@@ -9,18 +9,35 @@
  */
 
 import { realpathSync, existsSync, lstatSync } from 'fs'
-import { resolve } from 'path'
+import { resolve, join } from 'path'
 
 // Workspace root: where Mission Control reads/writes agent files.
 //
 // Resolution order:
 // - OPENCLAW_WORKSPACE (preferred)
+// - MISSION_CONTROL_WORKSPACE_ROOT (app-specific)
 // - WORKSPACE_ROOT (legacy)
+// - Auto-detect: ../../../../.. (when mission-control is checked out under ~/clawd/projects/savORG/apps/mission-control)
 // - ./workspace (fallback for demo/dev)
-const WORKSPACE_ROOT =
-  process.env.OPENCLAW_WORKSPACE ||
-  process.env.WORKSPACE_ROOT ||
-  resolve(process.cwd(), 'workspace')
+function pickWorkspaceRoot(): string {
+  const candidates = [
+    process.env.OPENCLAW_WORKSPACE,
+    process.env.MISSION_CONTROL_WORKSPACE_ROOT,
+    process.env.WORKSPACE_ROOT,
+    resolve(process.cwd(), '../../../../..'),
+    resolve(process.cwd(), 'workspace'),
+  ].filter(Boolean) as string[]
+
+  for (const c of candidates) {
+    // Prefer something that looks like an OpenClaw workspace (has AGENTS.md / SOUL.md)
+    if (existsSync(join(c, 'AGENTS.md')) || existsSync(join(c, 'SOUL.md'))) return c
+  }
+
+  // Last resort: first candidate (even if it doesn't exist yet)
+  return candidates[0] ?? resolve(process.cwd(), 'workspace')
+}
+
+const WORKSPACE_ROOT = pickWorkspaceRoot()
 
 // Allowed top-level subdirectories within workspace
 const ALLOWED_SUBDIRS = ['agents', 'overlays', 'skills', 'playbooks', 'plugins', 'memory', 'life'] as const
