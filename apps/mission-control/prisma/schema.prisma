@@ -1,0 +1,302 @@
+// SAVORG Mission Control - Database Schema
+// SQLite with WAL mode for local-first performance
+
+generator client {
+  provider = "prisma-client-js"
+  // Output to root node_modules for npm workspaces compatibility
+  output   = "../../../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// WORK ORDERS
+// ============================================================================
+
+model WorkOrder {
+  id              String   @id @default(cuid())
+  code            String   @unique // WO-0001 format, auto-generated
+  title           String
+  goalMd          String   @map("goal_md")
+  state           String   @default("planned") // planned|active|blocked|review|shipped|cancelled
+  priority        String   @default("P2") // P0|P1|P2|P3
+  owner           String   @default("user") // user|savorgceo
+  routingTemplate String   @default("default_routing") @map("routing_template")
+  blockedReason   String?  @map("blocked_reason")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  shippedAt       DateTime? @map("shipped_at")
+
+  // Relations
+  operations Operation[]
+  approvals  Approval[]
+  artifacts  Artifact[]
+  receipts   Receipt[]
+  messages   Message[]
+
+  @@index([state])
+  @@index([priority])
+  @@index([owner])
+  @@index([createdAt])
+  @@map("work_orders")
+}
+
+// ============================================================================
+// OPERATIONS
+// ============================================================================
+
+model Operation {
+  id                      String   @id @default(cuid())
+  workOrderId             String   @map("work_order_id")
+  station                 String   // spec|build|qa|ops|update|ship|compound
+  title                   String
+  notes                   String?
+  status                  String   @default("todo") // todo|in_progress|blocked|review|done|rework
+  assigneeAgentIds        String   @default("[]") @map("assignee_agent_ids") // JSON array
+  dependsOnOperationIds   String   @default("[]") @map("depends_on_operation_ids") // JSON array
+  wipClass                String   @default("implementation") @map("wip_class")
+  blockedReason           String?  @map("blocked_reason")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  approvals Approval[]
+  artifacts Artifact[]
+  receipts  Receipt[]
+
+  @@index([workOrderId])
+  @@index([status])
+  @@index([station])
+  @@map("operations")
+}
+
+// ============================================================================
+// AGENTS
+// ============================================================================
+
+model Agent {
+  id              String    @id @default(cuid())
+  name            String    @unique
+  role            String
+  station         String
+  status          String    @default("idle") // idle|active|blocked|error
+  sessionKey      String    @unique @map("session_key")
+  capabilities    String    @default("{}") @map("capabilities") // JSON object
+  wipLimit        Int       @default(2) @map("wip_limit")
+  lastSeenAt      DateTime? @map("last_seen_at")
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([station])
+  @@map("agents")
+}
+
+// ============================================================================
+// APPROVALS
+// ============================================================================
+
+model Approval {
+  id           String    @id @default(cuid())
+  workOrderId  String    @map("work_order_id")
+  operationId  String?   @map("operation_id")
+  type         String    // ship_gate|risky_action|scope_change|cron_change|external_side_effect
+  questionMd   String    @map("question_md")
+  status       String    @default("pending") // pending|approved|rejected
+  resolvedBy   String?   @map("resolved_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  resolvedAt   DateTime? @map("resolved_at")
+
+  // Relations
+  workOrder WorkOrder  @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  operation Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
+
+  @@index([workOrderId])
+  @@index([status])
+  @@index([type])
+  @@map("approvals")
+}
+
+// ============================================================================
+// ACTIVITIES
+// ============================================================================
+
+model Activity {
+  id          String   @id @default(cuid())
+  ts          DateTime @default(now())
+  type        String   // work_order.*, operation.*, agent.*, system.*, cron.*, etc.
+  actor       String   // system|user|agent:<name>
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  summary     String
+  payloadJson String   @default("{}") @map("payload_json") // JSON
+
+  @@index([ts])
+  @@index([type])
+  @@index([entityType, entityId])
+  @@map("activities")
+}
+
+// ============================================================================
+// RECEIPTS
+// ============================================================================
+
+model Receipt {
+  id              String    @id @default(cuid())
+  workOrderId     String    @map("work_order_id")
+  operationId     String?   @map("operation_id")
+  kind            String    // playbook_step|cron_run|agent_run|manual
+  commandName     String    @map("command_name")
+  commandArgsJson String    @default("{}") @map("command_args_json") // JSON
+  exitCode        Int?      @map("exit_code")
+  durationMs      Int?      @map("duration_ms")
+  stdoutExcerpt   String    @default("") @map("stdout_excerpt")
+  stderrExcerpt   String    @default("") @map("stderr_excerpt")
+  parsedJson      String?   @map("parsed_json") // JSON
+  startedAt       DateTime  @default(now()) @map("started_at")
+  endedAt         DateTime? @map("ended_at")
+
+  // Relations
+  workOrder WorkOrder  @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  operation Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
+
+  @@index([workOrderId])
+  @@index([kind])
+  @@index([startedAt])
+  @@map("receipts")
+}
+
+// ============================================================================
+// ARTIFACTS
+// ============================================================================
+
+model Artifact {
+  id          String   @id @default(cuid())
+  workOrderId String   @map("work_order_id")
+  operationId String?  @map("operation_id")
+  type        String   // pr|doc|file|link|patch|screenshot|report
+  title       String
+  pathOrUrl   String   @map("path_or_url")
+  createdBy   String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  workOrder WorkOrder  @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  operation Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
+
+  @@index([workOrderId])
+  @@index([type])
+  @@map("artifacts")
+}
+
+// ============================================================================
+// MESSAGES (for agent communication + FTS)
+// ============================================================================
+
+model Message {
+  id          String   @id @default(cuid())
+  workOrderId String   @map("work_order_id")
+  role        String   // user|agent|system
+  agentName   String?  @map("agent_name")
+  content     String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@index([workOrderId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// ============================================================================
+// DOCUMENTS (general docs for FTS)
+// ============================================================================
+
+model Document {
+  id        String   @id @default(cuid())
+  type      String   // skill|playbook|overlay|readme|other
+  path      String   @unique
+  title     String
+  content   String
+  checksum  String   // for detecting changes
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([type])
+  @@map("documents")
+}
+
+// ============================================================================
+// CRON JOBS
+// ============================================================================
+
+model CronJob {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  schedule    String    // cron expression
+  description String
+  enabled     Boolean   @default(true)
+  lastRunAt   DateTime? @map("last_run_at")
+  nextRunAt   DateTime? @map("next_run_at")
+  lastStatus  String?   @map("last_status") // success|failed|running
+  runCount    Int       @default(0) @map("run_count")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("cron_jobs")
+}
+
+// ============================================================================
+// SKILLS
+// ============================================================================
+
+model Skill {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String
+  version     String
+  enabled     Boolean   @default(true)
+  usageCount  Int       @default(0) @map("usage_count")
+  configJson  String    @default("{}") @map("config_json") // JSON
+  lastUsedAt  DateTime? @map("last_used_at")
+  installedAt DateTime  @default(now()) @map("installed_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("skills")
+}
+
+// ============================================================================
+// PLUGINS
+// ============================================================================
+
+model Plugin {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String
+  version     String
+  author      String
+  enabled     Boolean  @default(true)
+  configJson  String   @default("{}") @map("config_json") // JSON
+  installedAt DateTime @default(now()) @map("installed_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("plugins")
+}
+
+// ============================================================================
+// SETTINGS (key-value store)
+// ============================================================================
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
