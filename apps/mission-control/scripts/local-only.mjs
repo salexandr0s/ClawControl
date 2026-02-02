@@ -1,0 +1,32 @@
+#!/usr/bin/env node
+
+// Local-only guard for Mission Control.
+// Refuses to start if HOST/HOSTNAME is set to a non-loopback value.
+
+const allowed = new Set(['127.0.0.1', 'localhost', '::1'])
+
+function fail(msg) {
+  console.error(`\n[FATAL] ${msg}`)
+  console.error('[FATAL] Mission Control is local-only. Refusing to start.')
+  process.exit(1)
+}
+
+const hostEnv = process.env.HOST || process.env.HOSTNAME
+if (hostEnv && !allowed.has(hostEnv)) {
+  fail(`HOST/HOSTNAME is set to "${hostEnv}" (must be loopback: 127.0.0.1/localhost/::1).`)
+}
+
+// Explicitly force loopback for Next.js
+process.env.HOSTNAME = '127.0.0.1'
+process.env.HOST = '127.0.0.1'
+
+// Pass-through: `node scripts/local-only.mjs <cmd> <args...>`
+const [cmd, ...args] = process.argv.slice(2)
+if (!cmd) fail('No command provided. Usage: node scripts/local-only.mjs next dev ...')
+
+const { spawn } = await import('node:child_process')
+const child = spawn(cmd, args, { stdio: 'inherit', env: process.env })
+child.on('exit', (code, signal) => {
+  if (signal) process.exit(1)
+  process.exit(code ?? 1)
+})

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getDefaultAdapter, checkOpenClaw, OPENCLAW_BIN, MIN_OPENCLAW_VERSION } from '@savorg/adapters-openclaw'
+import { getDefaultAdapter, checkOpenClaw, OPENCLAW_BIN, MIN_OPENCLAW_VERSION, runCommandJson } from '@savorg/adapters-openclaw'
 
 /**
  * GET /api/maintenance
@@ -18,15 +18,29 @@ export async function GET() {
   const cliCheck = await checkOpenClaw()
 
   try {
-    const [health, status, probe] = await Promise.all([
+    const [health, status, probe, gatewayCfg] = await Promise.all([
       adapter.healthCheck(),
       adapter.gatewayStatus(),
       adapter.gatewayProbe(),
+      runCommandJson('config.gateway.json'),
     ])
+
+    const localOnly = {
+      missionControl: {
+        expectedHost: '127.0.0.1',
+        enforced: true,
+      },
+      openclawDashboard: {
+        bind: (gatewayCfg as any)?.data?.bind ?? null,
+        port: (gatewayCfg as any)?.data?.port ?? null,
+        ok: (gatewayCfg as any)?.data?.bind === 'loopback',
+      },
+    }
 
     return NextResponse.json({
       data: {
         mode: adapter.mode,
+        localOnly,
         // CLI info
         cliBin: OPENCLAW_BIN,
         cliAvailable: cliCheck.available,

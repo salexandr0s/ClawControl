@@ -114,6 +114,8 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
     error?: string
   } | null>(null)
 
+  const [localOnly, setLocalOnly] = useState<MaintenanceStatus['localOnly'] | null>(null)
+
   const protectedAction = useProtectedAction()
 
   const applyMaintenanceStatus = useCallback((status: MaintenanceStatus) => {
@@ -132,6 +134,7 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
       belowMinVersion: status.belowMinVersion,
       error: status.cliError,
     })
+    setLocalOnly(status.localOnly ?? null)
   }, [])
 
   const refreshStatus = useCallback(async () => {
@@ -290,6 +293,9 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
   const showCliUnknown = cliStatus?.available && !cliStatus.belowMinVersion && cliVersionLabel === 'unknown'
   const blockCriticalActions = cliStatus?.belowMinVersion === true
 
+  const localOnlyEnabled = localOnly?.missionControl?.enforced === true
+  const openclawLocalOk = localOnly?.openclawDashboard?.ok !== false
+
   return (
     <>
       <div className="w-full space-y-6">
@@ -345,6 +351,10 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-fg-0">Gateway Status</h2>
             <div className="flex items-center gap-2">
+              <StatusPill
+                tone={localOnlyEnabled && openclawLocalOk ? 'success' : 'warning'}
+                label={localOnlyEnabled && openclawLocalOk ? 'LOCAL-ONLY: ENABLED' : 'LOCAL-ONLY: UNSAFE'}
+              />
               <StatusPill
                 tone={gateway.status === 'ok' ? 'success' : gateway.status === 'degraded' ? 'warning' : 'danger'}
                 label={gateway.status.toUpperCase()}

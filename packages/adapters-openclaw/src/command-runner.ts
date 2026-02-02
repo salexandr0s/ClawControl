@@ -54,6 +54,7 @@ export const ALLOWED_COMMANDS = {
 
   // Config reads (local-only)
   'config.agents.list.json': { args: ['config', 'get', 'agents.list', '--json'], danger: false, description: 'Read configured agents.list (JSON)' },
+  'config.gateway.json': { args: ['config', 'get', 'gateway', '--json'], danger: false, description: 'Read gateway config (JSON)' },
 
   // Gateway Discovery (documented at docs.openclaw.ai/cli/gateway)
   'gateway.discover': { args: ['gateway', 'discover', '--json'], danger: false, description: 'Scan for gateways on network' },

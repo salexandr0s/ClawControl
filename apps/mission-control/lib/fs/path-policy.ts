@@ -112,8 +112,9 @@ export function validateWorkspacePath(inputPath: string): PathValidationResult {
   }
 
   // For new files, check parent directory
+  // Skip this check for WORKSPACE_ROOT itself - its parent is naturally outside
   const parentPath = resolve(fullPath, '..')
-  if (existsSync(parentPath)) {
+  if (fullPath !== WORKSPACE_ROOT && existsSync(parentPath)) {
     try {
       const resolvedParent = realpathSync(parentPath)
       if (!resolvedParent.startsWith(WORKSPACE_ROOT)) {

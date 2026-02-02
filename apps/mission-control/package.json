@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbo",
+    "dev": "node scripts/local-only.mjs next dev --turbo --hostname 127.0.0.1",
     "build": "cross-env DATABASE_URL=file:../data/mission-control.db next build",
     "prebuild": "prisma generate",
-    "start": "next start",
+    "start": "node scripts/local-only.mjs next start --hostname 127.0.0.1",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "pretypecheck": "prisma generate",

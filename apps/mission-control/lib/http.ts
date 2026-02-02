@@ -866,6 +866,17 @@ export const pluginsApi = {
 
 export interface MaintenanceStatus {
   mode: string
+  localOnly?: {
+    missionControl: {
+      expectedHost: string
+      enforced: boolean
+    }
+    openclawDashboard: {
+      bind: string | null
+      port: number | null
+      ok: boolean
+    }
+  }
   cliBin: string
   cliAvailable: boolean
   cliVersion: string | null
