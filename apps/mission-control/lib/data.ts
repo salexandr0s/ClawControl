@@ -300,20 +300,26 @@ export async function getGatewayStatus(): Promise<GatewayStatusDTO> {
 }
 
 // ============================================================================
-// WORKSPACE (mock only for now)
+// WORKSPACE
 // ============================================================================
 
 export async function getWorkspaceFiles(path = '/'): Promise<WorkspaceFileDTO[]> {
-  return mockWorkspaceFiles
-    .filter((f) => f.path === path)
-    .map((f) => ({
-      id: f.id,
-      name: f.name,
-      type: f.type,
-      path: f.path,
-      size: f.size,
-      modifiedAt: f.modifiedAt,
-    }))
+  if (useMockData()) {
+    return mockWorkspaceFiles
+      .filter((f) => f.path === path)
+      .map((f) => ({
+        id: f.id,
+        name: f.name,
+        type: f.type,
+        path: f.path,
+        size: f.size,
+        modifiedAt: f.modifiedAt,
+      }))
+  }
+
+  // Server-side listing via API helper so SSR pages work consistently.
+  const { listWorkspace } = await import('./fs/workspace-fs')
+  return listWorkspace(path)
 }
 
 // ============================================================================

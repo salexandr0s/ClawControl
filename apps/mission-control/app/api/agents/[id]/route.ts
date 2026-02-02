@@ -55,7 +55,7 @@ export async function PATCH(
 
   try {
     const body = await request.json()
-    const { status, currentWorkOrderId, typedConfirmText } = body
+    const { status, currentWorkOrderId, role, station, capabilities, wipLimit, sessionKey, typedConfirmText } = body
 
     const repos = getRepos()
 
@@ -68,60 +68,71 @@ export async function PATCH(
       )
     }
 
-    // Determine if status change requires typed confirmation
-    if (status && status !== currentAgent.status) {
-      let actionKind: ActionKind | null = null
+    // Determine if any protected change requires typed confirmation
+    let protectedAction: ActionKind | null = null
 
+    // Status changes
+    if (status && status !== currentAgent.status) {
       // Restarting an agent (from error/idle to active)
       if (status === 'active' && (currentAgent.status === 'error' || currentAgent.status === 'idle')) {
-        actionKind = 'agent.restart'
+        protectedAction = 'agent.restart'
       }
       // Stopping an agent (from active to idle)
       else if (status === 'idle' && currentAgent.status === 'active') {
-        actionKind = 'agent.stop'
+        protectedAction = 'agent.stop'
       }
+    }
 
-      // Enforce typed confirmation for protected status changes
-      if (actionKind) {
-        const result = await enforceTypedConfirm({
-          actionKind,
-          typedConfirmText,
-        })
+    // Admin edits
+    const wantsAdminEdit =
+      role !== undefined ||
+      station !== undefined ||
+      capabilities !== undefined ||
+      wipLimit !== undefined ||
+      sessionKey !== undefined
 
-        if (!result.allowed) {
-          return NextResponse.json(
-            {
-              error: `Typed confirmation required for "${result.policy.description}"`,
-              code: result.errorType,
-              details: {
-                actionKind,
-                confirmMode: result.policy.confirmMode,
-                required: 'CONFIRM',
-              },
-            },
-            { status: 403 }
-          )
-        }
+    if (wantsAdminEdit) {
+      protectedAction = protectedAction ?? 'agent.edit'
+    }
 
-        // Log the protected action
-        await repos.activities.create({
-          type: `agent.${actionKind === 'agent.restart' ? 'restarted' : 'stopped'}`,
-          actor: 'user',
-          entityType: 'agent',
-          entityId: id,
-          summary: `Agent ${currentAgent.name} ${actionKind === 'agent.restart' ? 'restarted' : 'stopped'}`,
-          payloadJson: {
-            previousStatus: currentAgent.status,
-            newStatus: status,
-            actionKind,
+    if (protectedAction) {
+      const result = await enforceTypedConfirm({
+        actionKind: protectedAction,
+        typedConfirmText,
+      })
+
+      if (!result.allowed) {
+        return NextResponse.json(
+          {
+            error: result.errorType,
+            policy: result.policy,
           },
-        })
+          { status: result.errorType === 'TYPED_CONFIRM_REQUIRED' ? 428 : 403 }
+        )
       }
+
+      await repos.activities.create({
+        type: `agent.action`,
+        actor: 'user',
+        entityType: 'agent',
+        entityId: id,
+        summary: `Agent ${currentAgent.name} updated (${protectedAction})`,
+        payloadJson: {
+          actionKind: protectedAction,
+          previous: currentAgent,
+          next: { status, role, station, wipLimit, sessionKey },
+        },
+      })
     }
 
     const data = await repos.agents.update(id, {
       status,
       currentWorkOrderId,
+      role,
+      station,
+      capabilities,
+      wipLimit,
+      sessionKey,
     })
 
     return NextResponse.json({ data })

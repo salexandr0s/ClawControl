@@ -9,6 +9,10 @@ export const metadata: Metadata = {
   description: 'Local-first multi-agent orchestration platform',
 }
 
+// Mission Control is local-first and DB-backed. We intentionally avoid build-time
+// static prerendering so `next build` does not require a pre-created SQLite file.
+export const dynamic = 'force-dynamic'
+
 export const viewport: Viewport = {
   themeColor: '#0B0F14',
   colorScheme: 'dark',

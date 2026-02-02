@@ -200,6 +200,32 @@ export function AgentsClient() {
     }
   }
 
+  const handleEditAgent = (agent: AgentDTO, patch: {
+    role?: string
+    station?: string
+    wipLimit?: number
+    capabilities?: Record<string, boolean>
+    sessionKey?: string
+  }) => {
+    triggerProtectedAction({
+      actionKind: 'agent.edit',
+      actionTitle: 'Edit Agent',
+      actionDescription: `Update configuration for ${agent.name}`,
+      entityName: agent.name,
+      onConfirm: async (typedConfirmText) => {
+        await agentsApi.update(agent.id, {
+          ...patch,
+          typedConfirmText,
+        })
+        await fetchData()
+        setCreateResult({ success: true, message: `Updated ${agent.name}` })
+      },
+      onError: (err) => {
+        setCreateResult({ success: false, message: err.message })
+      },
+    })
+  }
+
   // Handle create agent
   const handleCreateAgent = (formData: CreateAgentFormData) => {
     triggerProtectedAction({
@@ -384,6 +410,7 @@ export function AgentsClient() {
             assignedOps={assignedOps}
             onProvision={() => handleProvisionAgent(selectedAgent)}
             onTest={() => handleTestAgent(selectedAgent)}
+            onEdit={(patch) => handleEditAgent(selectedAgent, patch)}
           />
         )}
       </RightDrawer>
@@ -908,11 +935,19 @@ function AgentDetail({
   assignedOps,
   onProvision,
   onTest,
+  onEdit,
 }: {
   agent: AgentDTO
   assignedOps: OperationDTO[]
   onProvision: () => void
   onTest: () => void
+  onEdit: (patch: {
+    role?: string
+    station?: string
+    wipLimit?: number
+    capabilities?: Record<string, boolean>
+    sessionKey?: string
+  }) => void
 }) {
   const toneMap: Record<string, StatusTone> = {
     active: 'success',
@@ -920,6 +955,20 @@ function AgentDetail({
     blocked: 'warning',
     error: 'danger',
   }
+
+  const [editRole, setEditRole] = useState(agent.role)
+  const [editStation, setEditStation] = useState(agent.station)
+  const [editWipLimit, setEditWipLimit] = useState<number>(agent.wipLimit)
+  const [editSessionKey, setEditSessionKey] = useState(agent.sessionKey)
+  const [editCaps, setEditCaps] = useState<Record<string, boolean>>(agent.capabilities)
+
+  useEffect(() => {
+    setEditRole(agent.role)
+    setEditStation(agent.station)
+    setEditWipLimit(agent.wipLimit)
+    setEditSessionKey(agent.sessionKey)
+    setEditCaps(agent.capabilities)
+  }, [agent.id])
 
   return (
     <div className="space-y-6">
@@ -1010,6 +1059,90 @@ function AgentDetail({
           <dt className="text-fg-2">Registered</dt>
           <dd className="text-fg-1 font-mono text-xs">{new Date(agent.createdAt).toLocaleDateString()}</dd>
         </dl>
+      </PageSection>
+
+      {/* Edit */}
+      <PageSection title="Edit Configuration" description="Requires typed confirmation">
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-xs text-fg-2">Role</label>
+              <input
+                value={editRole}
+                onChange={(e) => setEditRole(e.target.value)}
+                className="w-full px-2 py-1.5 bg-bg-2 border border-white/[0.06] rounded-[var(--radius-md)] text-sm text-fg-0"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-fg-2">Station</label>
+              <select
+                value={editStation}
+                onChange={(e) => setEditStation(e.target.value)}
+                className="w-full px-2 py-1.5 bg-bg-2 border border-white/[0.06] rounded-[var(--radius-md)] text-sm text-fg-0"
+              >
+                {['spec','build','qa','ops','update','ship','compound'].map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-xs text-fg-2">WIP Limit</label>
+              <input
+                type="number"
+                value={editWipLimit}
+                onChange={(e) => setEditWipLimit(parseInt(e.target.value || '0', 10))}
+                className="w-full px-2 py-1.5 bg-bg-2 border border-white/[0.06] rounded-[var(--radius-md)] text-sm text-fg-0"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-fg-2">Session Key</label>
+              <input
+                value={editSessionKey}
+                onChange={(e) => setEditSessionKey(e.target.value)}
+                className="w-full px-2 py-1.5 bg-bg-2 border border-white/[0.06] rounded-[var(--radius-md)] text-sm text-fg-0 font-mono"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-fg-2">Capabilities</label>
+            <div className="flex flex-wrap gap-2">
+              {CAPABILITY_OPTIONS.map((cap) => (
+                <button
+                  key={cap}
+                  type="button"
+                  onClick={() => setEditCaps((prev) => ({ ...prev, [cap]: !prev[cap] }))}
+                  className={cn(
+                    'px-2 py-1 text-xs rounded border transition-colors',
+                    editCaps[cap]
+                      ? 'bg-status-progress/10 text-status-progress border-status-progress/30'
+                      : 'bg-bg-3 text-fg-2 border-white/[0.06] hover:border-bd-1'
+                  )}
+                >
+                  {cap}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <button
+              onClick={() => onEdit({
+                role: editRole,
+                station: editStation,
+                wipLimit: editWipLimit,
+                sessionKey: editSessionKey,
+                capabilities: editCaps,
+              })}
+              className="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-warning/10 text-status-warning border border-status-warning/30 hover:bg-status-warning/20 transition-colors"
+            >
+              Save Changes
+            </button>
+          </div>
+        </div>
       </PageSection>
     </div>
   )

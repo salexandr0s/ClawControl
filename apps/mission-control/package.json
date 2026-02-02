@@ -4,15 +4,19 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbo",
-    "build": "next build",
+    "build": "cross-env DATABASE_URL=file:../data/mission-control.db next build",
+    "prebuild": "prisma generate",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "pretypecheck": "prisma generate",
+    "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "postinstall": "prisma generate"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -48,7 +52,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.17",
-    "eslint": "^9.0.0",
+    "cross-env": "^7.0.3",
+    "eslint": "^9.39.0",
     "eslint-config-next": "^16.1.0",
     "postcss": "^8.4.35",
     "prisma": "^5.22.0",

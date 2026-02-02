@@ -125,15 +125,8 @@ function sanitizeFtsQuery(query: string): string {
 
 async function searchWorkOrders(query: string, limit: number): Promise<SearchResult[]> {
   try {
-    const results = await prisma.$queryRawUnsafe<
-      Array<{
-        id: string
-        code: string
-        title: string
-        goal_md: string
-        rank: number
-      }>
-    >(`
+    const results = (await prisma.$queryRawUnsafe(
+      `
       SELECT
         wo.id,
         wo.code,
@@ -145,7 +138,16 @@ async function searchWorkOrders(query: string, limit: number): Promise<SearchRes
       WHERE work_orders_fts MATCH ?
       ORDER BY rank
       LIMIT ?
-    `, query, limit)
+    `,
+      query,
+      limit
+    )) as Array<{
+      id: string
+      code: string
+      title: string
+      goal_md: string
+      rank: number
+    }>
 
     return results.map((r) => ({
       id: r.id,
@@ -164,16 +166,8 @@ async function searchWorkOrders(query: string, limit: number): Promise<SearchRes
 
 async function searchOperations(query: string, limit: number): Promise<SearchResult[]> {
   try {
-    const results = await prisma.$queryRawUnsafe<
-      Array<{
-        id: string
-        title: string
-        notes: string | null
-        work_order_id: string
-        wo_code: string
-        rank: number
-      }>
-    >(`
+    const results = (await prisma.$queryRawUnsafe(
+      `
       SELECT
         op.id,
         op.title,
@@ -187,7 +181,17 @@ async function searchOperations(query: string, limit: number): Promise<SearchRes
       WHERE operations_fts MATCH ?
       ORDER BY rank
       LIMIT ?
-    `, query, limit)
+    `,
+      query,
+      limit
+    )) as Array<{
+      id: string
+      title: string
+      notes: string | null
+      work_order_id: string
+      wo_code: string
+      rank: number
+    }>
 
     return results.map((r) => ({
       id: r.id,
@@ -206,16 +210,8 @@ async function searchOperations(query: string, limit: number): Promise<SearchRes
 
 async function searchMessages(query: string, limit: number): Promise<SearchResult[]> {
   try {
-    const results = await prisma.$queryRawUnsafe<
-      Array<{
-        id: string
-        content: string
-        work_order_id: string
-        wo_code: string
-        role: string
-        rank: number
-      }>
-    >(`
+    const results = (await prisma.$queryRawUnsafe(
+      `
       SELECT
         msg.id,
         msg.content,
@@ -229,7 +225,17 @@ async function searchMessages(query: string, limit: number): Promise<SearchResul
       WHERE messages_fts MATCH ?
       ORDER BY rank
       LIMIT ?
-    `, query, limit)
+    `,
+      query,
+      limit
+    )) as Array<{
+      id: string
+      content: string
+      work_order_id: string
+      wo_code: string
+      role: string
+      rank: number
+    }>
 
     return results.map((r) => ({
       id: r.id,
@@ -248,15 +254,8 @@ async function searchMessages(query: string, limit: number): Promise<SearchResul
 
 async function searchDocuments(query: string, limit: number): Promise<SearchResult[]> {
   try {
-    const results = await prisma.$queryRawUnsafe<
-      Array<{
-        id: string
-        title: string
-        content: string
-        type: string
-        rank: number
-      }>
-    >(`
+    const results = (await prisma.$queryRawUnsafe(
+      `
       SELECT
         doc.id,
         doc.title,
@@ -268,7 +267,16 @@ async function searchDocuments(query: string, limit: number): Promise<SearchResu
       WHERE documents_fts MATCH ?
       ORDER BY rank
       LIMIT ?
-    `, query, limit)
+    `,
+      query,
+      limit
+    )) as Array<{
+      id: string
+      title: string
+      content: string
+      type: string
+      rank: number
+    }>
 
     return results.map((r) => ({
       id: r.id,

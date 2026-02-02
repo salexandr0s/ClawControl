@@ -47,6 +47,10 @@ const PROTECTED_FILES: Record<string, { actionKind: ActionKind; label: string }>
 
 export function WorkspaceClient({ initialFiles }: Props) {
   const [currentPath, setCurrentPath] = useState('/')
+  const [filesByPath, setFilesByPath] = useState<Record<string, WorkspaceFileDTO[]>>({
+    '/': initialFiles,
+  })
+
   const [selectedFile, setSelectedFile] = useState<FileWithContent | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -55,8 +59,7 @@ export function WorkspaceClient({ initialFiles }: Props) {
 
   const protectedAction = useProtectedAction()
 
-  // Filter files for current path
-  const files = initialFiles.filter((f) => f.path === currentPath)
+  const files = filesByPath[currentPath] ?? []
 
   const breadcrumbs = currentPath
     .split('/')
@@ -69,7 +72,22 @@ export function WorkspaceClient({ initialFiles }: Props) {
   // Handle file click - open in drawer
   const handleFileClick = useCallback(async (file: WorkspaceFileDTO) => {
     if (file.type === 'folder') {
-      setCurrentPath(file.path === '/' ? `/${file.name}` : `${file.path}/${file.name}`)
+      const nextPath = file.path === '/' ? `/${file.name}` : `${file.path}/${file.name}`
+      setCurrentPath(nextPath)
+
+      // Lazy-load directory contents
+      if (!filesByPath[nextPath]) {
+        setIsLoading(true)
+        setError(null)
+        try {
+          const result = await workspaceApi.list(nextPath)
+          setFilesByPath((prev) => ({ ...prev, [nextPath]: result.data }))
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to load directory')
+        } finally {
+          setIsLoading(false)
+        }
+      }
       return
     }
 
@@ -86,7 +104,7 @@ export function WorkspaceClient({ initialFiles }: Props) {
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [filesByPath])
 
   // Handle save
   const handleSave = useCallback(async (content: string): Promise<void> => {
@@ -189,6 +207,22 @@ export function WorkspaceClient({ initialFiles }: Props) {
     }
   }
 
+  const navigateTo = useCallback(async (nextPath: string) => {
+    setCurrentPath(nextPath)
+    if (!filesByPath[nextPath]) {
+      setIsLoading(true)
+      setError(null)
+      try {
+        const result = await workspaceApi.list(nextPath)
+        setFilesByPath((prev) => ({ ...prev, [nextPath]: result.data }))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load directory')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+  }, [filesByPath])
+
   return (
     <>
       <div className="w-full space-y-4">
@@ -200,7 +234,7 @@ export function WorkspaceClient({ initialFiles }: Props) {
         {/* Breadcrumb */}
         <div className="flex items-center gap-1 text-sm">
           <button
-            onClick={() => setCurrentPath('/')}
+            onClick={() => navigateTo('/')}
             className={cn(
               'px-2 py-1 rounded hover:bg-bg-3 transition-colors',
               currentPath === '/' ? 'text-fg-0' : 'text-fg-2'
@@ -212,7 +246,7 @@ export function WorkspaceClient({ initialFiles }: Props) {
             <div key={crumb.path} className="flex items-center gap-1">
               <ChevronRight className="w-3.5 h-3.5 text-fg-3" />
               <button
-                onClick={() => setCurrentPath(crumb.path)}
+                onClick={() => navigateTo(crumb.path)}
                 className="px-2 py-1 rounded hover:bg-bg-3 transition-colors text-fg-1"
               >
                 {crumb.name}
