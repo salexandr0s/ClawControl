@@ -8,7 +8,7 @@
  */
 
 import { promises as fsp } from 'node:fs'
-import { join, basename, dirname } from 'node:path'
+import { join, basename } from 'node:path'
 import { mockGlobalSkills, mockAgentSkills, mockSkillContents, mockAgents } from '@savorg/core'
 import {
   validateWorkspacePath,
@@ -293,7 +293,7 @@ export function createFsSkillsRepo(): SkillsRepo {
   return {
     async list(filters?: SkillFilters): Promise<SkillDTO[]> {
       const skills: SkillDTO[] = []
-      const workspaceRoot = getWorkspaceRoot()
+      const _workspaceRoot = getWorkspaceRoot() // Reserved for future use
 
       // Read global skills from /skills/
       if (!filters?.scope || filters.scope === 'global') {
@@ -630,7 +630,7 @@ async function parseSkillWithContent(
   }
 }
 
-function parseSkillMetadata(skillMdContent: string, fallbackName: string): {
+function parseSkillMetadata(skillMdContent: string, _fallbackName: string): {
   description?: string
   version?: string
 } {

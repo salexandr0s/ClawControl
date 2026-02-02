@@ -173,7 +173,7 @@ export function PluginsClient({ plugins: initialPlugins, meta: initialMeta }: Pr
   const handleReprobe = useCallback(async () => {
     setIsProbing(true)
     try {
-      const result = await pluginsApi.getCapabilities({ refresh: true })
+      await pluginsApi.getCapabilities({ refresh: true })
       // Refresh plugin list with new capabilities
       const listResult = await pluginsApi.list()
       setPlugins(listResult.data)

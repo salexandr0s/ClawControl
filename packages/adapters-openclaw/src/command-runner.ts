@@ -404,7 +404,7 @@ export async function runDynamicCommandJson<T = unknown>(
   }
 
   const timeout = options.timeout ?? 60000
-  const startTime = Date.now()
+  const _startTime = Date.now() // Reserved for future latency tracking
 
   try {
     const child = spawn(OPENCLAW_BIN, args, {

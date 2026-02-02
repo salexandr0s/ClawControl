@@ -9,13 +9,14 @@ function formatSchedule(schedule: CronRepoJobDTO['schedule']): string {
   switch (schedule.kind) {
     case 'cron':
       return schedule.expr ?? '* * * * *'
-    case 'every':
+    case 'every': {
       if (!schedule.everyMs) return 'every ?'
       const ms = schedule.everyMs
       if (ms < 60000) return `every ${ms / 1000}s`
       if (ms < 3600000) return `every ${ms / 60000}m`
       if (ms < 86400000) return `every ${ms / 3600000}h`
       return `every ${ms / 86400000}d`
+    }
     case 'at':
       return schedule.atMs ? new Date(schedule.atMs).toLocaleString() : 'at ?'
     default:

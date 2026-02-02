@@ -528,7 +528,7 @@ export function createCliPluginsRepo(): PluginsRepo {
       }
     },
 
-    async uninstall(id: string) {
+    async uninstall(_id: string) {
       const caps = await getOpenClawCapabilities()
 
       if (!caps.plugins.supported || !caps.plugins.uninstall) {
@@ -547,7 +547,7 @@ export function createCliPluginsRepo(): PluginsRepo {
       }
     },
 
-    async doctor(id: string) {
+    async doctor(_id: string) {
       const caps = await getOpenClawCapabilities()
 
       if (!caps.plugins.supported || !caps.plugins.doctor) {
@@ -642,22 +642,25 @@ export function createCliPluginsRepo(): PluginsRepo {
 
 function extractPluginName(sourceType: PluginSourceType, spec: string): string {
   switch (sourceType) {
-    case 'npm':
+    case 'npm': {
       // @scope/name@version -> name
       // name@version -> name
       const npmMatch = spec.match(/^(?:@[^/]+\/)?([^@]+)/)
       return npmMatch?.[1] ?? spec
+    }
 
-    case 'git':
+    case 'git': {
       // https://github.com/org/repo.git -> repo
       const gitMatch = spec.match(/\/([^/]+?)(?:\.git)?$/)
       return gitMatch?.[1] ?? spec
+    }
 
     case 'local':
-    case 'tgz':
+    case 'tgz': {
       // /path/to/plugin -> plugin
       const parts = spec.split('/')
       return parts[parts.length - 1].replace(/\.(tgz|tar\.gz)$/, '')
+    }
 
     default:
       return spec
