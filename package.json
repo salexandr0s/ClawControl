@@ -1,0 +1,34 @@
+{
+  "name": "savorgos",
+  "private": true,
+  "packageManager": "npm@10.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "db:migrate": "npm run db:migrate --workspace=mission-control",
+    "db:push": "npm run db:push --workspace=mission-control",
+    "db:seed": "npm run db:seed --workspace=mission-control",
+    "db:studio": "npm run db:studio --workspace=mission-control",
+    "clean": "turbo clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "turbo": "^2.3.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "next": "^16.1.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}
