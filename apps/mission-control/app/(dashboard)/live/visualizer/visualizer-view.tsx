@@ -10,6 +10,7 @@ import {
   type VisualizerEntityType,
 } from './visualizer-store'
 import { LivePulseHeader } from './components/live-pulse-header'
+import { OpenClawSessionsPanel } from './components/openclaw-sessions-panel'
 import { Lane } from './components/lane'
 import { ReceiptDetailPanel, EntityDetailPanel } from './components/receipt-detail-panel'
 import { Play, Pause, Filter, AlertTriangle, Bell } from 'lucide-react'
@@ -215,6 +216,11 @@ export function VisualizerView() {
             </>
           )}
         </button>
+      </div>
+
+      {/* OpenClaw Sessions (telemetry only) */}
+      <div className="shrink-0 pb-4">
+        <OpenClawSessionsPanel />
       </div>
 
       {/* Lanes Grid */}

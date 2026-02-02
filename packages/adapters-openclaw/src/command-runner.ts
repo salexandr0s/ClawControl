@@ -51,6 +51,7 @@ export const ALLOWED_COMMANDS = {
 
   // Extended Status (documented at docs.openclaw.ai/gateway/troubleshooting)
   'status.all': { args: ['status', '--all'], danger: false, description: 'Comprehensive status report (redacts secrets)' },
+  'status.all.json': { args: ['status', '--all', '--json'], danger: false, description: 'Comprehensive status report (JSON, redacts secrets)' },
 
   // Config reads (local-only)
   'config.agents.list.json': { args: ['config', 'get', 'agents.list', '--json'], danger: false, description: 'Read configured agents.list (JSON)' },

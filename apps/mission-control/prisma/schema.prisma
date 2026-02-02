@@ -98,6 +98,40 @@ model Agent {
 }
 
 // ============================================================================
+// OPENCLAW SESSION TELEMETRY (NOT CANONICAL)
+// ============================================================================
+
+model AgentSession {
+  id             String   @id @default(cuid())
+
+  // Telemetry only — never canonical.
+  sessionId      String   @unique @map("session_id")
+  sessionKey     String   @map("session_key")
+  agentId        String   @map("agent_id") // OpenClaw agentId (e.g. "main", "savorgbuild")
+  kind           String   @map("kind") // direct|isolated|...
+  model          String?  @map("model")
+
+  updatedAtMs    BigInt   @map("updated_at_ms")
+  lastSeenAt     DateTime @map("last_seen_at")
+  abortedLastRun Boolean  @default(false) @map("aborted_last_run")
+  percentUsed    Int?     @map("percent_used")
+
+  // Derived display state: active|idle|error
+  state          String   @default("idle")
+
+  // Keep raw JSON for debugging (redacted status output is safe-ish, but treat as internal)
+  rawJson        String   @default("{}") @map("raw_json")
+
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([agentId])
+  @@index([state])
+  @@index([lastSeenAt])
+  @@map("agent_sessions")
+}
+
+// ============================================================================
 // APPROVALS
 // ============================================================================
 
