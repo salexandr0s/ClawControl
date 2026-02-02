@@ -74,6 +74,7 @@ export type ActionKind =
   | 'agent.test'
   | 'agent.restart'
   | 'agent.stop'
+  | 'agent.edit'
   // Template actions
   | 'template.create'
   | 'template.edit'
@@ -412,6 +413,12 @@ export const ACTION_POLICIES: Record<ActionKind, ActionPolicy> = {
     confirmMode: 'CONFIRM',
     requiresApproval: false,
     description: 'Stop an agent',
+  },
+  'agent.edit': {
+    riskLevel: 'caution',
+    confirmMode: 'CONFIRM',
+    requiresApproval: false,
+    description: 'Edit agent configuration',
   },
 
   // Template actions

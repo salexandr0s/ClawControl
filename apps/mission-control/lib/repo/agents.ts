@@ -15,6 +15,13 @@ import type { AgentDTO, AgentFilters } from './types'
 export interface UpdateAgentInput {
   status?: string
   currentWorkOrderId?: string | null
+
+  // Admin-editable fields
+  role?: string
+  station?: string
+  capabilities?: Record<string, boolean>
+  wipLimit?: number
+  sessionKey?: string
 }
 
 export interface CreateAgentInput {
@@ -93,6 +100,11 @@ export function createDbAgentsRepo(): AgentsRepo {
         where: { id },
         data: {
           ...(input.status !== undefined && { status: input.status }),
+          ...(input.role !== undefined && { role: input.role }),
+          ...(input.station !== undefined && { station: input.station }),
+          ...(input.capabilities !== undefined && { capabilities: JSON.stringify(input.capabilities) }),
+          ...(input.wipLimit !== undefined && { wipLimit: input.wipLimit }),
+          ...(input.sessionKey !== undefined && { sessionKey: input.sessionKey }),
           lastSeenAt: new Date(),
         },
       })

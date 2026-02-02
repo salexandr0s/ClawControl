@@ -261,6 +261,12 @@ export const agentsApi = {
   update: (id: string, data: Partial<{
     status: string
     currentWorkOrderId: string | null
+    role: string
+    station: string
+    capabilities: Record<string, boolean>
+    wipLimit: number
+    sessionKey: string
+    typedConfirmText: string
   }>) => apiPatch<{ data: AgentDTO }>(`/api/agents/${id}`, data),
 
   provision: (id: string, typedConfirmText: string) =>
@@ -416,17 +422,22 @@ export const searchApi = {
 }
 
 // Workspace Files
-export interface WorkspaceFileWithContent {
+export interface WorkspaceFileSummary {
   id: string
   name: string
   type: 'file' | 'folder'
   path: string
   size?: number
   modifiedAt: Date
+}
+
+export interface WorkspaceFileWithContent extends WorkspaceFileSummary {
   content: string
 }
 
 export const workspaceApi = {
+  list: (path = '/') => apiGet<{ data: WorkspaceFileSummary[] }>('/api/workspace', { path }),
+
   get: (id: string) => apiGet<{ data: WorkspaceFileWithContent }>(`/api/workspace/${id}`),
 
   update: (id: string, data: {

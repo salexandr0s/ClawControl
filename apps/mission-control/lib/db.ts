@@ -69,8 +69,10 @@ export async function checkConnection(): Promise<boolean> {
  * Get current journal mode
  */
 export async function getJournalMode(): Promise<string> {
-  const result = await prisma.$queryRawUnsafe<[{ journal_mode: string }]>(
+  // Avoid relying on Prisma generic typing here; it may be unavailable before `prisma generate`.
+  const result = (await prisma.$queryRawUnsafe(
     'PRAGMA journal_mode;'
-  )
+  )) as Array<{ journal_mode: string }>
+
   return result[0]?.journal_mode ?? 'unknown'
 }

@@ -45,6 +45,9 @@ coverage/
 # Generated
 *.generated.*
 
+# TypeScript incremental build cache
+**/tsconfig.tsbuildinfo
+
 # Audit artifacts (internal reports, not OSS docs)
 AUDIT.md
 docs/audit/

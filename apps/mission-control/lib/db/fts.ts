@@ -210,9 +210,9 @@ export async function rebuildAllIndexes(): Promise<void> {
   `)
 
   // Only rebuild messages if the table has data
-  const messageCount = await prisma.$queryRawUnsafe<[{ cnt: number }]>(
+  const messageCount = (await prisma.$queryRawUnsafe(
     `SELECT COUNT(*) as cnt FROM messages`
-  )
+  )) as Array<{ cnt: number }>
   if (messageCount[0]?.cnt > 0) {
     await prisma.$executeRawUnsafe(`
       INSERT INTO messages_fts(id, msg_content)
@@ -221,9 +221,9 @@ export async function rebuildAllIndexes(): Promise<void> {
   }
 
   // Only rebuild documents if the table has data
-  const documentCount = await prisma.$queryRawUnsafe<[{ cnt: number }]>(
+  const documentCount = (await prisma.$queryRawUnsafe(
     `SELECT COUNT(*) as cnt FROM documents`
-  )
+  )) as Array<{ cnt: number }>
   if (documentCount[0]?.cnt > 0) {
     await prisma.$executeRawUnsafe(`
       INSERT INTO documents_fts(id, title, doc_content)
