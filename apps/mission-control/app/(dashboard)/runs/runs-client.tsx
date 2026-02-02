@@ -7,7 +7,6 @@ import { OperationStatusPill } from '@/components/ui/status-pill'
 import { RightDrawer } from '@/components/shell/right-drawer'
 import { operationsApi, workOrdersApi, agentsApi } from '@/lib/http'
 import type { OperationDTO, WorkOrderDTO, AgentDTO } from '@/lib/repo'
-import { cn } from '@/lib/utils'
 import { TerminalSquare, Loader2 } from 'lucide-react'
 
 export function RunsClient() {

@@ -20,7 +20,6 @@ import {
   Globe,
   CalendarClock,
   CheckSquare,
-  User,
   LayoutDashboard,
 } from 'lucide-react'
 

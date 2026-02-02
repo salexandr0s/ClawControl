@@ -11,10 +11,6 @@ import type {
   Agent,
   Approval,
   Activity,
-  Artifact,
-  Receipt,
-  Playbook,
-  CommandTemplate,
 } from '../types'
 
 // ============================================================================

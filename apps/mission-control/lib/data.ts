@@ -145,10 +145,12 @@ export async function getDashboardStats(): Promise<DashboardStatsDTO> {
     workOrderCounts,
     agentCounts,
     pendingApprovals,
+    completedToday,
   ] = await Promise.all([
     repos.workOrders.countByState(),
     repos.agents.countByStatus(),
     repos.approvals.countPending(),
+    repos.workOrders.countShippedToday(),
   ])
 
   return {
@@ -157,7 +159,7 @@ export async function getDashboardStats(): Promise<DashboardStatsDTO> {
     pendingApprovals,
     activeAgents: agentCounts['active'] ?? 0,
     totalAgents: Object.values(agentCounts).reduce((a, b) => a + b, 0),
-    completedToday: workOrderCounts['shipped'] ?? 0, // TODO: filter by today
+    completedToday,
   }
 }
 

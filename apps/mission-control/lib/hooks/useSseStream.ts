@@ -157,7 +157,7 @@ export function useSseStream(options: SseStreamOptions = {}): UseSseStreamReturn
     return () => {
       disconnect()
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   return {
     connectionState,

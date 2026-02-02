@@ -11,7 +11,6 @@ import type {
   WorkOrderDTO,
   WorkOrderWithOpsDTO,
   WorkOrderFilters,
-  OperationSummaryDTO,
 } from './types'
 
 // ============================================================================
@@ -48,6 +47,8 @@ export interface WorkOrdersRepo {
   getByIdWithOps(id: string): Promise<WorkOrderWithOpsDTO | null>
   getByCode(code: string): Promise<WorkOrderDTO | null>
   countByState(): Promise<Record<string, number>>
+  /** Count work orders shipped since start of today (local time) */
+  countShippedToday(): Promise<number>
   create(input: CreateWorkOrderInput): Promise<WorkOrderDTO>
   update(id: string, input: UpdateWorkOrderInput): Promise<WorkOrderDTO | null>
   /** Atomically update state and write activity record in a transaction */
@@ -111,6 +112,18 @@ export function createDbWorkOrdersRepo(): WorkOrdersRepo {
       return Object.fromEntries(
         groups.map((g) => [g.state, g._count.id])
       )
+    },
+
+    async countShippedToday(): Promise<number> {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      return prisma.workOrder.count({
+        where: {
+          state: 'shipped',
+          shippedAt: { gte: today },
+        },
+      })
     },
 
     async getByIdWithOps(id: string): Promise<WorkOrderWithOpsDTO | null> {
@@ -284,6 +297,15 @@ export function createMockWorkOrdersRepo(): WorkOrdersRepo {
       return counts
     },
 
+    async countShippedToday(): Promise<number> {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      return mockWorkOrders.filter(
+        (wo) => wo.state === 'shipped' && wo.shippedAt && wo.shippedAt >= today
+      ).length
+    },
+
     async getByIdWithOps(id: string): Promise<WorkOrderWithOpsDTO | null> {
       const wo = mockWorkOrders.find((w) => w.id === id)
       if (!wo) return null
@@ -340,7 +362,7 @@ export function createMockWorkOrdersRepo(): WorkOrdersRepo {
     async updateStateWithActivity(
       id: string,
       newState: string,
-      actor: string
+      _actor: string
     ): Promise<StateTransitionResult | null> {
       const wo = mockWorkOrders.find((w) => w.id === id)
       if (!wo) return null

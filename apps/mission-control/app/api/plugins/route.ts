@@ -15,7 +15,7 @@ function validateSpec(sourceType: PluginSourceType, spec: string): { valid: bool
   }
 
   switch (sourceType) {
-    case 'local':
+    case 'local': {
       // Check if path is within allowed bases
       const isAllowed = ALLOWED_LOCAL_BASES.some((base) => spec.startsWith(base))
       if (!isAllowed && !spec.startsWith('/')) {
@@ -26,6 +26,7 @@ function validateSpec(sourceType: PluginSourceType, spec: string): { valid: bool
         return { valid: false, error: 'Path traversal not allowed' }
       }
       return { valid: true }
+    }
 
     case 'npm':
       if (!NPM_SPEC_PATTERN.test(spec)) {
@@ -57,15 +58,17 @@ function extractPluginName(sourceType: PluginSourceType, spec: string): string {
   switch (sourceType) {
     case 'local':
       return spec.split('/').pop() || 'unknown'
-    case 'npm':
+    case 'npm': {
       // Extract package name without version
       const match = spec.match(/^(@[^@/]+\/)?([^@/]+)/)
       return match ? (match[1] || '') + match[2] : spec
+    }
     case 'tgz':
       return spec.split('/').pop()?.replace(/\.(tgz|tar\.gz)$/, '') || 'unknown'
-    case 'git':
+    case 'git': {
       const repoMatch = spec.match(/\/([^/]+?)(\.git)?$/)
       return repoMatch ? repoMatch[1] : 'unknown'
+    }
     default:
       return 'unknown'
   }

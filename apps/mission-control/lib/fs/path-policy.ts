@@ -9,7 +9,7 @@
  */
 
 import { realpathSync, existsSync, lstatSync } from 'fs'
-import { resolve, normalize } from 'path'
+import { resolve } from 'path'
 
 // Workspace root: where Mission Control reads/writes agent files.
 //

@@ -153,7 +153,7 @@ export function AgentsClient() {
   }
 
   const selectedAgent = selectedId ? agents.find((a) => a.id === selectedId) : undefined
-  const activeCount = agents.filter((a) => a.status === 'active').length
+  const _activeCount = agents.filter((a) => a.status === 'active').length
 
   const assignedOps = selectedAgent
     ? operations.filter((op) => op.assigneeAgentIds.includes(selectedAgent.id))

@@ -8,7 +8,7 @@ import { YamlEditor } from '@/components/editors/yaml-editor'
 import { JsonEditor } from '@/components/editors/json-editor'
 import { workspaceApi, HttpError } from '@/lib/http'
 import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
-import { ACTION_POLICIES, type ActionKind } from '@savorg/core'
+import type { ActionKind } from '@savorg/core'
 import type { WorkspaceFileDTO } from '@/lib/data'
 import { cn } from '@/lib/utils'
 import {
@@ -16,8 +16,6 @@ import {
   Folder,
   FileText,
   ChevronRight,
-  Upload,
-  Plus,
   FileCode,
   Loader2,
   Shield,

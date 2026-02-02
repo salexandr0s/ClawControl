@@ -590,7 +590,7 @@ function ConnectionCard({
 }
 
 function LiveActionCard({
-  action,
+  action: _action,
   config,
   isRunning,
   disabled,

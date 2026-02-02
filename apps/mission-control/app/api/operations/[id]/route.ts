@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRepos } from '@/lib/repo'
+import { getRequestActor } from '@/lib/request-actor'
 import {
   validateOperationTransition,
   getValidOperationTransitions,
@@ -61,6 +62,7 @@ export async function PATCH(
     const { status, notes, blockedReason } = body
 
     const repos = getRepos()
+    const { actor } = getRequestActor(request)
 
     // Always fetch current for comparison
     const current = await repos.operations.getById(id)
@@ -92,7 +94,7 @@ export async function PATCH(
       const result = await repos.operations.updateStatusWithActivity(
         id,
         status,
-        'system' // TODO: Use actual user/agent when auth is implemented
+        actor
       )
 
       if (!result) {

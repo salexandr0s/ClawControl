@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRepos } from '@/lib/repo'
 import { enforceGovernor } from '@/lib/with-governor'
+import { getRequestActor } from '@/lib/request-actor'
 import {
   validateWorkOrderTransition,
   getValidWorkOrderTransitions,
@@ -74,6 +75,7 @@ export async function PATCH(
     const { title, goalMd, state, priority, owner, blockedReason, typedConfirmText } = body
 
     const repos = getRepos()
+    const { actor } = getRequestActor(request)
 
     // Always fetch current for comparison
     const current = await repos.workOrders.getById(id)
@@ -105,7 +107,7 @@ export async function PATCH(
         const governorResult = await enforceGovernor({
           actionKind,
           workOrderId: id,
-          actor: 'user', // TODO: Use actual user when auth is implemented
+          actor,
           typedConfirmText,
         })
 
@@ -120,7 +122,7 @@ export async function PATCH(
       const result = await repos.workOrders.updateStateWithActivity(
         id,
         state,
-        'user' // TODO: Use actual user/agent when auth is implemented
+        actor
       )
 
       if (!result) {

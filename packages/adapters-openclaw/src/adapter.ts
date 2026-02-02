@@ -254,7 +254,7 @@ class LocalCliAdapter implements OpenClawAdapter {
     }
   }
 
-  async *tailLogs(options?: { limit?: number }): AsyncGenerator<string> {
+  async *tailLogs(_options?: { limit?: number }): AsyncGenerator<string> {
     const available = await this.ensureAvailable()
 
     if (!available) {
@@ -445,10 +445,93 @@ class HttpAdapter implements OpenClawAdapter {
   async *sendToAgent(
     target: string,
     message: string,
-    _options?: { stream?: boolean }
+    options?: { stream?: boolean }
   ): AsyncGenerator<string> {
-    // TODO: Implement SSE streaming via OpenAI-compatible endpoint
-    yield `[HTTP] Sending to ${target}: ${message.slice(0, 50)}...`
+    const shouldStream = options?.stream ?? true
+
+    if (!shouldStream) {
+      // Non-streaming: single request/response
+      const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          ...this.headers,
+          'x-openclaw-agent-id': target,
+        },
+        body: JSON.stringify({
+          model: `openclaw:${target}`,
+          messages: [{ role: 'user', content: message }],
+          stream: false,
+        }),
+      })
+
+      if (!res.ok) {
+        yield `[Error] HTTP ${res.status}: ${res.statusText}`
+        return
+      }
+
+      const data = await res.json()
+      yield data.choices?.[0]?.message?.content ?? ''
+      return
+    }
+
+    // SSE streaming: parse Server-Sent Events from OpenAI-compatible endpoint
+    const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        ...this.headers,
+        'x-openclaw-agent-id': target,
+      },
+      body: JSON.stringify({
+        model: `openclaw:${target}`,
+        messages: [{ role: 'user', content: message }],
+        stream: true,
+      }),
+    })
+
+    if (!res.ok) {
+      yield `[Error] HTTP ${res.status}: ${res.statusText}`
+      return
+    }
+
+    if (!res.body) {
+      yield '[Error] No response body'
+      return
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || trimmed.startsWith(':')) continue
+
+          if (trimmed.startsWith('data: ')) {
+            const data = trimmed.slice(6)
+            if (data === '[DONE]') return
+
+            try {
+              const parsed = JSON.parse(data)
+              const content = parsed.choices?.[0]?.delta?.content
+              if (content) yield content
+            } catch {
+              // Ignore malformed JSON chunks
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
   }
 
   async *runCommandTemplate(

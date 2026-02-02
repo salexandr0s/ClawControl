@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "lint": "echo 'lint temporarily disabled (ESLint v9 flat-config compatibility pending)'",
+    "lint": "turbo lint",
     "test": "turbo test",
     "typecheck": "turbo typecheck",
     "db:migrate": "npm run db:migrate --workspace=mission-control",

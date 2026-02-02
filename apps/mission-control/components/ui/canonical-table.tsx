@@ -214,7 +214,7 @@ interface ResponsiveTableProps<T> extends CanonicalTableProps<T> {
 }
 
 export function ResponsiveTable<T>({
-  stackBreakpoint = 768,
+  stackBreakpoint: _stackBreakpoint = 768,
   ...props
 }: ResponsiveTableProps<T>) {
   return (

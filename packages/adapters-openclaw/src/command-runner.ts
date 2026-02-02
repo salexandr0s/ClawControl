@@ -10,7 +10,7 @@
 
 import { spawn, type ChildProcess } from 'child_process'
 import type { CommandOutput } from './types'
-import { checkOpenClaw, OPENCLAW_BIN, type CliCheck } from './resolve-bin'
+import { checkOpenClaw, OPENCLAW_BIN } from './resolve-bin'
 
 // ============================================================================
 // COMMAND ALLOWLIST

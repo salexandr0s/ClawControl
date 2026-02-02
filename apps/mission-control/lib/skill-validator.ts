@@ -116,7 +116,7 @@ function validateSkillMd(content: string | undefined): SkillValidationError[] {
 
 function validateConfig(content: string | undefined): SkillValidationError[] {
   const errors: SkillValidationError[] = []
-  const warnings: SkillValidationError[] = []
+  const _warnings: SkillValidationError[] = []
 
   if (!content) {
     return [] // Config is optional

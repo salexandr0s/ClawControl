@@ -366,7 +366,7 @@ This template creates a build agent optimized for implementing features and fixe
 
 // Cache for scanned templates
 let templateCache: AgentTemplate[] | null = null
-let lastScanTime: Date | null = null
+let _lastScanTime: Date | null = null
 
 /**
  * Scan workspace/agent-templates/ for all templates
@@ -452,7 +452,7 @@ export function scanTemplates(): AgentTemplate[] {
 
   // Update cache
   templateCache = templates
-  lastScanTime = new Date()
+  _lastScanTime = new Date()
 
   return templates
 }

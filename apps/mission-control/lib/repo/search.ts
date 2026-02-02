@@ -116,7 +116,7 @@ function sanitizeFtsQuery(query: string): string {
   if (!sanitized) return ''
 
   // Escape FTS5 special characters: " ( ) * : ^
-  sanitized = sanitized.replace(/[\"()*:^]/g, ' ')
+  sanitized = sanitized.replace(/["()*:^]/g, ' ')
 
   // Add * for prefix matching on each word
   const words = sanitized.split(' ').filter(Boolean)

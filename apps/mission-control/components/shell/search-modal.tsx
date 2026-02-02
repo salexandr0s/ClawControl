@@ -107,13 +107,35 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
     [results, selectedIndex, onClose]
   )
 
-  // Navigate to selected result
-  // Note: Using work-orders list for now since detail routes are not yet implemented
-  const navigateToResult = (_result: SearchResult) => {
+  // Navigate to selected result based on type
+  const navigateToResult = (result: SearchResult) => {
     onClose()
-    // All results navigate to work orders list for now
-    // TODO: Add detail routing when work order detail page exists
-    router.push('/work-orders')
+
+    switch (result.type) {
+      case 'work_order':
+        router.push(`/work-orders/${result.id}`)
+        break
+      case 'operation':
+        // Navigate to parent work order's operations tab
+        if (result.workOrderId) {
+          router.push(`/work-orders/${result.workOrderId}?tab=operations`)
+        } else {
+          router.push('/work-orders')
+        }
+        break
+      case 'message':
+        // Messages tab exists but is disabled - route to work order
+        if (result.workOrderId) {
+          router.push(`/work-orders/${result.workOrderId}`)
+        } else {
+          router.push('/work-orders')
+        }
+        break
+      case 'document':
+        // No documents page exists - fall back to work orders
+        router.push('/work-orders')
+        break
+    }
   }
 
   if (!open) return null

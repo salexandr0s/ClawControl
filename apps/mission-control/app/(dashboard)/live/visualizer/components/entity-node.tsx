@@ -51,8 +51,8 @@ const operationStatusTone: Record<string, StatusTone> = {
   rework: 'warning',
 }
 
-// Execution state tones
-const executionStateTone: Record<ExecutionState, StatusTone> = {
+// Execution state tones (used for future features)
+const _executionStateTone: Record<ExecutionState, StatusTone> = {
   intent: 'idle',
   queued: 'warning',
   executing: 'progress',
@@ -192,7 +192,7 @@ export function EntityNode({
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                node.isPinned ? onUnpin?.() : onPin?.()
+                if (node.isPinned) { onUnpin?.() } else { onPin?.() }
               }}
               className={cn(
                 'p-0.5 rounded-[var(--radius-sm)] transition-colors',

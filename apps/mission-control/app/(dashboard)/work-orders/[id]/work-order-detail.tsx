@@ -1,10 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
-import { PageHeader, PageSection, EmptyState, DisabledAction } from '@savorg/ui'
+import { PageHeader, PageSection, EmptyState } from '@savorg/ui'
 import { OperationStatusPill, WorkOrderStatePill, PriorityPill } from '@/components/ui/status-pill'
 import { workOrdersApi, operationsApi, activitiesApi, approvalsApi } from '@/lib/http'
 import type { WorkOrderWithOpsDTO, OperationDTO, ActivityDTO, ApprovalDTO } from '@/lib/repo'
@@ -57,7 +56,6 @@ interface WorkOrderDetailProps {
 }
 
 export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
-  const router = useRouter()
   const triggerProtectedAction = useProtectedActionTrigger()
   const [workOrder, setWorkOrder] = useState<WorkOrderWithOpsDTO | null>(null)
   const [operations, setOperations] = useState<OperationDTO[]>([])
@@ -813,7 +811,7 @@ function OperationsTab({
 
 function ActivityTab({
   activities,
-  workOrderId,
+  workOrderId: _workOrderId,
 }: {
   activities: ActivityDTO[]
   workOrderId: string

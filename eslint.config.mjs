@@ -1,16 +1,8 @@
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { FlatCompat } from '@eslint/eslintrc'
+import js from '@eslint/js'
+import globals from 'globals'
+import tseslint from 'typescript-eslint'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
-// Bridge classic "extends" configs into ESLint v9 flat config.
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-})
-
-export default [
+export default tseslint.config(
   // Ignore generated/build outputs
   {
     ignores: [
@@ -21,19 +13,47 @@ export default [
       '**/out/**',
       '**/data/**',
       '**/.turbo/**',
+      '**/*.d.ts',
     ],
   },
 
-  // Next.js app (Mission Control)
-  ...compat.extends('next/core-web-vitals'),
+  // Base JS recommended rules
+  js.configs.recommended,
 
-  // Packages: keep lint minimal for now (no TS type-aware rules yet)
+  // TypeScript recommended rules
+  ...tseslint.configs.recommended,
+
+  // All TypeScript/JavaScript files
   {
-    files: ['packages/**/*.{js,ts,tsx}', 'packages/**/*.{mjs,cjs}'],
+    files: ['**/*.{js,mjs,cjs,ts,tsx,jsx}'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
     },
-    rules: {},
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-explicit-any': 'off',
+      'no-unused-vars': 'off', // Use TypeScript version instead
+    },
   },
-]
+
+  // Next.js app - additional config
+  {
+    files: ['apps/mission-control/**/*.{js,jsx,ts,tsx}'],
+    languageOptions: {
+      globals: {
+        React: 'readonly',
+        JSX: 'readonly',
+      },
+      parserOptions: {
+        ecmaFeatures: {
+          jsx: true,
+        },
+      },
+    },
+  },
+)

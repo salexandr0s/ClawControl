@@ -5,9 +5,6 @@ import {
   CheckCircle,
   AlertTriangle,
   XCircle,
-  Activity,
-  ShieldCheck,
-  PlayCircle,
   AlertOctagon,
 } from 'lucide-react'
 import type { StatusTone } from '@savorg/ui/theme'
@@ -22,7 +19,7 @@ interface StatusChip {
   age?: string
 }
 
-const statusToTone: Record<ChipStatus, StatusTone> = {
+const _statusToTone: Record<ChipStatus, StatusTone> = {
   ok: 'success',
   degraded: 'warning',
   down: 'danger',

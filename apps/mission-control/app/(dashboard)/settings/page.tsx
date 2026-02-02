@@ -110,14 +110,13 @@ export default function SettingsPage() {
 // ============================================================================
 
 function LayoutModeCard({
-  mode,
   label,
   description,
   icon: Icon,
   selected,
   onSelect,
 }: {
-  mode: LayoutMode
+  mode?: LayoutMode
   label: string
   description: string
   icon: React.ComponentType<{ className?: string }>
