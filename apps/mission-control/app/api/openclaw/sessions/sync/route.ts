@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { runCommandJson } from '@savorg/adapters-openclaw'
+import { detectPrismaHmrMismatchHint, safeStack, parseExplicitLinkage } from './_helpers'
 
 type OpenClawStatusAll = {
   sessions?: {
@@ -14,6 +15,13 @@ type OpenClawStatusAll = {
       abortedLastRun?: boolean
       percentUsed?: number
       model?: string
+      // Newer OpenClaw builds may include arbitrary flags.
+      flags?: string[]
+      // Optional explicit metadata (future-proof)
+      metadata?: {
+        operationId?: string
+        workOrderId?: string
+      }
     }>
   }
 }
@@ -33,61 +41,145 @@ function deriveState(s: { abortedLastRun?: boolean; age?: number }): string {
  * Does NOT create or mutate WorkOrders/Operations.
  */
 export async function POST() {
-  const res = await runCommandJson<OpenClawStatusAll>('status.all.json')
+  // Telemetry only — never canonical.
+  // This endpoint must fail soft (never crash dev server).
+  const phase: { step: string } = { step: 'init' }
 
-  if (res.error || !res.data) {
+  try {
+    phase.step = 'openclaw.status'
+    const res = await runCommandJson<OpenClawStatusAll>('status.all.json')
+
+    if (res.error || !res.data) {
+      phase.step = 'openclaw.status.error'
+
+      // Emit an activity for visibility (telemetry category; does not mutate tasks)
+      await prisma.activity.create({
+        data: {
+          type: 'openclaw.sessions_sync_failed',
+          actor: 'system',
+          entityType: 'telemetry',
+          entityId: 'openclaw.sessions',
+          summary: 'OpenClaw sessions sync failed (status.all.json)'
+            + (res.error ? `: ${res.error}` : ''),
+          payloadJson: JSON.stringify({
+            code: 'OPENCLAW_SYNC_FAILED',
+            phase: phase.step,
+            hint: 'Check OpenClaw CLI availability and JSON output',
+            error: res.error ?? null,
+          }),
+        },
+      })
+
+      return NextResponse.json(
+        {
+          code: 'OPENCLAW_SYNC_FAILED',
+          message: 'Failed to read OpenClaw status JSON',
+          details: {
+            phase: phase.step,
+            hint: 'Check OpenClaw CLI and status output',
+            error: res.error ?? null,
+          },
+        },
+        { status: 502 }
+      )
+    }
+
+    phase.step = 'parse'
+    const recent = res.data.sessions?.recent ?? []
+
+    phase.step = 'upsert'
+    let upserted = 0
+
+    for (const s of recent) {
+      if (!s?.sessionId || !s?.key || !s?.agentId) continue
+
+      const updatedAtMs = BigInt(s.updatedAt)
+      const lastSeenAt = new Date(s.updatedAt)
+
+      const linkage = parseExplicitLinkage({
+        sessionKey: s.key,
+        flags: s.flags,
+        metadata: s.metadata,
+      })
+
+      await prisma.agentSession.upsert({
+        where: { sessionId: s.sessionId },
+        create: {
+          sessionId: s.sessionId,
+          sessionKey: s.key,
+          agentId: s.agentId,
+          kind: s.kind ?? 'unknown',
+          model: s.model ?? null,
+          updatedAtMs,
+          lastSeenAt,
+          abortedLastRun: Boolean(s.abortedLastRun),
+          percentUsed: typeof s.percentUsed === 'number' ? Math.floor(s.percentUsed) : null,
+          state: deriveState({ abortedLastRun: s.abortedLastRun, age: s.age }),
+          operationId: linkage.operationId ?? null,
+          workOrderId: linkage.workOrderId ?? null,
+          rawJson: JSON.stringify(s),
+        },
+        update: {
+          sessionKey: s.key,
+          agentId: s.agentId,
+          kind: s.kind ?? 'unknown',
+          model: s.model ?? null,
+          updatedAtMs,
+          lastSeenAt,
+          abortedLastRun: Boolean(s.abortedLastRun),
+          percentUsed: typeof s.percentUsed === 'number' ? Math.floor(s.percentUsed) : null,
+          state: deriveState({ abortedLastRun: s.abortedLastRun, age: s.age }),
+          operationId: linkage.operationId ?? null,
+          workOrderId: linkage.workOrderId ?? null,
+          rawJson: JSON.stringify(s),
+        },
+      })
+
+      upserted++
+    }
+
+    phase.step = 'done'
+    return NextResponse.json({
+      stats: {
+        seen: recent.length,
+        upserted,
+      },
+    })
+  } catch (err) {
+    const hint = detectPrismaHmrMismatchHint(err)
+
+    // Emit an activity for visibility (telemetry category; does not mutate tasks)
+    try {
+      await prisma.activity.create({
+        data: {
+          type: 'openclaw.sessions_sync_failed',
+          actor: 'system',
+          entityType: 'telemetry',
+          entityId: 'openclaw.sessions',
+          summary: 'OpenClaw sessions sync failed (exception)',
+          payloadJson: JSON.stringify({
+            code: 'OPENCLAW_SYNC_FAILED',
+            phase: phase.step,
+            hint,
+            stackTrimmed: safeStack(err),
+          }),
+        },
+      })
+    } catch {
+      // Never let telemetry failure crash the server.
+    }
+
     return NextResponse.json(
-      { error: 'OPENCLAW_STATUS_ALL_FAILED', detail: res.error ?? 'Unknown error' },
+      {
+        code: 'OPENCLAW_SYNC_FAILED',
+        message: 'OpenClaw sessions sync failed',
+        details: {
+          phase: phase.step,
+          hint,
+          stackTrimmed: safeStack(err),
+        },
+      },
       { status: 502 }
     )
   }
-
-  const recent = res.data.sessions?.recent ?? []
-
-  let upserted = 0
-
-  for (const s of recent) {
-    if (!s?.sessionId || !s?.key || !s?.agentId) continue
-
-    const updatedAtMs = BigInt(s.updatedAt)
-    const lastSeenAt = new Date(s.updatedAt)
-
-    await prisma.agentSession.upsert({
-      where: { sessionId: s.sessionId },
-      create: {
-        sessionId: s.sessionId,
-        sessionKey: s.key,
-        agentId: s.agentId,
-        kind: s.kind ?? 'unknown',
-        model: s.model ?? null,
-        updatedAtMs,
-        lastSeenAt,
-        abortedLastRun: Boolean(s.abortedLastRun),
-        percentUsed: typeof s.percentUsed === 'number' ? Math.floor(s.percentUsed) : null,
-        state: deriveState({ abortedLastRun: s.abortedLastRun, age: s.age }),
-        rawJson: JSON.stringify(s),
-      },
-      update: {
-        sessionKey: s.key,
-        agentId: s.agentId,
-        kind: s.kind ?? 'unknown',
-        model: s.model ?? null,
-        updatedAtMs,
-        lastSeenAt,
-        abortedLastRun: Boolean(s.abortedLastRun),
-        percentUsed: typeof s.percentUsed === 'number' ? Math.floor(s.percentUsed) : null,
-        state: deriveState({ abortedLastRun: s.abortedLastRun, age: s.age }),
-        rawJson: JSON.stringify(s),
-      },
-    })
-
-    upserted++
-  }
-
-  return NextResponse.json({
-    stats: {
-      seen: recent.length,
-      upserted,
-    },
-  })
 }

@@ -35,6 +35,8 @@ export async function GET(request: NextRequest) {
       abortedLastRun: r.abortedLastRun,
       percentUsed: r.percentUsed,
       state: r.state,
+      operationId: r.operationId,
+      workOrderId: r.workOrderId,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     })),

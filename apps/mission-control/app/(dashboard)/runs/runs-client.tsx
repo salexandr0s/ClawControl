@@ -30,6 +30,12 @@ export function RunsClient() {
         setOperations(opsResult.data)
         setWorkOrders(woResult.data)
         setAgents(agentsResult.data)
+
+        // Optional deep-link: /runs?opId=<operationId>
+        const opId = new URLSearchParams(window.location.search).get('opId')
+        if (opId) {
+          setSelectedId(opId)
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load operations')
       } finally {

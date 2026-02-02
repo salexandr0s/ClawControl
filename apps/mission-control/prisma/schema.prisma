@@ -119,6 +119,11 @@ model AgentSession {
   // Derived display state: active|idle|error
   state          String   @default("idle")
 
+  // Explicit linkage (read-only; may be null)
+  // Telemetry only — never canonical.
+  operationId    String?  @map("operation_id")
+  workOrderId    String?  @map("work_order_id")
+
   // Keep raw JSON for debugging (redacted status output is safe-ish, but treat as internal)
   rawJson        String   @default("{}") @map("raw_json")
 
