@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac-app:
+    name: Build macOS App
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.0'
+
+      - name: Build Mac App
+        run: |
+          cd apps/mission-control-mac
+          chmod +x build.sh
+          ./build.sh Release
+
+      - name: Package App
+        run: |
+          cd apps/mission-control-mac/build/Release
+          # Create zip with the app
+          zip -r -y MissionControl-${{ github.ref_name }}-macos.zip MissionControl.app
+          # Show what we built
+          ls -la
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-app
+          path: apps/mission-control-mac/build/Release/MissionControl-*.zip
+          retention-days: 5
+
+  create-release:
+    name: Create Release
+    needs: build-mac-app
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Mac App
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-app
+          path: ./artifacts
+
+      - name: List artifacts
+        run: ls -la ./artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./artifacts/*
+          generate_release_notes: true
+          body: |
+            ## Installation
+
+            ### Mac App (requires backend)
+            1. Download `MissionControl-${{ github.ref_name }}-macos.zip`
+            2. Extract and move `MissionControl.app` to your Applications folder
+            3. **Important**: The Mac app requires the backend to be running:
+               ```bash
+               git clone https://github.com/${{ github.repository }}.git
+               cd savORG
+               npm install && npm run db:migrate && npm run start
+               ```
+            4. Open MissionControl.app (first time: right-click → Open to bypass Gatekeeper)
+
+            ### Web Only (no Xcode required)
+            ```bash
+            git clone https://github.com/${{ github.repository }}.git
+            cd savORG
+            npm install && npm run db:migrate && npm run dev
+            # Open http://localhost:3000
+            ```
+
+            ### Full Setup with Launcher
+            ```bash
+            git clone https://github.com/${{ github.repository }}.git
+            cd savORG
+            npm install && npm run db:migrate
+            ./start.sh --build
+            ```
+
+            ---
+
+            > **Note**: The Mac app is unsigned. On first launch, right-click the app and select "Open" to bypass macOS Gatekeeper.
