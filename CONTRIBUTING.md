@@ -252,7 +252,7 @@ We plan to add:
 
 - **Questions** — Open a GitHub Discussion
 - **Bugs** — Open a GitHub Issue with reproduction steps
-- **Security** — Email security@your-org.com (do not open public issue)
+- **Security** — Open a GitHub issue with the `security` label
 
 ---
 

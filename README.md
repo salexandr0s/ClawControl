@@ -10,7 +10,7 @@ Built on [OpenClaw](https://github.com/openclaw/openclaw). Track work orders, go
 
 ### Option A: Web Only (Simplest)
 ```bash
-git clone https://github.com/your-org/savorg.git
+git clone https://github.com/salexandr0s/savORG.git
 cd savorg
 npm install && npm run db:migrate && npm run dev
 # → http://localhost:3000
@@ -18,7 +18,7 @@ npm install && npm run db:migrate && npm run dev
 
 ### Option B: Mac App + Backend
 ```bash
-git clone https://github.com/your-org/savorg.git
+git clone https://github.com/salexandr0s/savORG.git
 cd savorg
 npm install && npm run db:migrate
 ./start.sh --build    # Builds Mac app and starts everything
@@ -29,7 +29,7 @@ npm install && npm run db:migrate
 2. Extract and move `MissionControl.app` to Applications
 3. Start the backend:
    ```bash
-   git clone https://github.com/your-org/savorg.git
+   git clone https://github.com/salexandr0s/savORG.git
    cd savorg && npm install && npm run db:migrate && npm run start
    ```
 4. Open MissionControl.app (first time: right-click → Open)
