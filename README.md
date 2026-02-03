@@ -1,4 +1,4 @@
-# SAVORG Mission Control
+# ClawHub
 
 **Local-first ops console for AI agent orchestration.**
 
