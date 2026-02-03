@@ -1,7 +1,10 @@
 'use client'
 
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
-import { X, Bot, MessageSquare, Wrench, Settings, Radio, Shield } from 'lucide-react'
+import { X, Bot, MessageSquare, Wrench, Settings, Radio, Shield, Loader2, Eye, Code } from 'lucide-react'
+import { TypedConfirmModal } from '@savorg/ui'
+import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
 import type { GraphNode, GraphNodeKind } from '@/lib/openclaw/live-graph'
 
 interface NodeDetailDrawerProps {
@@ -20,6 +23,44 @@ const NODE_KIND_CONFIG: Record<GraphNodeKind, { label: string; icon: typeof Bot;
 export function NodeDetailDrawer({ node, onClose }: NodeDetailDrawerProps) {
   const config = NODE_KIND_CONFIG[node.kind]
   const Icon = config.icon
+  const [rawDetails, setRawDetails] = useState<object | null>(null)
+  const [isLoadingRaw, setIsLoadingRaw] = useState(false)
+  const protectedAction = useProtectedAction()
+
+  const handleRequestRawDetails = () => {
+    protectedAction.trigger({
+      actionKind: 'action.danger',
+      actionTitle: 'View Raw Event Details',
+      actionDescription: `Request raw event data for node "${node.id}". This may expose sensitive information including tool arguments and message contents.`,
+      onConfirm: async () => {
+        setIsLoadingRaw(true)
+        try {
+          // Simulate fetching raw details (in real implementation, would call an API)
+          // For now, expose the full node metadata
+          await new Promise((resolve) => setTimeout(resolve, 500))
+          setRawDetails({
+            id: node.id,
+            kind: node.kind,
+            status: node.status,
+            sessionId: node.sessionId,
+            sessionKey: node.sessionKey,
+            agentId: node.agentId,
+            operationId: node.operationId,
+            workOrderId: node.workOrderId,
+            metadata: node.metadata,
+            timestamps: {
+              startedAt: node.startedAt.toISOString(),
+              endedAt: node.endedAt?.toISOString() ?? null,
+              lastActivity: node.lastActivity.toISOString(),
+            },
+            isPinned: node.isPinned,
+          })
+        } finally {
+          setIsLoadingRaw(false)
+        }
+      },
+    })
+  }
 
   return (
     <div className="fixed inset-y-0 right-0 w-96 bg-bg-2 border-l border-white/[0.06] shadow-xl z-50 flex flex-col">
@@ -118,18 +159,65 @@ export function NodeDetailDrawer({ node, onClose }: NodeDetailDrawerProps) {
 
         {/* Raw Details Button (Governor-Gated) */}
         <Section title="Advanced">
-          <div className="text-xs text-fg-3 mb-2">
-            Raw event details require governor approval.
-          </div>
-          <button
-            disabled
-            className="btn-secondary text-xs opacity-50 cursor-not-allowed"
-            title="Requires governor approval (not yet implemented)"
-          >
-            Request Raw Details
-          </button>
+          {rawDetails ? (
+            <>
+              <div className="flex items-center gap-2 mb-2">
+                <Eye className="w-3.5 h-3.5 text-status-warning" />
+                <span className="text-xs text-status-warning font-medium">Raw Details Exposed</span>
+              </div>
+              <div className="bg-bg-3/50 rounded-[var(--radius-md)] border border-white/[0.06] overflow-hidden">
+                <div className="flex items-center justify-between px-2 py-1.5 border-b border-white/[0.06] bg-bg-3">
+                  <div className="flex items-center gap-1.5">
+                    <Code className="w-3.5 h-3.5 text-fg-2" />
+                    <span className="text-xs text-fg-2 font-medium">JSON</span>
+                  </div>
+                  <button
+                    onClick={() => setRawDetails(null)}
+                    className="text-xs text-fg-3 hover:text-fg-1"
+                  >
+                    Hide
+                  </button>
+                </div>
+                <pre className="p-2 text-xs font-mono text-fg-1 overflow-auto max-h-[300px]">
+                  {JSON.stringify(rawDetails, null, 2)}
+                </pre>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-xs text-fg-3 mb-2">
+                Raw event details require governor approval.
+              </div>
+              <button
+                onClick={handleRequestRawDetails}
+                disabled={isLoadingRaw}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-bg-3 hover:bg-bd-1 rounded-[var(--radius-md)] border border-white/[0.06] text-fg-1 disabled:opacity-50"
+              >
+                {isLoadingRaw ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Shield className="w-3.5 h-3.5" />
+                )}
+                Request Raw Details
+              </button>
+            </>
+          )}
         </Section>
       </div>
+
+      {/* Confirm Modal */}
+      <TypedConfirmModal
+        isOpen={protectedAction.state.isOpen}
+        onClose={protectedAction.cancel}
+        onConfirm={protectedAction.confirm}
+        actionTitle={protectedAction.state.actionTitle}
+        actionDescription={protectedAction.state.actionDescription}
+        confirmMode={protectedAction.confirmMode}
+        riskLevel={protectedAction.riskLevel}
+        workOrderCode={protectedAction.state.workOrderCode}
+        entityName={protectedAction.state.entityName}
+        isLoading={protectedAction.state.isLoading}
+      />
     </div>
   )
 }

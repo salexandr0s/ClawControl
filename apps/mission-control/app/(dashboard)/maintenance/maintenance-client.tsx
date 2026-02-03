@@ -5,7 +5,7 @@ import { PageHeader, PageSection, TypedConfirmModal } from '@savorg/ui'
 import { StatusPill } from '@/components/ui/status-pill'
 import { RightDrawer } from '@/components/shell/right-drawer'
 import { YamlEditor } from '@/components/editors/yaml-editor'
-import { playbooksApi, maintenanceApi, type PlaybookWithContent, type MaintenanceStatus, HttpError } from '@/lib/http'
+import { playbooksApi, maintenanceApi, type PlaybookWithContent, type MaintenanceStatus, type PlaybookRunResult, HttpError } from '@/lib/http'
 import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
 import type { GatewayStatusDTO } from '@/lib/data'
 import type { ActionKind } from '@savorg/core'
@@ -100,11 +100,13 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
   const [error, setError] = useState<string | null>(null)
   const [playbookContent, setPlaybookContent] = useState<string>('')
   const [runningAction, setRunningAction] = useState<MaintenanceAction | null>(null)
+  const [runningPlaybookId, setRunningPlaybookId] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<{
-    action: MaintenanceAction
+    action: MaintenanceAction | 'playbook'
     success: boolean
     message: string
     receiptId?: string
+    playbookResult?: PlaybookRunResult
   } | null>(null)
   const [cliStatus, setCliStatus] = useState<{
     available: boolean
@@ -287,6 +289,52 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
       },
     })
   }, [gateway, protectedAction, refreshStatus])
+
+  // Handle playbook run
+  const handleRunPlaybook = useCallback((playbook: { id: string; name: string; severity: 'info' | 'warn' | 'critical' }) => {
+    setLastResult(null)
+
+    const actionKind = playbook.severity === 'critical' ? 'action.danger' : 'action.caution'
+
+    protectedAction.trigger({
+      actionKind,
+      actionTitle: `Run Playbook: ${playbook.name}`,
+      actionDescription: `Execute the "${playbook.name}" playbook. This will run all steps defined in the playbook.`,
+      onConfirm: async (typedConfirmText) => {
+        setRunningPlaybookId(playbook.id)
+        setError(null)
+
+        try {
+          const result = await playbooksApi.run(playbook.id, { typedConfirmText })
+          const success = result.data.status === 'completed'
+          setLastResult({
+            action: 'playbook',
+            success,
+            message: success
+              ? `Playbook "${playbook.name}" completed successfully (${result.data.steps.length} steps)`
+              : `Playbook "${playbook.name}" failed`,
+            receiptId: result.receiptId,
+            playbookResult: result.data,
+          })
+        } catch (err) {
+          console.error(`Failed to run playbook ${playbook.id}:`, err)
+          setError(err instanceof Error ? err.message : 'Failed to run playbook')
+          setLastResult({
+            action: 'playbook',
+            success: false,
+            message: err instanceof Error ? err.message : 'Playbook execution failed',
+          })
+        } finally {
+          setRunningPlaybookId(null)
+        }
+      },
+      onError: (err) => {
+        console.error(`Playbook ${playbook.id} error:`, err)
+        setError(err.message)
+        setRunningPlaybookId(null)
+      },
+    })
+  }, [protectedAction])
 
   const cliVersionLabel = cliStatus?.version ?? 'unknown'
   const showCliTooOld = cliStatus?.available && cliStatus.belowMinVersion
@@ -493,16 +541,19 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
         </PageSection>
 
         {/* Playbooks */}
-        <PageSection title="Playbooks" description="Automated maintenance procedures (click to edit)">
+        <PageSection title="Playbooks" description="Automated maintenance procedures">
           <div className="space-y-2">
             {playbooks.map((playbook) => (
               <PlaybookCard
                 key={playbook.id}
+                id={playbook.id}
                 name={playbook.name}
                 description={playbook.description}
                 severity={playbook.severity}
                 modifiedAt={playbook.modifiedAt}
-                onClick={() => handlePlaybookClick(playbook.id)}
+                onEdit={() => handlePlaybookClick(playbook.id)}
+                onRun={() => handleRunPlaybook(playbook)}
+                isRunning={runningPlaybookId === playbook.id}
               />
             ))}
           </div>
@@ -655,13 +706,18 @@ function PlaybookCard({
   description,
   severity,
   modifiedAt,
-  onClick,
+  onEdit,
+  onRun,
+  isRunning,
 }: {
+  id: string
   name: string
   description: string
   severity: 'info' | 'warn' | 'critical'
   modifiedAt: Date
-  onClick: () => void
+  onEdit: () => void
+  onRun: () => void
+  isRunning: boolean
 }) {
   const severityColors = {
     info: 'bg-status-info/10 text-status-info border-status-info/20',
@@ -670,10 +726,7 @@ function PlaybookCard({
   }
 
   return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-center justify-between p-3 bg-bg-3 rounded-[var(--radius-md)] border border-white/[0.06] hover:bg-bg-2 hover:border-bd-1 transition-colors text-left"
-    >
+    <div className="flex items-center justify-between p-3 bg-bg-3 rounded-[var(--radius-md)] border border-white/[0.06]">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <FileCode className="w-4 h-4 text-fg-2 shrink-0" />
@@ -689,9 +742,34 @@ function PlaybookCard({
       </div>
       <div className="flex items-center gap-2 shrink-0 ml-4">
         <span className="text-xs text-fg-3">{formatRelativeTime(modifiedAt)}</span>
-        <Edit3 className="w-3.5 h-3.5 text-fg-2" />
+        <button
+          onClick={onEdit}
+          className="p-1.5 hover:bg-bg-2 rounded-[var(--radius-sm)] transition-colors"
+          title="Edit playbook"
+        >
+          <Edit3 className="w-3.5 h-3.5 text-fg-2" />
+        </button>
+        <button
+          onClick={onRun}
+          disabled={isRunning}
+          className={cn(
+            'flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-[var(--radius-sm)] transition-colors',
+            severity === 'critical'
+              ? 'bg-status-danger/10 text-status-danger hover:bg-status-danger/20 border border-status-danger/20'
+              : 'bg-status-success/10 text-status-success hover:bg-status-success/20 border border-status-success/20',
+            'disabled:opacity-50'
+          )}
+          title="Run playbook"
+        >
+          {isRunning ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : (
+            <Play className="w-3 h-3" />
+          )}
+          Run
+        </button>
       </div>
-    </button>
+    </div>
   )
 }
 

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { GeistSans } from 'geist/font/sans'
 import { GeistMono } from 'geist/font/mono'
 import { LayoutProvider } from '@/lib/layout-context'
+import { SettingsProvider } from '@/lib/settings-context'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -30,9 +31,11 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="font-sans antialiased bg-bg-0 text-fg-0 min-h-screen">
-        <LayoutProvider>
-          {children}
-        </LayoutProvider>
+        <SettingsProvider>
+          <LayoutProvider>
+            {children}
+          </LayoutProvider>
+        </SettingsProvider>
       </body>
     </html>
   )

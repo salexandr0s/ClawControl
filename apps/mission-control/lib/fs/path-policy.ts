@@ -40,7 +40,7 @@ function pickWorkspaceRoot(): string {
 const WORKSPACE_ROOT = pickWorkspaceRoot()
 
 // Allowed top-level subdirectories within workspace
-const ALLOWED_SUBDIRS = ['agents', 'overlays', 'skills', 'playbooks', 'plugins', 'memory', 'life'] as const
+const ALLOWED_SUBDIRS = ['agents', 'overlays', 'skills', 'playbooks', 'plugins', 'memory', 'life', 'docs', 'tools', 'templates', 'canvas', 'projects'] as const
 type AllowedSubdir = (typeof ALLOWED_SUBDIRS)[number]
 
 // Allowed root-level files (e.g. /MEMORY.md). These do not live under a subdir.
@@ -52,6 +52,12 @@ const ALLOWED_ROOT_FILES = [
   'TOOLS.md',
   'HEARTBEAT.md',
   'README.md',
+  'BOOTSTRAP.md',
+  'COMMANDS.md',
+  'IDENTITY.md',
+  'SECURITY.md',
+  'SECURITY.local.md',
+  'WORKING.md',
 ] as const
 
 export interface PathValidationResult {

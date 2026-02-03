@@ -137,3 +137,84 @@ export async function ensureWorkspaceRootExists(): Promise<void> {
   const root = getWorkspaceRoot()
   await fsp.mkdir(root, { recursive: true })
 }
+
+export async function createWorkspaceFile(
+  parentPath: string,
+  name: string,
+  content = ''
+): Promise<WorkspaceEntryWithContent> {
+  const fullPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`
+  const res = validateWorkspacePath(fullPath)
+  if (!res.valid || !res.resolvedPath) throw new Error(res.error || 'Invalid path')
+
+  const abs = res.resolvedPath
+
+  // Check if already exists
+  try {
+    await fsp.access(abs)
+    throw new Error('File already exists')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+  }
+
+  await fsp.mkdir(dirname(abs), { recursive: true })
+  await fsp.writeFile(abs, content, 'utf8')
+
+  const st = await fsp.stat(abs)
+
+  return {
+    id: encodeWorkspaceId(fullPath),
+    name,
+    type: 'file',
+    path: parentPath,
+    size: st.size,
+    modifiedAt: st.mtime,
+    content,
+  }
+}
+
+export async function createWorkspaceFolder(
+  parentPath: string,
+  name: string
+): Promise<WorkspaceEntry> {
+  const fullPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`
+  const res = validateWorkspacePath(fullPath)
+  if (!res.valid || !res.resolvedPath) throw new Error(res.error || 'Invalid path')
+
+  const abs = res.resolvedPath
+
+  // Check if already exists
+  try {
+    await fsp.access(abs)
+    throw new Error('Folder already exists')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+  }
+
+  await fsp.mkdir(abs, { recursive: true })
+
+  const st = await fsp.stat(abs)
+
+  return {
+    id: encodeWorkspaceId(fullPath),
+    name,
+    type: 'folder',
+    path: parentPath,
+    modifiedAt: st.mtime,
+  }
+}
+
+export async function deleteWorkspaceEntry(id: string): Promise<void> {
+  const fullPath = decodeWorkspaceId(id)
+  const res = validateWorkspacePath(fullPath)
+  if (!res.valid || !res.resolvedPath) throw new Error(res.error || 'Invalid path')
+
+  const abs = res.resolvedPath
+  const st = await fsp.stat(abs)
+
+  if (st.isDirectory()) {
+    await fsp.rm(abs, { recursive: true, force: true })
+  } else {
+    await fsp.unlink(abs)
+  }
+}

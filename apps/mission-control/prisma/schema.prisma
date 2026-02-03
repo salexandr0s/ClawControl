@@ -90,6 +90,8 @@ model Agent {
   sessionKey      String    @unique @map("session_key")
   capabilities    String    @default("{}") @map("capabilities") // JSON object
   wipLimit        Int       @default(2) @map("wip_limit")
+  avatarPath      String?   @map("avatar_path") // Custom avatar image path
+  model           String?   @default("claude-sonnet-4-20250514") @map("model") // Primary AI model
   lastSeenAt      DateTime? @map("last_seen_at")
   lastHeartbeatAt DateTime? @map("last_heartbeat_at")
   createdAt       DateTime  @default(now()) @map("created_at")

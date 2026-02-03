@@ -5,8 +5,8 @@ import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
 import { PageHeader, PageSection, EmptyState } from '@savorg/ui'
 import { OperationStatusPill, WorkOrderStatePill, PriorityPill } from '@/components/ui/status-pill'
-import { workOrdersApi, operationsApi, activitiesApi, approvalsApi } from '@/lib/http'
-import type { WorkOrderWithOpsDTO, OperationDTO, ActivityDTO, ApprovalDTO } from '@/lib/repo'
+import { workOrdersApi, operationsApi, activitiesApi, approvalsApi, receiptsApi } from '@/lib/http'
+import type { WorkOrderWithOpsDTO, OperationDTO, ActivityDTO, ApprovalDTO, ReceiptDTO } from '@/lib/repo'
 import { cn } from '@/lib/utils'
 import { useProtectedActionTrigger } from '@/components/protected-action-modal'
 import { getValidWorkOrderTransitions, type WorkOrderState } from '@savorg/core'
@@ -45,9 +45,9 @@ const tabs: Tab[] = [
   { id: 'overview', label: 'Overview', icon: ClipboardList },
   { id: 'pipeline', label: 'Pipeline', icon: LayoutList },
   { id: 'operations', label: 'Operations', icon: Terminal },
-  { id: 'messages', label: 'Messages', icon: MessageSquare, disabled: true },
-  { id: 'artifacts', label: 'Artifacts', icon: FileBox, disabled: true },
-  { id: 'receipts', label: 'Receipts', icon: Receipt, disabled: true },
+  { id: 'messages', label: 'Messages', icon: MessageSquare },
+  { id: 'artifacts', label: 'Artifacts', icon: FileBox },
+  { id: 'receipts', label: 'Receipts', icon: Receipt },
   { id: 'activity', label: 'Activity', icon: Activity },
 ]
 
@@ -61,6 +61,7 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
   const [operations, setOperations] = useState<OperationDTO[]>([])
   const [activities, setActivities] = useState<ActivityDTO[]>([])
   const [approvals, setApprovals] = useState<ApprovalDTO[]>([])
+  const [receipts, setReceipts] = useState<ReceiptDTO[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabId>('overview')
@@ -69,16 +70,18 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
   useEffect(() => {
     async function fetchData() {
       try {
-        const [woResult, opsResult, activitiesResult, approvalsResult] = await Promise.all([
+        const [woResult, opsResult, activitiesResult, approvalsResult, receiptsResult] = await Promise.all([
           workOrdersApi.get(workOrderId),
           operationsApi.list({ workOrderId }),
           activitiesApi.list({ entityType: 'work_order', entityId: workOrderId, limit: 50 }),
           approvalsApi.list({ workOrderId, limit: 50 }),
+          receiptsApi.list({ workOrderId }),
         ])
         setWorkOrder(woResult.data)
         setOperations(opsResult.data)
         setActivities(activitiesResult.data)
         setApprovals(approvalsResult.data)
+        setReceipts(receiptsResult.data)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load work order')
       } finally {
@@ -88,17 +91,19 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
     fetchData()
   }, [workOrderId])
 
-  // Refresh operations, activities, and approvals after changes
+  // Refresh operations, activities, approvals, and receipts after changes
   const refreshData = async () => {
     try {
-      const [opsResult, activitiesResult, approvalsResult] = await Promise.all([
+      const [opsResult, activitiesResult, approvalsResult, receiptsResult] = await Promise.all([
         operationsApi.list({ workOrderId }),
         activitiesApi.list({ entityType: 'work_order', entityId: workOrderId, limit: 50 }),
         approvalsApi.list({ workOrderId, limit: 50 }),
+        receiptsApi.list({ workOrderId }),
       ])
       setOperations(opsResult.data)
       setActivities(activitiesResult.data)
       setApprovals(approvalsResult.data)
+      setReceipts(receiptsResult.data)
     } catch (err) {
       console.error('Failed to refresh data:', err)
     }
@@ -290,6 +295,15 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
             workOrderId={workOrderId}
             onOperationCreated={refreshData}
           />
+        )}
+        {activeTab === 'messages' && (
+          <MessagesTab workOrderId={workOrderId} />
+        )}
+        {activeTab === 'artifacts' && (
+          <ArtifactsTab workOrderId={workOrderId} />
+        )}
+        {activeTab === 'receipts' && (
+          <ReceiptsTab receipts={receipts} workOrderId={workOrderId} />
         )}
         {activeTab === 'activity' && (
           <ActivityTab activities={activities} workOrderId={workOrderId} />
@@ -880,6 +894,143 @@ function ActivityTab({
             icon={<Activity className="w-8 h-8" />}
             title="No activity yet"
             description="Activity will appear here as the work order progresses"
+          />
+        )}
+      </PageSection>
+    </div>
+  )
+}
+
+function MessagesTab({ workOrderId: _workOrderId }: { workOrderId: string }) {
+  return (
+    <div className="p-6">
+      <PageSection
+        title="Messages"
+        description="Communication thread for this work order"
+      >
+        <EmptyState
+          icon={<MessageSquare className="w-8 h-8" />}
+          title="No messages yet"
+          description="Messages between agents and operations will appear here"
+        />
+      </PageSection>
+    </div>
+  )
+}
+
+function ArtifactsTab({ workOrderId: _workOrderId }: { workOrderId: string }) {
+  return (
+    <div className="p-6">
+      <PageSection
+        title="Artifacts"
+        description="Files, PRs, and links produced by this work order"
+      >
+        <EmptyState
+          icon={<FileBox className="w-8 h-8" />}
+          title="No artifacts yet"
+          description="Artifacts like PRs, docs, and files will appear here as work progresses"
+        />
+      </PageSection>
+    </div>
+  )
+}
+
+function ReceiptsTab({
+  receipts,
+  workOrderId: _workOrderId,
+}: {
+  receipts: ReceiptDTO[]
+  workOrderId: string
+}) {
+  return (
+    <div className="p-6">
+      <PageSection
+        title="Receipts"
+        description={`${receipts.length} execution records`}
+      >
+        {receipts.length > 0 ? (
+          <div className="space-y-2">
+            {receipts.map((receipt) => {
+              const isRunning = !receipt.endedAt
+              const isSuccess = receipt.exitCode === 0
+              const isFailed = receipt.exitCode !== null && receipt.exitCode !== 0
+
+              return (
+                <div
+                  key={receipt.id}
+                  className="flex items-start gap-3 p-4 bg-bg-3/50 rounded-[var(--radius-md)] border border-white/[0.03] hover:border-white/[0.06] transition-colors"
+                >
+                  {/* Status Indicator */}
+                  <div className={cn(
+                    'w-2 h-2 mt-1.5 rounded-full shrink-0',
+                    isRunning && 'bg-status-progress animate-pulse',
+                    isSuccess && 'bg-status-success',
+                    isFailed && 'bg-status-danger'
+                  )} />
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-mono font-medium text-fg-0">
+                        {receipt.commandName}
+                      </span>
+                      <span className={cn(
+                        'px-1.5 py-0.5 text-[10px] rounded',
+                        receipt.kind === 'cron_run' && 'bg-status-info/10 text-status-info',
+                        receipt.kind === 'agent_run' && 'bg-status-progress/10 text-status-progress',
+                        receipt.kind === 'playbook_step' && 'bg-status-warning/10 text-status-warning',
+                        receipt.kind === 'manual' && 'bg-fg-3/10 text-fg-2'
+                      )}>
+                        {receipt.kind.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+
+                    {/* Meta */}
+                    <div className="flex items-center gap-2 mt-1 text-xs text-fg-2">
+                      <span>{formatRelativeTime(receipt.startedAt)}</span>
+                      {receipt.durationMs && (
+                        <>
+                          <span className="text-fg-3">•</span>
+                          <span>{receipt.durationMs}ms</span>
+                        </>
+                      )}
+                      {receipt.exitCode !== null && (
+                        <>
+                          <span className="text-fg-3">•</span>
+                          <span className={cn(
+                            isSuccess ? 'text-status-success' : 'text-status-danger'
+                          )}>
+                            exit {receipt.exitCode}
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Output Preview */}
+                    {receipt.stdoutExcerpt && (
+                      <div className="mt-2 p-2 bg-bg-2 rounded text-xs font-mono text-fg-1 max-h-20 overflow-hidden">
+                        {receipt.stdoutExcerpt.slice(0, 200)}
+                        {receipt.stdoutExcerpt.length > 200 && '...'}
+                      </div>
+                    )}
+
+                    {/* Error Preview */}
+                    {receipt.stderrExcerpt && (
+                      <div className="mt-2 p-2 bg-status-danger/10 border border-status-danger/20 rounded text-xs font-mono text-status-danger max-h-20 overflow-hidden">
+                        {receipt.stderrExcerpt.slice(0, 200)}
+                        {receipt.stderrExcerpt.length > 200 && '...'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <EmptyState
+            icon={<Receipt className="w-8 h-8" />}
+            title="No receipts yet"
+            description="Execution receipts from commands, cron jobs, and agent runs will appear here"
           />
         )}
       </PageSection>

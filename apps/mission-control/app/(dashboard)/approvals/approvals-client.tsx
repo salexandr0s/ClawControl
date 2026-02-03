@@ -19,6 +19,9 @@ import {
   Ship,
   Loader2,
   ExternalLink,
+  Square,
+  CheckSquare,
+  MinusSquare,
 } from 'lucide-react'
 
 // ============================================================================
@@ -56,9 +59,45 @@ const APPROVAL_TYPE_ICONS: Record<ApprovalType, typeof Ship> = {
 const createColumns = (
   workOrderMap: Record<string, WorkOrderDTO>,
   onQuickApprove?: (id: string) => void,
-  quickApprovingId?: string | null
-): Column<ApprovalDTO>[] => [
-  {
+  quickApprovingId?: string | null,
+  selectedIds?: Set<string>,
+  onToggleSelect?: (id: string) => void,
+  showCheckbox?: boolean
+): Column<ApprovalDTO>[] => {
+  const columns: Column<ApprovalDTO>[] = []
+
+  // Checkbox column for batch selection (only for pending, non-danger)
+  if (showCheckbox) {
+    columns.push({
+      key: 'checkbox',
+      header: '',
+      width: '40px',
+      render: (row) => {
+        // Only show checkbox for pending non-danger approvals
+        if (row.status !== 'pending' || row.type === 'risky_action') {
+          return <div className="w-4 h-4" />
+        }
+        const isSelected = selectedIds?.has(row.id) ?? false
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleSelect?.(row.id)
+            }}
+            className="p-0.5 hover:bg-bg-3 rounded"
+          >
+            {isSelected ? (
+              <CheckSquare className="w-4 h-4 text-status-info" />
+            ) : (
+              <Square className="w-4 h-4 text-fg-3 hover:text-fg-2" />
+            )}
+          </button>
+        )
+      },
+    })
+  }
+
+  columns.push({
     key: 'status',
     header: '',
     width: '40px',
@@ -148,8 +187,10 @@ const createColumns = (
         </button>
       )
     },
-  },
-]
+  })
+
+  return columns
+}
 
 // ============================================================================
 // COMPONENT
@@ -161,6 +202,8 @@ export function ApprovalsClient({ approvals: initialApprovals, workOrderMap }: P
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [quickApprovingId, setQuickApprovingId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false)
 
   const selectedApproval = selectedId ? approvals.find((a) => a.id === selectedId) : undefined
 
@@ -181,6 +224,83 @@ export function ApprovalsClient({ approvals: initialApprovals, workOrderMap }: P
     rejected: approvals.filter((a) => a.status === 'rejected').length,
   }), [approvals])
 
+  // Batch-selectable items (pending, non-danger only)
+  const selectableApprovals = useMemo(() => {
+    return filteredApprovals.filter(
+      (a) => a.status === 'pending' && a.type !== 'risky_action'
+    )
+  }, [filteredApprovals])
+
+  // Toggle single selection
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  // Select/deselect all
+  const handleSelectAll = () => {
+    if (selectedIds.size === selectableApprovals.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(selectableApprovals.map((a) => a.id)))
+    }
+  }
+
+  // Batch approve
+  const handleBatchApprove = async () => {
+    if (selectedIds.size === 0) return
+    setIsBatchProcessing(true)
+    try {
+      const result = await approvalsApi.batchUpdate({
+        ids: Array.from(selectedIds),
+        status: 'approved',
+      })
+      // Update local state with returned approvals
+      setApprovals((prev) =>
+        prev.map((a) => {
+          const updated = result.data.updated.find((u) => u.id === a.id)
+          return updated ?? a
+        })
+      )
+      setSelectedIds(new Set())
+    } catch (err) {
+      console.error('Batch approve failed:', err)
+    } finally {
+      setIsBatchProcessing(false)
+    }
+  }
+
+  // Batch reject
+  const handleBatchReject = async () => {
+    if (selectedIds.size === 0) return
+    setIsBatchProcessing(true)
+    try {
+      const result = await approvalsApi.batchUpdate({
+        ids: Array.from(selectedIds),
+        status: 'rejected',
+      })
+      // Update local state with returned approvals
+      setApprovals((prev) =>
+        prev.map((a) => {
+          const updated = result.data.updated.find((u) => u.id === a.id)
+          return updated ?? a
+        })
+      )
+      setSelectedIds(new Set())
+    } catch (err) {
+      console.error('Batch reject failed:', err)
+    } finally {
+      setIsBatchProcessing(false)
+    }
+  }
+
   // Quick approve handler (for non-danger)
   const handleQuickApprove = async (id: string) => {
     setQuickApprovingId(id)
@@ -196,7 +316,16 @@ export function ApprovalsClient({ approvals: initialApprovals, workOrderMap }: P
     }
   }
 
-  const columns = createColumns(workOrderMap, handleQuickApprove, quickApprovingId)
+  // Show checkbox column when viewing pending approvals
+  const showCheckbox = statusFilter === 'pending' || statusFilter === 'all'
+  const columns = createColumns(
+    workOrderMap,
+    handleQuickApprove,
+    quickApprovingId,
+    selectedIds,
+    handleToggleSelect,
+    showCheckbox
+  )
 
   return (
     <>
@@ -240,7 +369,57 @@ export function ApprovalsClient({ approvals: initialApprovals, workOrderMap }: P
               <option key={key} value={key}>{label}</option>
             ))}
           </select>
+
+          {/* Select All / Deselect All */}
+          {showCheckbox && selectableApprovals.length > 0 && (
+            <button
+              onClick={handleSelectAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-fg-2 hover:text-fg-1 hover:bg-bg-3 rounded-[var(--radius-md)] transition-colors"
+            >
+              {selectedIds.size === selectableApprovals.length && selectedIds.size > 0 ? (
+                <>
+                  <MinusSquare className="w-3.5 h-3.5" />
+                  Deselect All
+                </>
+              ) : (
+                <>
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  Select All ({selectableApprovals.length})
+                </>
+              )}
+            </button>
+          )}
         </div>
+
+        {/* Batch Action Bar */}
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-3 p-3 bg-status-info/10 border border-status-info/30 rounded-[var(--radius-md)]">
+            <span className="text-sm text-fg-1">
+              {selectedIds.size} {selectedIds.size === 1 ? 'item' : 'items'} selected
+            </span>
+            <div className="flex-1" />
+            <button
+              onClick={handleBatchReject}
+              disabled={isBatchProcessing}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-status-danger hover:bg-status-danger/10 rounded-[var(--radius-md)] disabled:opacity-50"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              Reject Selected
+            </button>
+            <button
+              onClick={handleBatchApprove}
+              disabled={isBatchProcessing}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-status-success text-white hover:bg-status-success/90 rounded-[var(--radius-md)] disabled:opacity-50"
+            >
+              {isBatchProcessing ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <CheckCircle className="w-3.5 h-3.5" />
+              )}
+              Approve Selected
+            </button>
+          </div>
+        )}
 
         {/* Table */}
         <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-white/[0.06] overflow-hidden">

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { PageHeader, PageSection, EmptyState, TypedConfirmModal } from '@savorg/ui'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { StatusPill } from '@/components/ui/status-pill'
@@ -25,6 +25,7 @@ import {
   AlertTriangle,
   XCircle,
   RefreshCw,
+  X,
 } from 'lucide-react'
 
 interface Props {
@@ -54,6 +55,7 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
     scope: 'global' | 'agent'
     agentId?: string
   }>({ scope: 'global' })
+  const [showCreateModal, setShowCreateModal] = useState(false)
 
   const protectedAction = useProtectedAction()
 
@@ -65,6 +67,16 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
   const globalCount = skills.filter((s) => s.scope === 'global').length
   const agentCount = skills.filter((s) => s.scope === 'agent').length
   const enabledCount = skills.filter((s) => s.enabled).length
+
+  // Refresh skills list
+  const refreshSkills = useCallback(async () => {
+    try {
+      const result = await skillsApi.list()
+      setSkills(result.data)
+    } catch (err) {
+      console.error('Failed to refresh skills:', err)
+    }
+  }, [])
 
   // Handle skill click - open in drawer
   const handleSkillClick = useCallback(async (skill: SkillDTO) => {
@@ -382,20 +394,11 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
           actions={
             <div className="flex items-center gap-2">
               <button
-                disabled
-                title="Coming soon"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-bg-2 border border-white/[0.06] rounded-[var(--radius-md)] text-fg-2 cursor-not-allowed opacity-60"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                Install
-              </button>
-              <button
-                disabled
-                title="Coming soon"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-bg-2 border border-white/[0.06] rounded-[var(--radius-md)] text-fg-2 cursor-not-allowed opacity-60"
+                onClick={() => setShowCreateModal(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-status-info text-bg-0 hover:bg-status-info/90 rounded-[var(--radius-md)]"
               >
                 <Plus className="w-3.5 h-3.5" />
-                Create
+                Create Skill
               </button>
             </div>
           }
@@ -656,9 +659,267 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
         entityName={protectedAction.state.entityName}
         isLoading={protectedAction.state.isLoading}
       />
+
+      {/* Create Skill Modal */}
+      <CreateSkillModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={refreshSkills}
+        agents={agents}
+        protectedAction={protectedAction}
+      />
     </>
   )
 }
+
+// ============================================================================
+// CREATE SKILL MODAL
+// ============================================================================
+
+interface CreateSkillModalProps {
+  isOpen: boolean
+  onClose: () => void
+  onCreated: () => void
+  agents: AgentDTO[]
+  protectedAction: ReturnType<typeof useProtectedAction>
+}
+
+function CreateSkillModal({
+  isOpen,
+  onClose,
+  onCreated,
+  agents,
+  protectedAction,
+}: CreateSkillModalProps) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [scope, setScope] = useState<'global' | 'agent'>('global')
+  const [agentId, setAgentId] = useState<string>('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+
+  // Reset form when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setName('')
+      setDescription('')
+      setScope('global')
+      setAgentId('')
+      setError(null)
+      setTimeout(() => nameInputRef.current?.focus(), 100)
+    }
+  }, [isOpen])
+
+  // Handle escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen && !isSubmitting) {
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, isSubmitting, onClose])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!name.trim()) {
+      setError('Skill name is required')
+      return
+    }
+    if (scope === 'agent' && !agentId) {
+      setError('Please select an agent')
+      return
+    }
+
+    // Trigger protected action confirmation
+    protectedAction.trigger({
+      actionKind: 'skill.install',
+      actionTitle: 'Create Skill',
+      actionDescription: `Create a new ${scope} skill named "${name}"`,
+      onConfirm: async (typedConfirmText) => {
+        setIsSubmitting(true)
+        setError(null)
+
+        try {
+          await skillsApi.install({
+            name: name.trim(),
+            description: description.trim() || undefined,
+            scope,
+            agentId: scope === 'agent' ? agentId : undefined,
+            typedConfirmText,
+          })
+          onCreated()
+          onClose()
+        } catch (err) {
+          if (err instanceof HttpError) {
+            setError(err.message)
+          } else {
+            setError(err instanceof Error ? err.message : 'Failed to create skill')
+          }
+        } finally {
+          setIsSubmitting(false)
+        }
+      },
+      onError: (err) => {
+        setError(err.message)
+      },
+    })
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={!isSubmitting ? onClose : undefined}
+      />
+
+      {/* Modal */}
+      <div className="relative bg-bg-1 border border-white/[0.08] rounded-[var(--radius-lg)] shadow-2xl w-full max-w-lg mx-4">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+          <h2 className="text-base font-medium text-fg-0">Create New Skill</h2>
+          <button
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="p-1.5 text-fg-2 hover:text-fg-0 hover:bg-bg-3 rounded-[var(--radius-md)] transition-colors disabled:opacity-50"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {/* Name */}
+          <div>
+            <label htmlFor="skill-name" className="block text-xs font-medium text-fg-1 mb-1.5">
+              Name
+            </label>
+            <input
+              ref={nameInputRef}
+              id="skill-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g., my-custom-skill"
+              disabled={isSubmitting}
+              className="w-full px-3 py-2 text-sm bg-bg-2 border border-white/[0.08] rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+            />
+          </div>
+
+          {/* Description */}
+          <div>
+            <label htmlFor="skill-description" className="block text-xs font-medium text-fg-1 mb-1.5">
+              Description (optional)
+            </label>
+            <textarea
+              id="skill-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Brief description of what this skill does"
+              rows={2}
+              disabled={isSubmitting}
+              className="w-full px-3 py-2 text-sm bg-bg-2 border border-white/[0.08] rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 resize-none disabled:opacity-50"
+            />
+          </div>
+
+          {/* Scope */}
+          <div>
+            <label className="block text-xs font-medium text-fg-1 mb-1.5">
+              Scope
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setScope('global')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-[var(--radius-md)] border transition-colors',
+                  scope === 'global'
+                    ? 'bg-status-info/10 text-status-info border-status-info/30'
+                    : 'bg-bg-2 text-fg-1 border-white/[0.08] hover:border-white/[0.12]'
+                )}
+              >
+                <Globe className="w-4 h-4" />
+                Global
+              </button>
+              <button
+                type="button"
+                onClick={() => setScope('agent')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-[var(--radius-md)] border transition-colors',
+                  scope === 'agent'
+                    ? 'bg-status-info/10 text-status-info border-status-info/30'
+                    : 'bg-bg-2 text-fg-1 border-white/[0.08] hover:border-white/[0.12]'
+                )}
+              >
+                <User className="w-4 h-4" />
+                Agent
+              </button>
+            </div>
+          </div>
+
+          {/* Agent Selector (only for agent scope) */}
+          {scope === 'agent' && (
+            <div>
+              <label htmlFor="skill-agent" className="block text-xs font-medium text-fg-1 mb-1.5">
+                Agent
+              </label>
+              <select
+                id="skill-agent"
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
+                disabled={isSubmitting}
+                className="w-full px-3 py-2 text-sm bg-bg-2 border border-white/[0.08] rounded-[var(--radius-md)] text-fg-0 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+              >
+                <option value="">Select an agent...</option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="text-xs text-status-danger bg-status-danger/10 border border-status-danger/20 rounded-[var(--radius-md)] px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSubmitting}
+              className="px-4 py-2 text-xs font-medium text-fg-1 hover:text-fg-0 bg-bg-3 rounded-[var(--radius-md)] border border-white/[0.06] disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting || !name.trim() || (scope === 'agent' && !agentId)}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-bg-0 bg-status-info hover:bg-status-info/90 rounded-[var(--radius-md)] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {isSubmitting ? 'Creating...' : 'Create Skill'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// VALIDATION COMPONENTS
+// ============================================================================
 
 function ValidationIcon({ status }: { status: string }) {
   switch (status) {

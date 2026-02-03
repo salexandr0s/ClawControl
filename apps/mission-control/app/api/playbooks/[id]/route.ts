@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { mockPlaybooks } from '@savorg/core'
+import { useMockData } from '@/lib/repo'
 import { enforceTypedConfirm } from '@/lib/with-governor'
+import { getPlaybook, updatePlaybook } from '@/lib/fs/playbooks-fs'
 import type { ActionKind } from '@savorg/core'
 
 // Playbook edit action - uses caution level
@@ -16,12 +18,24 @@ export async function GET(
 ) {
   const { id } = await params
 
-  const playbook = mockPlaybooks.find((p) => p.id === id)
-  if (!playbook) {
-    return NextResponse.json({ error: 'Playbook not found' }, { status: 404 })
+  if (useMockData()) {
+    const playbook = mockPlaybooks.find((p) => p.id === id)
+    if (!playbook) {
+      return NextResponse.json({ error: 'Playbook not found' }, { status: 404 })
+    }
+    return NextResponse.json({ data: playbook })
   }
 
-  return NextResponse.json({ data: playbook })
+  try {
+    const playbook = await getPlaybook(id)
+    if (!playbook) {
+      return NextResponse.json({ error: 'Playbook not found' }, { status: 404 })
+    }
+    return NextResponse.json({ data: playbook })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to read playbook'
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }
 
 /**
@@ -33,11 +47,6 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-
-  const playbookIndex = mockPlaybooks.findIndex((p) => p.id === id)
-  if (playbookIndex === -1) {
-    return NextResponse.json({ error: 'Playbook not found' }, { status: 404 })
-  }
 
   const body = await request.json()
   const { content, typedConfirmText } = body
@@ -62,14 +71,32 @@ export async function PUT(
     )
   }
 
-  // Update the playbook content (in-memory mock)
-  mockPlaybooks[playbookIndex] = {
-    ...mockPlaybooks[playbookIndex],
-    content,
-    modifiedAt: new Date(),
+  if (useMockData()) {
+    const playbookIndex = mockPlaybooks.findIndex((p) => p.id === id)
+    if (playbookIndex === -1) {
+      return NextResponse.json({ error: 'Playbook not found' }, { status: 404 })
+    }
+
+    // Update the playbook content (in-memory mock)
+    mockPlaybooks[playbookIndex] = {
+      ...mockPlaybooks[playbookIndex],
+      content,
+      modifiedAt: new Date(),
+    }
+
+    return NextResponse.json({
+      data: mockPlaybooks[playbookIndex],
+    })
   }
 
-  return NextResponse.json({
-    data: mockPlaybooks[playbookIndex],
-  })
+  try {
+    const playbook = await updatePlaybook(id, content)
+    if (!playbook) {
+      return NextResponse.json({ error: 'Playbook not found' }, { status: 404 })
+    }
+    return NextResponse.json({ data: playbook })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to update playbook'
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }

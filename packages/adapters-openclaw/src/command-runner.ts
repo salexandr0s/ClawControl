@@ -359,6 +359,55 @@ export const ALLOWED_DYNAMIC_COMMANDS = {
     danger: false,
     description: 'Get cron job run history (requires --id)',
   },
+  'cron.run': {
+    baseArgs: ['cron', 'run', '--json'],
+    requiredParams: ['id'] as const,
+    danger: true,
+    description: 'Trigger immediate execution of a cron job (requires --id)',
+  },
+  'cron.enable': {
+    baseArgs: ['cron', 'enable', '--json'],
+    requiredParams: ['id'] as const,
+    danger: true,
+    description: 'Enable a cron job (requires --id)',
+  },
+  'cron.disable': {
+    baseArgs: ['cron', 'disable', '--json'],
+    requiredParams: ['id'] as const,
+    danger: true,
+    description: 'Disable a cron job (requires --id)',
+  },
+  'cron.create': {
+    baseArgs: ['cron', 'add', '--json'],
+    requiredParams: ['name', 'schedule', 'command'] as const,
+    optionalParams: ['enabled'] as const,
+    danger: true,
+    description: 'Create a new cron job (requires --name, --schedule, --command)',
+  },
+  'cron.delete': {
+    baseArgs: ['cron', 'delete', '--json'],
+    requiredParams: ['id'] as const,
+    danger: true,
+    description: 'Delete a cron job (requires --id)',
+  },
+  'plugins.uninstall': {
+    baseArgs: ['plugins', 'uninstall', '--json'],
+    requiredParams: ['id'] as const,
+    danger: true,
+    description: 'Uninstall a plugin (requires --id)',
+  },
+  'plugins.enable': {
+    baseArgs: ['plugins', 'enable', '--json'],
+    requiredParams: ['id'] as const,
+    danger: true,
+    description: 'Enable a plugin (requires --id)',
+  },
+  'plugins.disable': {
+    baseArgs: ['plugins', 'disable', '--json'],
+    requiredParams: ['id'] as const,
+    danger: true,
+    description: 'Disable a plugin (requires --id)',
+  },
 } as const
 
 export type AllowedDynamicCommandId = keyof typeof ALLOWED_DYNAMIC_COMMANDS

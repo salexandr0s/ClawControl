@@ -11,7 +11,7 @@
  */
 
 import { mockPlugins, mockPluginConfigs } from '@savorg/core'
-import { getDefaultAdapter } from '@savorg/adapters-openclaw'
+import { getDefaultAdapter, runDynamicCommandJson } from '@savorg/adapters-openclaw'
 import {
   getOpenClawCapabilities,
   type OpenClawCapabilities,
@@ -528,22 +528,40 @@ export function createCliPluginsRepo(): PluginsRepo {
       }
     },
 
-    async uninstall(_id: string) {
+    async uninstall(id: string) {
       const caps = await getOpenClawCapabilities()
 
       if (!caps.plugins.supported || !caps.plugins.uninstall) {
         throw new PluginUnsupportedError('uninstall', caps.plugins)
       }
 
-      // Note: Adapter doesn't currently support uninstall
-      console.warn('[plugins] Uninstall not yet implemented in adapter')
-      return {
-        success: false,
-        meta: {
-          ...(await buildMeta('openclaw_cli')),
-          degraded: true,
-          message: 'Uninstall not yet implemented',
-        },
+      try {
+        const result = await runDynamicCommandJson<{ ok?: boolean; message?: string }>('plugins.uninstall', { id })
+
+        if (result.error) {
+          return {
+            success: false,
+            meta: {
+              ...(await buildMeta('openclaw_cli')),
+              degraded: true,
+              message: result.error,
+            },
+          }
+        }
+
+        return {
+          success: true,
+          meta: await buildMeta('openclaw_cli'),
+        }
+      } catch (err) {
+        return {
+          success: false,
+          meta: {
+            ...(await buildMeta('openclaw_cli')),
+            degraded: true,
+            message: `Uninstall failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          },
+        }
       }
     },
 

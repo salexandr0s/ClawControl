@@ -29,6 +29,11 @@ xcodebuild -project MissionControl.xcodeproj -scheme MissionControl -configurati
 
 The built app will be in `build/Debug/MissionControl.app` or `build/Release/MissionControl.app`.
 
+```bash
+# Launch the built app
+open build/Debug/MissionControl.app
+```
+
 ## Starting Mission Control Backend
 
 The app connects to Mission Control at `http://127.0.0.1:3000`. Start it with:
@@ -193,4 +198,4 @@ For local development without signing:
 
 ## License
 
-Internal use only.
+MIT License - see repository root LICENSE file.

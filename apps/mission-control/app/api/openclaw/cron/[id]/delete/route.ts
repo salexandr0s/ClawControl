@@ -1,0 +1,82 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { runDynamicCommandJson } from '@savorg/adapters-openclaw'
+import {
+  type OpenClawResponse,
+  OPENCLAW_TIMEOUT_MS,
+  DEGRADED_THRESHOLD_MS,
+  clearCache,
+} from '@/lib/openclaw/availability'
+
+interface DeleteResult {
+  jobId: string
+  deleted: boolean
+  message?: string
+}
+
+/**
+ * POST /api/openclaw/cron/[id]/delete
+ *
+ * Deletes a cron job.
+ * Returns 200 with structured OpenClawResponse.
+ */
+export async function POST(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+): Promise<NextResponse<OpenClawResponse<DeleteResult>>> {
+  const { id: jobId } = await params
+
+  // Validate jobId format (alphanumeric + dash/underscore)
+  if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) {
+    return NextResponse.json({
+      status: 'unavailable',
+      latencyMs: 0,
+      data: null,
+      error: 'Invalid job ID format',
+      timestamp: new Date().toISOString(),
+      cached: false,
+    })
+  }
+
+  const start = Date.now()
+
+  try {
+    const res = await runDynamicCommandJson<DeleteResult>('cron.delete', { id: jobId }, {
+      timeout: OPENCLAW_TIMEOUT_MS,
+    })
+
+    const latencyMs = Date.now() - start
+
+    if (res.error) {
+      return NextResponse.json({
+        status: 'unavailable',
+        latencyMs,
+        data: null,
+        error: res.error,
+        timestamp: new Date().toISOString(),
+        cached: false,
+      })
+    }
+
+    // Clear cron jobs cache so list refreshes without deleted job
+    clearCache('cron.jobs')
+
+    return NextResponse.json({
+      status: latencyMs > DEGRADED_THRESHOLD_MS ? 'degraded' : 'ok',
+      latencyMs,
+      data: res.data ?? { jobId, deleted: true },
+      error: null,
+      timestamp: new Date().toISOString(),
+      cached: false,
+    })
+  } catch (err) {
+    const latencyMs = Date.now() - start
+    return NextResponse.json({
+      status: 'unavailable',
+      latencyMs,
+      data: null,
+      error: err instanceof Error ? err.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+      cached: false,
+    })
+  }
+}

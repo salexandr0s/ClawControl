@@ -560,18 +560,57 @@ export class WsAdapter implements OpenClawWsAdapter {
     }
   }
 
-  async *tailLogs(_options?: { limit?: number }): AsyncGenerator<string> {
-    yield '[WsAdapter] Log tailing via WebSocket not yet implemented'
+  async *tailLogs(options?: { limit?: number }): AsyncGenerator<string> {
+    // Attempt to subscribe to logs via WebSocket
+    try {
+      await this.connect()
+
+      // Try to request logs via 'logs.tail' method
+      const result = await this.request<{ logs?: string[] }>('logs.tail', {
+        limit: options?.limit ?? 50,
+      })
+
+      if (result.logs && Array.isArray(result.logs)) {
+        for (const log of result.logs) {
+          yield log
+        }
+      }
+    } catch (err) {
+      // Method not supported - yield error message
+      yield `[WsAdapter] Log tailing via WebSocket: ${err instanceof Error ? err.message : 'not supported'}`
+    }
   }
 
-  async channelsStatus(_options?: { probe?: boolean }): Promise<ChannelsStatus> {
-    // TODO: Implement via channels.status method if available
-    return {}
+  async channelsStatus(options?: { probe?: boolean }): Promise<ChannelsStatus> {
+    try {
+      await this.connect()
+
+      // Try to get channel status via 'channels.status' method
+      const result = await this.request<ChannelsStatus>('channels.status', {
+        probe: options?.probe ?? false,
+      })
+
+      return result ?? {}
+    } catch {
+      // Method not supported - return empty status
+      return {}
+    }
   }
 
-  async modelsStatus(_options?: { check?: boolean }): Promise<ModelsStatus> {
-    // TODO: Implement via models.list method if available
-    return { models: [] }
+  async modelsStatus(options?: { check?: boolean }): Promise<ModelsStatus> {
+    try {
+      await this.connect()
+
+      // Try to get models via 'models.list' method
+      const result = await this.request<ModelsStatus>('models.list', {
+        check: options?.check ?? false,
+      })
+
+      return result ?? { models: [] }
+    } catch {
+      // Method not supported - return empty list
+      return { models: [] }
+    }
   }
 
   async *sendToAgent(
@@ -632,40 +671,134 @@ export class WsAdapter implements OpenClawWsAdapter {
   }
 
   async *runCommandTemplate(
-    _templateId: string,
-    _args: Record<string, unknown>
+    templateId: string,
+    args: Record<string, unknown>
   ): AsyncGenerator<CommandOutput> {
-    yield { type: 'stdout', chunk: '[WsAdapter] Command templates not supported via WebSocket\n' }
-    yield { type: 'exit', code: 1 }
+    try {
+      await this.connect()
+
+      // Try to run command template via 'command.run' method
+      const result = await this.request<{ output?: string; exitCode?: number }>('command.run', {
+        templateId,
+        args,
+      })
+
+      if (result.output) {
+        yield { type: 'stdout', chunk: result.output }
+      }
+      yield { type: 'exit', code: result.exitCode ?? 0 }
+    } catch (err) {
+      yield { type: 'stderr', chunk: `[WsAdapter] Command template: ${err instanceof Error ? err.message : 'not supported'}\n` }
+      yield { type: 'exit', code: 1 }
+    }
   }
 
   async gatewayRestart(): Promise<void> {
-    // TODO: Implement if gateway supports restart via WS
-    throw new Error('Gateway restart via WebSocket not implemented')
+    try {
+      await this.connect()
+
+      // Try to restart gateway via 'gateway.restart' method
+      await this.request<{ ok: boolean }>('gateway.restart', {})
+
+      // Close our connection since gateway is restarting
+      this.cleanup()
+    } catch (err) {
+      throw new Error(`Gateway restart via WebSocket: ${err instanceof Error ? err.message : 'not supported'}`)
+    }
   }
 
   async listPlugins(): Promise<PluginInfo[]> {
-    return []
+    try {
+      await this.connect()
+
+      // Try to get plugins via 'plugins.list' method
+      const result = await this.request<{ plugins?: PluginInfo[] }>('plugins.list', {})
+
+      return result.plugins ?? []
+    } catch {
+      // Method not supported - return empty list
+      return []
+    }
   }
 
-  async pluginInfo(_id: string): Promise<PluginInfo> {
-    throw new Error('Plugin info via WebSocket not implemented')
+  async pluginInfo(id: string): Promise<PluginInfo> {
+    try {
+      await this.connect()
+
+      // Try to get plugin info via 'plugins.info' method
+      const result = await this.request<PluginInfo>('plugins.info', { id })
+
+      if (!result) {
+        throw new Error(`Plugin not found: ${id}`)
+      }
+
+      return result
+    } catch (err) {
+      // If method not supported, try to get from list
+      const plugins = await this.listPlugins()
+      const plugin = plugins.find((p) => p.id === id || p.name === id)
+
+      if (plugin) {
+        return plugin
+      }
+
+      throw new Error(`Plugin info via WebSocket: ${err instanceof Error ? err.message : 'not supported'}`)
+    }
   }
 
   async pluginDoctor(): Promise<PluginDoctorResult> {
-    return { ok: true, issues: [] }
+    try {
+      await this.connect()
+
+      // Try to run plugin doctor via 'plugins.doctor' method
+      const result = await this.request<PluginDoctorResult>('plugins.doctor', {})
+
+      return result ?? { ok: true, issues: [] }
+    } catch {
+      // Method not supported - return healthy status
+      return { ok: true, issues: [] }
+    }
   }
 
-  async *installPlugin(_spec: string): AsyncGenerator<string> {
-    yield '[WsAdapter] Plugin install via WebSocket not implemented\n'
+  async *installPlugin(spec: string): AsyncGenerator<string> {
+    try {
+      await this.connect()
+
+      yield `[WsAdapter] Installing plugin: ${spec}\n`
+
+      // Try to install plugin via 'plugins.install' method
+      const result = await this.request<{ ok: boolean; message?: string }>('plugins.install', { spec })
+
+      if (result.ok) {
+        yield `[WsAdapter] Plugin installed successfully\n`
+      } else {
+        yield `[WsAdapter] Plugin install failed: ${result.message ?? 'unknown error'}\n`
+      }
+    } catch (err) {
+      yield `[WsAdapter] Plugin install via WebSocket: ${err instanceof Error ? err.message : 'not supported'}\n`
+    }
   }
 
-  async enablePlugin(_id: string): Promise<void> {
-    throw new Error('Plugin enable via WebSocket not implemented')
+  async enablePlugin(id: string): Promise<void> {
+    try {
+      await this.connect()
+
+      // Try to enable plugin via 'plugins.enable' method
+      await this.request<{ ok: boolean }>('plugins.enable', { id })
+    } catch (err) {
+      throw new Error(`Plugin enable via WebSocket: ${err instanceof Error ? err.message : 'not supported'}`)
+    }
   }
 
-  async disablePlugin(_id: string): Promise<void> {
-    throw new Error('Plugin disable via WebSocket not implemented')
+  async disablePlugin(id: string): Promise<void> {
+    try {
+      await this.connect()
+
+      // Try to disable plugin via 'plugins.disable' method
+      await this.request<{ ok: boolean }>('plugins.disable', { id })
+    } catch (err) {
+      throw new Error(`Plugin disable via WebSocket: ${err instanceof Error ? err.message : 'not supported'}`)
+    }
   }
 }
 

@@ -1,13 +1,25 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { PageHeader, PageSection, EmptyState } from '@savorg/ui'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { OperationStatusPill } from '@/components/ui/status-pill'
 import { RightDrawer } from '@/components/shell/right-drawer'
 import { operationsApi, workOrdersApi, agentsApi } from '@/lib/http'
 import type { OperationDTO, WorkOrderDTO, AgentDTO } from '@/lib/repo'
-import { TerminalSquare, Loader2 } from 'lucide-react'
+import type { OperationStatus } from '@savorg/core'
+import { cn } from '@/lib/utils'
+import { TerminalSquare, Loader2, RefreshCw, XCircle, PlayCircle, CheckCircle2 } from 'lucide-react'
+
+// Available status transitions
+const STATUS_OPTIONS: { value: OperationStatus; label: string }[] = [
+  { value: 'todo', label: 'Todo' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'blocked', label: 'Blocked' },
+  { value: 'review', label: 'Review' },
+  { value: 'done', label: 'Done' },
+  { value: 'rework', label: 'Rework' },
+]
 
 export function RunsClient() {
   const [operations, setOperations] = useState<OperationDTO[]>([])
@@ -17,6 +29,16 @@ export function RunsClient() {
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
+
+  // Fetch operations
+  const fetchOperations = useCallback(async () => {
+    try {
+      const result = await operationsApi.list()
+      setOperations(result.data)
+    } catch (err) {
+      console.error('Failed to refresh operations:', err)
+    }
+  }, [])
 
   // Fetch all data on mount
   useEffect(() => {
@@ -201,6 +223,7 @@ export function RunsClient() {
             operation={selectedOperation}
             workOrder={workOrdersMap[selectedOperation.workOrderId]}
             agentsMap={agentsMap}
+            onStatusChange={fetchOperations}
           />
         )}
       </RightDrawer>
@@ -212,21 +235,129 @@ function OperationDetail({
   operation,
   workOrder,
   agentsMap,
+  onStatusChange,
 }: {
   operation: OperationDTO
   workOrder?: WorkOrderDTO
   agentsMap: Record<string, AgentDTO>
+  onStatusChange?: () => void
 }) {
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [updateError, setUpdateError] = useState<string | null>(null)
+
   const assignees = operation.assigneeAgentIds
     .map((id) => agentsMap[id])
     .filter(Boolean)
 
+  // Handle status change
+  const handleStatusChange = async (newStatus: string) => {
+    setIsUpdating(true)
+    setUpdateError(null)
+    try {
+      await operationsApi.update(operation.id, { status: newStatus })
+      onStatusChange?.()
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : 'Failed to update status')
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
+  // Quick actions
+  const handleCancel = () => handleStatusChange('blocked')
+  const handleRetry = () => handleStatusChange('todo')
+  const handleMarkDone = () => handleStatusChange('done')
+  const handleStartWork = () => handleStatusChange('in_progress')
+
+  const canRetry = operation.status === 'blocked' || operation.status === 'done' || operation.status === 'rework'
+  const canCancel = operation.status !== 'done' && operation.status !== 'blocked'
+  const canMarkDone = operation.status !== 'done'
+  const canStartWork = operation.status === 'todo' || operation.status === 'rework'
+
   return (
     <div className="space-y-6">
-      {/* Status */}
-      <div className="flex items-center gap-3">
-        <OperationStatusPill status={operation.status} />
-        <span className="px-2 py-0.5 text-xs bg-bg-3 rounded text-fg-1">{operation.station}</span>
+      {/* Status & Quick Actions */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <OperationStatusPill status={operation.status} />
+          <span className="px-2 py-0.5 text-xs bg-bg-3 rounded text-fg-1">{operation.station}</span>
+        </div>
+
+        {/* Quick Action Buttons */}
+        <div className="flex flex-wrap gap-2">
+          {canStartWork && (
+            <button
+              onClick={handleStartWork}
+              disabled={isUpdating}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-status-progress/10 text-status-progress hover:bg-status-progress/20 rounded-[var(--radius-md)] border border-status-progress/20 disabled:opacity-50"
+            >
+              <PlayCircle className="w-3.5 h-3.5" />
+              Start Work
+            </button>
+          )}
+          {canMarkDone && (
+            <button
+              onClick={handleMarkDone}
+              disabled={isUpdating}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-status-success/10 text-status-success hover:bg-status-success/20 rounded-[var(--radius-md)] border border-status-success/20 disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Mark Done
+            </button>
+          )}
+          {canRetry && (
+            <button
+              onClick={handleRetry}
+              disabled={isUpdating}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-status-info/10 text-status-info hover:bg-status-info/20 rounded-[var(--radius-md)] border border-status-info/20 disabled:opacity-50"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Retry
+            </button>
+          )}
+          {canCancel && (
+            <button
+              onClick={handleCancel}
+              disabled={isUpdating}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-status-danger/10 text-status-danger hover:bg-status-danger/20 rounded-[var(--radius-md)] border border-status-danger/20 disabled:opacity-50"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              Block
+            </button>
+          )}
+        </div>
+
+        {/* Status Dropdown */}
+        <div>
+          <label className="block text-xs font-medium text-fg-2 mb-1">Change Status</label>
+          <select
+            value={operation.status}
+            onChange={(e) => handleStatusChange(e.target.value)}
+            disabled={isUpdating}
+            className="w-full px-3 py-2 text-sm bg-bg-3 border border-white/[0.08] rounded-[var(--radius-md)] text-fg-0 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Error Message */}
+        {updateError && (
+          <div className="text-xs text-status-danger bg-status-danger/10 border border-status-danger/20 rounded-[var(--radius-md)] px-3 py-2">
+            {updateError}
+          </div>
+        )}
+
+        {/* Loading Indicator */}
+        {isUpdating && (
+          <div className="flex items-center gap-2 text-xs text-fg-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Updating status...
+          </div>
+        )}
       </div>
 
       {/* Work Order Link */}

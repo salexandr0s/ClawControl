@@ -1,15 +1,41 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { PageHeader, PageSection, EmptyState } from '@savorg/ui'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { StatusPill } from '@/components/ui/status-pill'
 import { RightDrawer } from '@/components/shell/right-drawer'
 import { useProtectedActionTrigger } from '@/components/protected-action-modal'
-import { agentsApi, operationsApi, templatesApi, type TemplateSummary } from '@/lib/http'
+import { AgentAvatar } from '@/components/ui/agent-avatar'
+import { ModelBadge, ModelOption } from '@/components/ui/model-badge'
+import { AgentCard } from '@/components/agent-card'
+import { FileEditorModal } from '@/components/file-editor-modal'
+import { SkillSelector } from '@/components/skill-selector'
+import { agentsApi, operationsApi, templatesApi, skillsApi, type TemplateSummary, type SkillSummary } from '@/lib/http'
+import { AVAILABLE_MODELS, DEFAULT_MODEL } from '@/lib/models'
 import type { AgentDTO, OperationDTO } from '@/lib/repo'
 import { cn } from '@/lib/utils'
-import { Bot, Plus, Loader2, X, Check, Zap, MessageSquare, LayoutTemplate, ChevronRight, ChevronLeft, FileCode, Eye } from 'lucide-react'
+import {
+  Bot,
+  Plus,
+  Loader2,
+  X,
+  Check,
+  Zap,
+  MessageSquare,
+  LayoutTemplate,
+  ChevronRight,
+  ChevronLeft,
+  FileCode,
+  Eye,
+  LayoutGrid,
+  List,
+  Upload,
+  RotateCcw,
+  FileText,
+  Sparkles,
+  ChevronDown,
+} from 'lucide-react'
 import type { StatusTone } from '@savorg/ui/theme'
 
 // ============================================================================
@@ -46,20 +72,20 @@ const agentColumns: Column<AgentDTO>[] = [
   {
     key: 'name',
     header: 'Agent',
-    width: '140px',
+    width: '180px',
     mono: true,
     render: (row) => (
       <div className="flex items-center gap-2">
-        <span className={cn(
-          'w-2 h-2 rounded-full',
-          row.status === 'active' && 'bg-status-success',
-          row.status === 'idle' && 'bg-fg-3',
-          row.status === 'blocked' && 'bg-status-warning',
-          row.status === 'error' && 'bg-status-danger'
-        )} />
+        <AgentAvatar agentId={row.id} name={row.name} size="sm" />
         <span className="text-status-progress">{row.name}</span>
       </div>
     ),
+  },
+  {
+    key: 'model',
+    header: 'Model',
+    width: '90px',
+    render: (row) => <ModelBadge modelId={row.model} size="sm" />,
   },
   {
     key: 'role',
@@ -122,12 +148,18 @@ export function AgentsClient() {
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | undefined>()
 
+  // View mode state
+  const [viewMode, setViewMode] = useState<'list' | 'card'>('card')
+
   // Create agent modal state
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createResult, setCreateResult] = useState<{ success: boolean; message: string } | null>(null)
 
   // Create from template wizard state
   const [showTemplateWizard, setShowTemplateWizard] = useState(false)
+
+  // File editor modal state
+  const [editingFile, setEditingFile] = useState<{ agentName: string; fileName: string } | null>(null)
 
   const triggerProtectedAction = useProtectedActionTrigger()
 
@@ -206,6 +238,7 @@ export function AgentsClient() {
     wipLimit?: number
     capabilities?: Record<string, boolean>
     sessionKey?: string
+    model?: string
   }) => {
     triggerProtectedAction({
       actionKind: 'agent.edit',
@@ -224,6 +257,86 @@ export function AgentsClient() {
         setCreateResult({ success: false, message: err.message })
       },
     })
+  }
+
+  // Handle avatar upload
+  const handleAvatarUpload = (agent: AgentDTO, file: File) => {
+    triggerProtectedAction({
+      actionKind: 'agent.edit',
+      actionTitle: 'Upload Avatar',
+      actionDescription: `Upload custom avatar for ${agent.name}`,
+      entityName: agent.name,
+      onConfirm: async (typedConfirmText) => {
+        const reader = new FileReader()
+        reader.onload = async () => {
+          const base64 = (reader.result as string).split(',')[1]
+          await fetch(`/api/agents/${agent.id}/avatar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: base64, typedConfirmText }),
+          })
+          await fetchData()
+          setCreateResult({ success: true, message: 'Avatar uploaded' })
+        }
+        reader.readAsDataURL(file)
+      },
+      onError: (err) => {
+        setCreateResult({ success: false, message: err.message })
+      },
+    })
+  }
+
+  // Handle avatar reset
+  const handleAvatarReset = (agent: AgentDTO) => {
+    triggerProtectedAction({
+      actionKind: 'agent.edit',
+      actionTitle: 'Reset Avatar',
+      actionDescription: `Reset avatar to default identicon for ${agent.name}`,
+      entityName: agent.name,
+      onConfirm: async (typedConfirmText) => {
+        await fetch(`/api/agents/${agent.id}/avatar?typedConfirmText=${encodeURIComponent(typedConfirmText)}`, {
+          method: 'DELETE',
+        })
+        await fetchData()
+        setCreateResult({ success: true, message: 'Avatar reset to default' })
+      },
+      onError: (err) => {
+        setCreateResult({ success: false, message: err.message })
+      },
+    })
+  }
+
+  // Handle duplicate skills to agent
+  const handleDuplicateSkills = (agent: AgentDTO, skillIds: string[]) => {
+    triggerProtectedAction({
+      actionKind: 'skill.duplicate_to_agent',
+      actionTitle: 'Duplicate Skills',
+      actionDescription: `Duplicate ${skillIds.length} skill(s) to ${agent.name}`,
+      onConfirm: async (typedConfirmText) => {
+        for (const skillId of skillIds) {
+          await skillsApi.duplicate('global', skillId, {
+            targetScope: 'agent',
+            targetAgentId: agent.id,
+            typedConfirmText,
+          })
+        }
+        setCreateResult({ success: true, message: `Duplicated ${skillIds.length} skill(s)` })
+      },
+      onError: (err) => {
+        setCreateResult({ success: false, message: err.message })
+      },
+    })
+  }
+
+  // Handle file edit
+  const handleFileEdit = (agentName: string, fileName: string) => {
+    setEditingFile({ agentName, fileName })
+  }
+
+  // Handle file saved (called by FileEditorModal after successful save)
+  const handleFileSaved = () => {
+    setEditingFile(null)
+    setCreateResult({ success: true, message: 'File saved' })
   }
 
   // Handle create agent
@@ -319,6 +432,34 @@ export function AgentsClient() {
           subtitle={`${agents.length} agents configured`}
           actions={
             <div className="flex gap-2">
+              {/* View Toggle */}
+              <div className="flex rounded-[var(--radius-md)] border border-white/[0.06] overflow-hidden">
+                <button
+                  onClick={() => setViewMode('card')}
+                  className={cn(
+                    'p-1.5 transition-colors',
+                    viewMode === 'card'
+                      ? 'bg-status-progress text-white'
+                      : 'bg-bg-2 text-fg-2 hover:text-fg-0'
+                  )}
+                  title="Card view"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={cn(
+                    'p-1.5 transition-colors',
+                    viewMode === 'list'
+                      ? 'bg-status-progress text-white'
+                      : 'bg-bg-2 text-fg-2 hover:text-fg-0'
+                  )}
+                  title="List view"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+              </div>
+
               <button
                 onClick={() => setShowTemplateWizard(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] border border-white/[0.06] text-fg-1 hover:bg-bg-3 transition-colors"
@@ -364,23 +505,49 @@ export function AgentsClient() {
           </div>
         )}
 
-        <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-white/[0.06] overflow-hidden">
-          <CanonicalTable
-            columns={agentColumns}
-            rows={agents}
-            rowKey={(row) => row.id}
-            onRowClick={(row) => setSelectedId(row.id)}
-            selectedKey={selectedId}
-            density="compact"
-            emptyState={
-              <EmptyState
-                icon={<Bot className="w-8 h-8" />}
-                title="No agents registered"
-                description="Create an agent to get started"
-              />
-            }
-          />
-        </div>
+        {/* Content: Card View or Table View */}
+        {viewMode === 'card' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {agents.length === 0 ? (
+              <div className="col-span-full">
+                <EmptyState
+                  icon={<Bot className="w-8 h-8" />}
+                  title="No agents registered"
+                  description="Create an agent to get started"
+                />
+              </div>
+            ) : (
+              agents.map((agent) => (
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
+                  onProvision={() => handleProvisionAgent(agent)}
+                  onTest={() => handleTestAgent(agent)}
+                  onEditFile={(fileName) => handleFileEdit(agent.name, fileName)}
+                  onClick={() => setSelectedId(agent.id)}
+                />
+              ))
+            )}
+          </div>
+        ) : (
+          <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-white/[0.06] overflow-hidden">
+            <CanonicalTable
+              columns={agentColumns}
+              rows={agents}
+              rowKey={(row) => row.id}
+              onRowClick={(row) => setSelectedId(row.id)}
+              selectedKey={selectedId}
+              density="compact"
+              emptyState={
+                <EmptyState
+                  icon={<Bot className="w-8 h-8" />}
+                  title="No agents registered"
+                  description="Create an agent to get started"
+                />
+              }
+            />
+          </div>
+        )}
       </div>
 
       {/* Create Agent Modal */}
@@ -397,6 +564,17 @@ export function AgentsClient() {
         onSubmit={handleCreateFromTemplate}
       />
 
+      {/* File Editor Modal */}
+      {editingFile && (
+        <FileEditorModal
+          isOpen={!!editingFile}
+          onClose={() => setEditingFile(null)}
+          filePath={`agents/${editingFile.agentName}/${editingFile.fileName}`}
+          fileName={editingFile.fileName}
+          onSaved={handleFileSaved}
+        />
+      )}
+
       {/* Detail Drawer */}
       <RightDrawer
         open={!!selectedAgent}
@@ -411,6 +589,10 @@ export function AgentsClient() {
             onProvision={() => handleProvisionAgent(selectedAgent)}
             onTest={() => handleTestAgent(selectedAgent)}
             onEdit={(patch) => handleEditAgent(selectedAgent, patch)}
+            onAvatarUpload={(file) => handleAvatarUpload(selectedAgent, file)}
+            onAvatarReset={() => handleAvatarReset(selectedAgent)}
+            onDuplicateSkills={(skillIds) => handleDuplicateSkills(selectedAgent, skillIds)}
+            onEditFile={(fileName) => handleFileEdit(selectedAgent.name, fileName)}
           />
         )}
       </RightDrawer>
@@ -936,6 +1118,10 @@ function AgentDetail({
   onProvision,
   onTest,
   onEdit,
+  onAvatarUpload,
+  onAvatarReset,
+  onDuplicateSkills,
+  onEditFile,
 }: {
   agent: AgentDTO
   assignedOps: OperationDTO[]
@@ -947,7 +1133,12 @@ function AgentDetail({
     wipLimit?: number
     capabilities?: Record<string, boolean>
     sessionKey?: string
+    model?: string
   }) => void
+  onAvatarUpload: (file: File) => void
+  onAvatarReset: () => void
+  onDuplicateSkills: (skillIds: string[]) => void
+  onEditFile: (fileName: string) => void
 }) {
   const toneMap: Record<string, StatusTone> = {
     active: 'success',
@@ -961,6 +1152,16 @@ function AgentDetail({
   const [editWipLimit, setEditWipLimit] = useState<number>(agent.wipLimit)
   const [editSessionKey, setEditSessionKey] = useState(agent.sessionKey)
   const [editCaps, setEditCaps] = useState<Record<string, boolean>>(agent.capabilities)
+  const [editModel, setEditModel] = useState(agent.model || DEFAULT_MODEL)
+  const [showModelSelector, setShowModelSelector] = useState(false)
+
+  // Skills state
+  const [agentSkills, setAgentSkills] = useState<SkillSummary[]>([])
+  const [loadingSkills, setLoadingSkills] = useState(false)
+  const [showSkillSelector, setShowSkillSelector] = useState(false)
+
+  // File input ref
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setEditRole(agent.role)
@@ -968,14 +1169,74 @@ function AgentDetail({
     setEditWipLimit(agent.wipLimit)
     setEditSessionKey(agent.sessionKey)
     setEditCaps(agent.capabilities)
+    setEditModel(agent.model || DEFAULT_MODEL)
+    loadAgentSkills()
   }, [agent.id])
+
+  async function loadAgentSkills() {
+    setLoadingSkills(true)
+    try {
+      const result = await skillsApi.list({ scope: 'agent', agentId: agent.id })
+      setAgentSkills(result.data)
+    } catch {
+      // Ignore errors
+    } finally {
+      setLoadingSkills(false)
+    }
+  }
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      onAvatarUpload(file)
+    }
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  // Agent file names
+  const agentFiles = [`${agent.name}.soul.md`, `${agent.name}.md`]
 
   return (
     <div className="space-y-6">
+      {/* Avatar Section */}
+      <div className="flex items-center gap-4">
+        <AgentAvatar agentId={agent.id} name={agent.name} size="xl" />
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-1 hover:bg-bg-3/80 transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Upload
+            </button>
+            <button
+              onClick={onAvatarReset}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-2 hover:text-fg-1 transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Reset
+            </button>
+          </div>
+          <p className="text-xs text-fg-3">PNG, JPG, or WebP. Max 2MB.</p>
+        </div>
+      </div>
+
       {/* Status */}
       <div className="flex items-center gap-3">
         <StatusPill tone={toneMap[agent.status]} label={agent.status} />
         <span className="px-2 py-0.5 text-xs bg-bg-3 rounded text-fg-1">{agent.station}</span>
+        <ModelBadge modelId={agent.model} size="sm" showIcon />
       </div>
 
       {/* Actions */}
@@ -997,6 +1258,65 @@ function AgentDetail({
           </button>
         </div>
       </PageSection>
+
+      {/* Files */}
+      <PageSection title="Agent Files">
+        <div className="flex flex-wrap gap-2">
+          {agentFiles.map((fileName) => (
+            <button
+              key={fileName}
+              onClick={() => onEditFile(fileName)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-1 hover:bg-bg-3/80 border border-white/[0.06] transition-colors"
+            >
+              <FileText className="w-3.5 h-3.5 text-fg-2" />
+              {fileName}
+            </button>
+          ))}
+        </div>
+      </PageSection>
+
+      {/* Skills */}
+      <PageSection title="Skills" description={`${agentSkills.length} agent-scoped skills`}>
+        <div className="space-y-2">
+          {loadingSkills ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-4 h-4 animate-spin text-fg-2" />
+            </div>
+          ) : agentSkills.length === 0 ? (
+            <p className="text-xs text-fg-3">No skills assigned to this agent</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {agentSkills.map((skill) => (
+                <span
+                  key={skill.id}
+                  className="px-2 py-1 text-xs bg-status-progress/10 text-status-progress rounded border border-status-progress/20"
+                >
+                  {skill.name}
+                </span>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => setShowSkillSelector(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-1 hover:bg-bg-3/80 transition-colors"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            Add Skills from Global
+          </button>
+        </div>
+      </PageSection>
+
+      {/* Skill Selector Modal */}
+      <SkillSelector
+        isOpen={showSkillSelector}
+        onClose={() => setShowSkillSelector(false)}
+        agentId={agent.id}
+        agentName={agent.name}
+        onSelectSkills={(skillIds) => {
+          setShowSkillSelector(false)
+          onDuplicateSkills(skillIds)
+        }}
+      />
 
       {/* Current Work */}
       <PageSection
@@ -1064,6 +1384,39 @@ function AgentDetail({
       {/* Edit */}
       <PageSection title="Edit Configuration" description="Requires typed confirmation">
         <div className="space-y-3">
+          {/* Model Selection */}
+          <div className="space-y-2">
+            <label className="text-xs text-fg-2">AI Model</label>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowModelSelector(!showModelSelector)}
+                className="w-full flex items-center justify-between px-3 py-2 bg-bg-2 border border-white/[0.06] rounded-[var(--radius-md)] text-sm text-fg-0 hover:border-bd-1 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <ModelBadge modelId={editModel} size="sm" />
+                  <span>{AVAILABLE_MODELS.find((m) => m.id === editModel)?.name || 'Unknown'}</span>
+                </div>
+                <ChevronDown className={cn('w-4 h-4 text-fg-2 transition-transform', showModelSelector && 'rotate-180')} />
+              </button>
+              {showModelSelector && (
+                <div className="absolute z-10 mt-1 w-full bg-bg-1 border border-white/[0.06] rounded-[var(--radius-md)] shadow-lg overflow-hidden">
+                  {AVAILABLE_MODELS.map((model) => (
+                    <ModelOption
+                      key={model.id}
+                      modelId={model.id}
+                      selected={editModel === model.id}
+                      onClick={() => {
+                        setEditModel(model.id)
+                        setShowModelSelector(false)
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <label className="text-xs text-fg-2">Role</label>
@@ -1136,6 +1489,7 @@ function AgentDetail({
                 wipLimit: editWipLimit,
                 sessionKey: editSessionKey,
                 capabilities: editCaps,
+                model: editModel,
               })}
               className="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-warning/10 text-status-warning border border-status-warning/30 hover:bg-status-warning/20 transition-colors"
             >

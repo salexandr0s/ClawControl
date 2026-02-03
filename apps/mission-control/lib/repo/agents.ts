@@ -23,6 +23,8 @@ export interface UpdateAgentInput {
   capabilities?: Record<string, boolean>
   wipLimit?: number
   sessionKey?: string
+  avatarPath?: string | null
+  model?: string | null
 }
 
 export interface CreateAgentInput {
@@ -56,22 +58,22 @@ export function createDbAgentsRepo(): AgentsRepo {
         where,
         orderBy: { name: 'asc' },
       })
-      return rows.map(toDTO)
+      return rows.map((row) => toDTO(row as unknown as PrismaAgentRow))
     },
 
     async getById(id: string): Promise<AgentDTO | null> {
       const row = await prisma.agent.findUnique({ where: { id } })
-      return row ? toDTO(row) : null
+      return row ? toDTO(row as unknown as PrismaAgentRow) : null
     },
 
     async getByName(name: string): Promise<AgentDTO | null> {
       const row = await prisma.agent.findUnique({ where: { name } })
-      return row ? toDTO(row) : null
+      return row ? toDTO(row as unknown as PrismaAgentRow) : null
     },
 
     async getBySessionKey(sessionKey: string): Promise<AgentDTO | null> {
       const row = await prisma.agent.findUnique({ where: { sessionKey } })
-      return row ? toDTO(row) : null
+      return row ? toDTO(row as unknown as PrismaAgentRow) : null
     },
 
     async countByStatus(): Promise<Record<string, number>> {
@@ -96,28 +98,34 @@ export function createDbAgentsRepo(): AgentsRepo {
           wipLimit: input.wipLimit ?? 2,
         },
       })
-      return toDTO(row)
+      return toDTO(row as unknown as PrismaAgentRow)
     },
 
     async update(id: string, input: UpdateAgentInput): Promise<AgentDTO | null> {
       const existing = await prisma.agent.findUnique({ where: { id } })
       if (!existing) return null
 
+      // Build update data, casting to any to handle fields not in generated client
+      const updateData: Record<string, unknown> = {
+        lastSeenAt: new Date(),
+      }
+      if (input.status !== undefined) updateData.status = input.status
+      if (input.name !== undefined) updateData.name = input.name
+      if (input.role !== undefined) updateData.role = input.role
+      if (input.station !== undefined) updateData.station = input.station
+      if (input.capabilities !== undefined) updateData.capabilities = JSON.stringify(input.capabilities)
+      if (input.wipLimit !== undefined) updateData.wipLimit = input.wipLimit
+      if (input.sessionKey !== undefined) updateData.sessionKey = input.sessionKey
+      if (input.avatarPath !== undefined) updateData.avatarPath = input.avatarPath
+      if (input.model !== undefined) updateData.model = input.model
+
       const row = await prisma.agent.update({
         where: { id },
-        data: {
-          ...(input.status !== undefined && { status: input.status }),
-          ...(input.name !== undefined && { name: input.name }),
-          ...(input.role !== undefined && { role: input.role }),
-          ...(input.station !== undefined && { station: input.station }),
-          ...(input.capabilities !== undefined && { capabilities: JSON.stringify(input.capabilities) }),
-          ...(input.wipLimit !== undefined && { wipLimit: input.wipLimit }),
-          ...(input.sessionKey !== undefined && { sessionKey: input.sessionKey }),
-          lastSeenAt: new Date(),
-        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        data: updateData as any,
       })
 
-      return toDTO(row)
+      return toDTO(row as unknown as PrismaAgentRow)
     },
   }
 }
@@ -220,7 +228,8 @@ function buildWhere(filters?: AgentFilters) {
   return where
 }
 
-function toDTO(row: {
+// Extended type to handle new fields that may not be in generated Prisma client
+interface PrismaAgentRow {
   id: string
   name: string
   role: string
@@ -229,11 +238,15 @@ function toDTO(row: {
   sessionKey: string
   capabilities: string
   wipLimit: number
+  avatarPath?: string | null
+  model?: string | null
   lastSeenAt: Date | null
   lastHeartbeatAt: Date | null
   createdAt: Date
   updatedAt: Date
-}): AgentDTO {
+}
+
+function toDTO(row: PrismaAgentRow): AgentDTO {
   return {
     id: row.id,
     name: row.name,
@@ -243,6 +256,8 @@ function toDTO(row: {
     sessionKey: row.sessionKey,
     capabilities: JSON.parse(row.capabilities),
     wipLimit: row.wipLimit,
+    avatarPath: row.avatarPath ?? null,
+    model: row.model ?? null,
     lastSeenAt: row.lastSeenAt,
     lastHeartbeatAt: row.lastHeartbeatAt,
     createdAt: row.createdAt,
@@ -260,6 +275,8 @@ function mockToDTO(agent: typeof mockAgents[number]): AgentDTO {
     sessionKey: agent.sessionKey,
     capabilities: agent.capabilities,
     wipLimit: agent.wipLimit,
+    avatarPath: null, // Mock agents don't have custom avatars
+    model: 'claude-sonnet-4-20250514', // Default model for mock agents
     lastSeenAt: agent.lastSeenAt,
     lastHeartbeatAt: agent.lastHeartbeatAt,
     createdAt: agent.createdAt,

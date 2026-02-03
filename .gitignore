@@ -25,6 +25,14 @@ data/
 *.swp
 *.swo
 
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.dSYM/
+*.ipa
+
 # OS
 .DS_Store
 Thumbs.db

@@ -3,7 +3,7 @@ import { mockWorkspaceFiles, mockFileContents } from '@savorg/core'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import type { ActionKind } from '@savorg/core'
 import { useMockData } from '@/lib/repo'
-import { readWorkspaceFileById, writeWorkspaceFileById } from '@/lib/fs/workspace-fs'
+import { readWorkspaceFileById, writeWorkspaceFileById, deleteWorkspaceEntry } from '@/lib/fs/workspace-fs'
 
 // Protected file mapping
 const PROTECTED_FILES: Record<string, ActionKind> = {
@@ -127,6 +127,81 @@ export async function PUT(
     return NextResponse.json({ data: file })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to write file'
+    return NextResponse.json({ error: msg }, { status: 400 })
+  }
+}
+
+// Deleting files is a danger-level action (protected files are not deletable)
+const DELETE_ACTION: ActionKind = 'action.danger'
+
+/**
+ * DELETE /api/workspace/:id
+ * Delete file or folder (with Governor gating)
+ */
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const body = await request.json().catch(() => ({}))
+  const { typedConfirmText } = body as { typedConfirmText?: string }
+
+  // Determine file name for protected-file check
+  const fileName = useMockData()
+    ? mockWorkspaceFiles.find((f) => f.id === id)?.name
+    : (() => {
+        try {
+          const decoded = Buffer.from(id, 'base64url').toString('utf8')
+          return decoded.split('/').filter(Boolean).pop()
+        } catch {
+          return undefined
+        }
+      })()
+
+  // Protected files cannot be deleted
+  if (fileName && PROTECTED_FILES[fileName]) {
+    return NextResponse.json(
+      { error: 'Protected files cannot be deleted' },
+      { status: 403 }
+    )
+  }
+
+  // Enforce typed confirmation for deletion
+  const result = await enforceTypedConfirm({
+    actionKind: DELETE_ACTION,
+    typedConfirmText,
+  })
+
+  if (!result.allowed) {
+    return NextResponse.json(
+      {
+        error: result.errorType,
+        policy: result.policy,
+      },
+      { status: result.errorType === 'TYPED_CONFIRM_REQUIRED' ? 428 : 403 }
+    )
+  }
+
+  if (useMockData()) {
+    const fileIndex = mockWorkspaceFiles.findIndex((f) => f.id === id)
+    if (fileIndex === -1) {
+      return NextResponse.json({ error: 'File not found' }, { status: 404 })
+    }
+
+    mockWorkspaceFiles.splice(fileIndex, 1)
+    if (mockFileContents[id]) {
+      delete mockFileContents[id]
+    }
+
+    return NextResponse.json({ success: true })
+  }
+
+  try {
+    await deleteWorkspaceEntry(id)
+    return NextResponse.json({ success: true })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to delete'
     return NextResponse.json({ error: msg }, { status: 400 })
   }
 }

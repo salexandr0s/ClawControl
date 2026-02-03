@@ -367,6 +367,12 @@ export const approvalsApi = {
     /** Required when rejecting danger-level actions */
     note?: string
   }) => apiPatch<{ data: ApprovalDTO }>(`/api/approvals/${id}`, data),
+
+  batchUpdate: (data: {
+    ids: string[]
+    status: 'approved' | 'rejected'
+    resolvedBy?: string
+  }) => apiPost<{ data: { updated: ApprovalDTO[]; failed: string[] } }>('/api/approvals/batch', data),
 }
 
 // Activities
@@ -463,6 +469,52 @@ export const workspaceApi = {
     }
     return res.json() as Promise<{ data: WorkspaceFileWithContent }>
   }),
+
+  create: (data: {
+    path: string
+    name: string
+    type: 'file' | 'folder'
+    content?: string
+    typedConfirmText: string
+  }) => fetch('/api/workspace', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(data),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const errorData = await res.json()
+      throw new HttpError(
+        errorData.error,
+        res.status,
+        errorData.error,
+        { policy: errorData.policy }
+      )
+    }
+    return res.json() as Promise<{ data: WorkspaceFileSummary }>
+  }),
+
+  delete: (id: string, typedConfirmText: string) => fetch(`/api/workspace/${id}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ typedConfirmText }),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const errorData = await res.json()
+      throw new HttpError(
+        errorData.error,
+        res.status,
+        errorData.error,
+        { policy: errorData.policy }
+      )
+    }
+    return res.json() as Promise<{ success: boolean }>
+  }),
 }
 
 // Playbooks
@@ -476,6 +528,20 @@ export interface PlaybookSummary {
 
 export interface PlaybookWithContent extends PlaybookSummary {
   content: string
+}
+
+export interface PlaybookRunResult {
+  playbookId: string
+  playbookName: string
+  status: 'completed' | 'failed'
+  steps: Array<{
+    index: number
+    name: string
+    status: 'success' | 'failed' | 'skipped'
+    message: string
+    durationMs: number
+  }>
+  totalDurationMs: number
 }
 
 export const playbooksApi = {
@@ -504,6 +570,29 @@ export const playbooksApi = {
       )
     }
     return res.json() as Promise<{ data: PlaybookWithContent }>
+  }),
+
+  run: (id: string, data: {
+    typedConfirmText: string
+    workOrderId?: string
+  }) => fetch(`/api/playbooks/${id}/run`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(data),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const errorData = await res.json()
+      throw new HttpError(
+        errorData.error,
+        res.status,
+        errorData.error,
+        { policy: errorData.policy }
+      )
+    }
+    return res.json() as Promise<{ data: PlaybookRunResult; receiptId: string }>
   }),
 }
 
@@ -1129,5 +1218,50 @@ export const templatesApi = {
       validation: { valid: boolean; errors: unknown[]; warnings: unknown[] }
       receiptId: string
     }>
+  }),
+}
+
+// ============================================================================
+// CONFIGURATION API
+// ============================================================================
+
+export interface EnvConfig {
+  OPENCLAW_WORKSPACE: string | null
+  DATABASE_URL: string | null
+  USE_MOCK_DATA: string | null
+  NODE_ENV: string | null
+}
+
+export interface EnvConfigResponse {
+  config: EnvConfig
+  activeWorkspace: string | null
+  envPath: string
+  requiresRestart: boolean
+  message?: string
+}
+
+export const configApi = {
+  getEnv: () => apiGet<{ data: EnvConfigResponse }>('/api/config/env'),
+
+  updateEnv: (data: Partial<{
+    OPENCLAW_WORKSPACE: string | null
+    USE_MOCK_DATA: string | null
+  }>) => fetch('/api/config/env', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(data),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const errorData = await res.json()
+      throw new HttpError(
+        errorData.error,
+        res.status,
+        errorData.error
+      )
+    }
+    return res.json() as Promise<{ data: EnvConfigResponse }>
   }),
 }
