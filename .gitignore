@@ -63,3 +63,6 @@ docs/audit/
 # SQLite WAL files
 *.db-wal
 *.db-shm
+
+# Internal work order artifacts
+artifacts/
