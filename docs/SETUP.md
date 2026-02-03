@@ -25,7 +25,7 @@ This guide covers detailed setup instructions for both demo mode and operational
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/savorg.git
+git clone https://github.com/salexandr0s/savORG.git
 cd savorg
 
 # Install dependencies

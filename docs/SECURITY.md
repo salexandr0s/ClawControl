@@ -284,7 +284,6 @@ SQLite with WAL mode supports single-writer, multiple-reader:
 
 Found a vulnerability? Please report responsibly:
 
-1. **Do not** open a public GitHub issue
-2. **Do** email security@your-org.com with details
-3. **Include** reproduction steps if possible
-4. **Allow** reasonable time for a fix before disclosure
+1. **Open** a GitHub issue with the `security` label
+2. **Include** reproduction steps if possible
+3. **Allow** reasonable time for a fix before public disclosure
