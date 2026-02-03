@@ -74,9 +74,14 @@ export function KanbanColumn({
       ref={setNodeRef}
       className={cn(
         'flex flex-col',
-        'flex-shrink-0 snap-start',
-        'w-[280px]',
-        'min-h-[400px] max-h-[calc(100vh-200px)]',
+        'snap-start',
+        // Flexible width: grow to fill space, but scroll when below min-width
+        // min-w-[180px] ensures columns don't get too narrow
+        // flex-1 makes them share space equally
+        // max-w-[320px] prevents columns from getting too wide on large screens
+        'flex-1 min-w-[180px] max-w-[320px]',
+        // Fill available height from parent
+        'h-full min-h-[300px]',
         'bg-bg-1 rounded-[var(--radius-md)]',
         'border border-white/[0.06]',
         'transition-all duration-200',

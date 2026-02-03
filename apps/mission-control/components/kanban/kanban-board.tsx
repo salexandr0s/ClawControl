@@ -211,10 +211,12 @@ export function KanbanBoard({
     >
       <div
         className={cn(
-          'flex gap-4 overflow-x-auto pb-4',
+          // Fill available height (parent should set height context)
+          'flex h-full min-h-0',
+          // Columns fill width until min-width threshold, then scroll
+          'gap-3 overflow-x-auto pb-2',
           'snap-x snap-mandatory',
-          'scrollbar-hide',
-          'min-h-[400px]'
+          'scrollbar-hide'
         )}
       >
         {KANBAN_COLUMNS.map((column) => (

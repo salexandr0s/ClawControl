@@ -142,7 +142,7 @@ export function KanbanCardOverlay({ workOrder }: { workOrder: WorkOrderWithOpsDT
         'shadow-2xl ring-2 ring-status-info/50',
         'cursor-grabbing',
         'rotate-2 scale-105',
-        'w-[264px]' // Match column width minus padding
+        'w-[200px]' // Reasonable overlay width
       )}
     >
       {/* Header: Code + Priority */}

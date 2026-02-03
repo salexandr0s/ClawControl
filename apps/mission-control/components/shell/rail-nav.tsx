@@ -19,6 +19,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldCheck,
+  MessageSquare,
+  Radio,
 } from 'lucide-react'
 import type { Route } from 'next'
 
@@ -33,12 +35,14 @@ const navItems: NavItem[] = [
   { href: '/now' as Route, label: 'Now', icon: LayoutDashboard },
   { href: '/work-orders' as Route, label: 'Work Orders', icon: ClipboardList },
   { href: '/approvals' as Route, label: 'Approvals', icon: ShieldCheck },
+  { href: '/console' as Route, label: 'Chat', icon: MessageSquare },
   { href: '/agents' as Route, label: 'Agents', icon: Bot },
   { href: '/agent-templates' as Route, label: 'Templates', icon: LayoutTemplate },
   { href: '/cron' as Route, label: 'Cron', icon: Clock },
   { href: '/workspace' as Route, label: 'Workspace', icon: FolderTree },
   { href: '/runs' as Route, label: 'Runs', icon: TerminalSquare },
   { href: '/maintenance' as Route, label: 'Maintenance', icon: Wrench },
+  { href: '/gateway-live' as Route, label: 'Gateway', icon: Radio },
   { href: '/live' as Route, label: 'Live', icon: Activity },
   { href: '/skills' as Route, label: 'Skills', icon: Sparkles },
   { href: '/plugins' as Route, label: 'Plugins', icon: Puzzle },
