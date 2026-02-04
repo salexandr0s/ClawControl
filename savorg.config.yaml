@@ -1,0 +1,534 @@
+# ============================================================================
+# SAVORG — Multi-Agent System Configuration
+# ============================================================================
+# Owner: Alexandros
+# Platform: OpenClaw Gateway
+# Version: 1.0.0
+# ============================================================================
+
+system:
+  name: "Savorg"
+  version: "1.0.0"
+  description: "Multi-agent orchestration system for VitaGrowth and personal projects"
+  owner: "Alexandros"
+  platform: "openclaw"
+
+# ============================================================================
+# GLOBAL DEFAULTS
+# ============================================================================
+defaults:
+  max_tokens: 4096
+  temperature: 0.3
+  retry_attempts: 2
+  timeout_seconds: 120
+  iteration_cap: 2              # max review loops before escalating
+  escalation_target: "savorgceo"
+
+# ============================================================================
+# MODEL REGISTRY
+# ============================================================================
+# Define reusable model profiles to keep agent configs DRY.
+models:
+  tier_1_reasoning:
+    description: "Highest intelligence — deep reasoning, nuanced judgment"
+    primary:
+      provider: "anthropic"
+      model: "claude-opus-4-5-20251101"
+    fallback:
+      provider: "anthropic"
+      model: "claude-sonnet-4-5-20250929"
+    notes: "Reserved for user-facing, security-critical, and deep research."
+
+  tier_2_workhorse:
+    description: "Strong all-rounder — code gen, planning, reviews"
+    primary:
+      provider: "anthropic"
+      model: "claude-sonnet-4-5-20250929"
+    fallback:
+      provider: "anthropic"
+      model: "claude-haiku-4-5-20251001"
+    notes: "Default for most agents. Great code, solid reasoning, reasonable cost."
+
+  tier_3_fast:
+    description: "Fast and cheap — screening, checklists, routing"
+    primary:
+      provider: "anthropic"
+      model: "claude-haiku-4-5-20251001"
+    fallback:
+      provider: "anthropic"
+      model: "claude-sonnet-4-5-20250929"
+    notes: "For high-volume, low-latency tasks. Escalates to Sonnet for edge cases."
+
+  tier_3_locked:
+    description: "Fast only — no expensive fallback (cost control)"
+    primary:
+      provider: "anthropic"
+      model: "claude-haiku-4-5-20251001"
+    fallback:
+      provider: "anthropic"
+      model: "claude-haiku-4-5-20251001"
+    notes: "For pure screening. Never accidentally triggers expensive models."
+
+# ============================================================================
+# AGENT DEFINITIONS
+# ============================================================================
+agents:
+
+  # --------------------------------------------------------------------------
+  # LAYER 0 — INPUT SCREENING (runs on EVERY external message)
+  # --------------------------------------------------------------------------
+  savorgguard:
+    name: "Guard"
+    role: "input_screener"
+    description: >
+      Security gatekeeper for all incoming external messages (emails,
+      webhooks, unknown senders). Detects prompt injections, social
+      engineering, malicious payloads, phishing. Can quarantine messages.
+      CANNOT execute code, modify files, or send messages.
+    model_tier: "tier_3_locked"
+    max_tokens: 1024
+    temperature: 0.1
+    system_prompt: "./agents/guard.md"
+    soul_file: "./agents/guard/SOUL.md"
+    heartbeat_file: "./agents/guard/HEARTBEAT.md"
+    permissions:
+      can_execute_code: false
+      can_modify_files: false
+      can_send_messages: false
+      can_access_network: false
+      can_quarantine: true
+      can_read_external_input: true
+      can_delegate: false
+    receives_from:
+      - "external_input"
+    reports_to: "savorgmanager"
+    triggers:
+      - type: "every_external_message"
+        priority: 0              # runs FIRST before anything else
+    quarantine:
+      enabled: true
+      storage: "./quarantine/"
+      alert_on_quarantine: true
+      alert_target: "savorgceo"
+    escalation:
+      suspicious_threshold: 0.6
+      escalation_model: "claude-sonnet-4-5-20250929"
+
+  # --------------------------------------------------------------------------
+  # LAYER 1 — STRATEGIC (user-facing)
+  # --------------------------------------------------------------------------
+  savorgceo:
+    name: "CEO"
+    role: "strategic_interface"
+    description: >
+      Primary interface between Alexandros and the Savorg system.
+      Interprets intent, frames strategy, synthesizes final responses.
+      Never delegates directly to workers — always through Manager.
+    model_tier: "tier_1_reasoning"
+    max_tokens: 8192
+    temperature: 0.4
+    system_prompt: "./agents/ceo.md"
+    soul_file: "./agents/ceo/SOUL.md"
+    heartbeat_file: "./agents/ceo/HEARTBEAT.md"
+    permissions:
+      can_execute_code: false
+      can_modify_files: false
+      can_send_messages: true
+      can_delegate: true
+    receives_from:
+      - "alexandros"
+      - "savorgmanager"
+    reports_to: "alexandros"
+    delegates_to:
+      - "savorgmanager"
+
+  # --------------------------------------------------------------------------
+  # LAYER 2 — ORCHESTRATION
+  # --------------------------------------------------------------------------
+  savorgmanager:
+    name: "Manager"
+    role: "orchestrator"
+    description: >
+      Central orchestrator. Receives tasks from CEO, picks the right
+      workflow chain, dispatches to workers, tracks state, enforces
+      iteration caps, aggregates results back to CEO.
+    model_tier: "tier_2_workhorse"
+    max_tokens: 4096
+    temperature: 0.2
+    system_prompt: "./agents/manager.md"
+    soul_file: "./agents/manager/SOUL.md"
+    heartbeat_file: "./agents/manager/HEARTBEAT.md"
+    permissions:
+      can_execute_code: false
+      can_modify_files: false
+      can_send_messages: false
+      can_delegate: true
+    receives_from:
+      - "savorgceo"
+      - "savorgguard"
+    reports_to: "savorgceo"
+    delegates_to:
+      - "savorgresearch"
+      - "savorgplan"
+      - "savorgplanreview"
+      - "savorgbuild"
+      - "savorgbuildreview"
+      - "savorgui"
+      - "savorguireview"
+      - "savorgops"
+      - "savorgsecurity"
+    state_tracking:
+      enabled: true
+      track_fields:
+        - "current_workflow"
+        - "current_stage"
+        - "iteration_count"
+        - "blocked_by"
+        - "agent_outputs"
+
+  # --------------------------------------------------------------------------
+  # LAYER 3 — WORKERS
+  # --------------------------------------------------------------------------
+
+  savorgresearch:
+    name: "Research"
+    role: "researcher"
+    description: "Deep research — APIs, prior art, docs. Read-only."
+    model_tier: "tier_1_reasoning"
+    max_tokens: 8192
+    temperature: 0.5
+    system_prompt: "./agents/research.md"
+    soul_file: "./agents/research/SOUL.md"
+    heartbeat_file: "./agents/research/HEARTBEAT.md"
+    permissions:
+      can_execute_code: false
+      can_modify_files: false
+      can_send_messages: false
+      can_delegate: false
+      can_web_search: true
+      can_read_files: true
+    receives_from: ["savorgmanager"]
+    reports_to: "savorgmanager"
+
+  savorgplan:
+    name: "Plan"
+    role: "planner"
+    description: "Writes structured implementation plans. Never code."
+    model_tier: "tier_2_workhorse"
+    max_tokens: 8192
+    temperature: 0.3
+    system_prompt: "./agents/plan.md"
+    soul_file: "./agents/plan/SOUL.md"
+    heartbeat_file: "./agents/plan/HEARTBEAT.md"
+    permissions:
+      can_execute_code: false
+      can_modify_files: false
+      can_send_messages: false
+      can_delegate: false
+    receives_from: ["savorgmanager"]
+    reports_to: "savorgmanager"
+
+  savorgplanreview:
+    name: "PlanReview"
+    role: "plan_reviewer"
+    description: "Challenges plans. Finds gaps, edge cases, scope creep."
+    model_tier: "tier_2_workhorse"
+    max_tokens: 4096
+    temperature: 0.3
+    system_prompt: "./agents/planreview.md"
+    soul_file: "./agents/planreview/SOUL.md"
+    heartbeat_file: "./agents/planreview/HEARTBEAT.md"
+    permissions:
+      can_execute_code: false
+      can_modify_files: false
+      can_send_messages: false
+      can_delegate: false
+    receives_from: ["savorgmanager"]
+    reports_to: "savorgmanager"
+    actions: ["approve", "reject_with_feedback", "request_research"]
+
+  savorgbuild:
+    name: "Build"
+    role: "builder"
+    description: "Implements code/configs per approved plans only."
+    model_tier: "tier_2_workhorse"
+    max_tokens: 16384
+    temperature: 0.2
+    system_prompt: "./agents/build.md"
+    soul_file: "./agents/build/SOUL.md"
+    heartbeat_file: "./agents/build/HEARTBEAT.md"
+    permissions:
+      can_execute_code: true
+      can_modify_files: true
+      can_send_messages: false
+      can_delegate: false
+    receives_from: ["savorgmanager"]
+    reports_to: "savorgmanager"
+    constraints:
+      requires_approved_plan: true
+
+  savorgbuildreview:
+    name: "BuildReview"
+    role: "build_reviewer"
+    description: "QA builds. Review only; no execution."
+    model_tier: "tier_2_workhorse"
+    max_tokens: 8192
+    temperature: 0.2
+    system_prompt: "./agents/buildreview.md"
+    soul_file: "./agents/buildreview/SOUL.md"
+    heartbeat_file: "./agents/buildreview/HEARTBEAT.md"
+    permissions:
+      can_execute_code: false    # review only
+      can_modify_files: false    # never edit source
+      can_send_messages: false
+      can_delegate: false
+    receives_from: ["savorgmanager"]
+    reports_to: "savorgmanager"
+    actions: ["approve", "reject_with_feedback"]
+
+  savorgui:
+    name: "UI"
+    role: "ui_builder"
+    description: "Frontend implementation. ui-skills constraints enforced."
+    model_tier: "tier_2_workhorse"
+    max_tokens: 16384
+    temperature: 0.2
+    system_prompt: "./agents/ui.md"
+    soul_file: "./agents/ui/SOUL.md"
+    heartbeat_file: "./agents/ui/HEARTBEAT.md"
+    permissions:
+      can_execute_code: true
+      can_modify_files: true
+      can_send_messages: false
+      can_delegate: false
+    receives_from: ["savorgmanager"]
+    reports_to: "savorgmanager"
+    constraints:
+      requires_approved_plan: true
+      ui_skills_enforced: true
+
+  savorguireview:
+    name: "UIReview"
+    role: "ui_reviewer"
+    description: "Reviews UI against a11y, responsive, and motion checklist."
+    model_tier: "tier_3_fast"
+    max_tokens: 4096
+    temperature: 0.2
+    system_prompt: "./agents/uireview.md"
+    soul_file: "./agents/uireview/SOUL.md"
+    heartbeat_file: "./agents/uireview/HEARTBEAT.md"
+    permissions:
+      can_execute_code: false
+      can_modify_files: false
+      can_send_messages: false
+      can_delegate: false
+    receives_from: ["savorgmanager"]
+    reports_to: "savorgmanager"
+    actions: ["approve", "reject_with_feedback"]
+
+  savorgops:
+    name: "Ops"
+    role: "operations"
+    description: "Infra, deploy, crons, monitoring. Needs approved plan."
+    model_tier: "tier_2_workhorse"
+    max_tokens: 8192
+    temperature: 0.2
+    system_prompt: "./agents/ops.md"
+    soul_file: "./agents/ops/SOUL.md"
+    heartbeat_file: "./agents/ops/HEARTBEAT.md"
+    permissions:
+      can_execute_code: true
+      can_modify_files: true
+      can_send_messages: false
+      can_delegate: false
+    receives_from: ["savorgmanager"]
+    reports_to: "savorgmanager"
+    constraints:
+      requires_approved_plan: true
+
+  savorgsecurity:
+    name: "Security"
+    role: "security_auditor"
+    description: "Security audits. Has VETO power on any build."
+    model_tier: "tier_1_reasoning"
+    max_tokens: 8192
+    temperature: 0.1
+    system_prompt: "./agents/security.md"
+    soul_file: "./agents/security/SOUL.md"
+    heartbeat_file: "./agents/security/HEARTBEAT.md"
+    permissions:
+      can_execute_code: false    # audit only
+      can_modify_files: false    # never patch
+      can_send_messages: false
+      can_delegate: false
+      can_veto: true
+    receives_from: ["savorgmanager"]
+    reports_to: "savorgmanager"
+    actions: ["approve", "veto_with_findings", "flag_warning"]
+
+# ============================================================================
+# WORKFLOW CHAINS
+# ============================================================================
+workflows:
+
+  feature_request:
+    description: "Standard feature implementation"
+    stages:
+      - agent: "savorgresearch"
+        condition: "unknowns_exist"
+        optional: true
+      - agent: "savorgplan"
+      - agent: "savorgplanreview"
+        loop_target: "savorgplan"
+        max_iterations: 2
+      - agent: "savorgbuild"
+      - agent: "savorgbuildreview"
+        loop_target: "savorgbuild"
+        max_iterations: 2
+      - agent: "savorgsecurity"
+        loop_target: "savorgbuild"
+        max_iterations: 1
+        can_veto: true
+      - agent: "savorgops"
+        condition: "deployment_needed"
+        optional: true
+
+  ui_feature:
+    description: "UI/frontend feature"
+    stages:
+      - agent: "savorgresearch"
+        condition: "unknowns_exist"
+        optional: true
+      - agent: "savorgplan"
+      - agent: "savorgplanreview"
+        loop_target: "savorgplan"
+        max_iterations: 2
+      - agent: "savorgui"
+      - agent: "savorguireview"
+        loop_target: "savorgui"
+        max_iterations: 2
+      - agent: "savorgsecurity"
+        loop_target: "savorgui"
+        max_iterations: 1
+        can_veto: true
+      - agent: "savorgops"
+        condition: "deployment_needed"
+        optional: true
+
+  full_stack_feature:
+    description: "Feature with backend + UI"
+    stages:
+      - agent: "savorgresearch"
+        condition: "unknowns_exist"
+        optional: true
+      - agent: "savorgplan"
+      - agent: "savorgplanreview"
+        loop_target: "savorgplan"
+        max_iterations: 2
+      - agent: "savorgbuild"
+      - agent: "savorgbuildreview"
+        loop_target: "savorgbuild"
+        max_iterations: 2
+      - agent: "savorgui"
+      - agent: "savorguireview"
+        loop_target: "savorgui"
+        max_iterations: 2
+      - agent: "savorgsecurity"
+        can_veto: true
+      - agent: "savorgops"
+        condition: "deployment_needed"
+        optional: true
+
+  research_only:
+    description: "Pure research / question answering"
+    stages:
+      - agent: "savorgresearch"
+
+  security_audit:
+    description: "Standalone security audit"
+    stages:
+      - agent: "savorgsecurity"
+      - agent: "savorgbuildreview"
+        condition: "code_review_needed"
+        optional: true
+
+  ops_task:
+    description: "Infrastructure / ops changes"
+    stages:
+      - agent: "savorgplan"
+      - agent: "savorgplanreview"
+        loop_target: "savorgplan"
+        max_iterations: 2
+      - agent: "savorgops"
+      - agent: "savorgsecurity"
+        can_veto: true
+
+  bug_fix:
+    description: "Bug fix — abbreviated workflow"
+    stages:
+      - agent: "savorgresearch"
+        condition: "unknowns_exist"
+        optional: true
+      - agent: "savorgbuild"
+      - agent: "savorgbuildreview"
+        loop_target: "savorgbuild"
+        max_iterations: 2
+      - agent: "savorgsecurity"
+        condition: "security_relevant"
+        optional: true
+
+  hotfix:
+    description: "Emergency hotfix — minimal gates"
+    stages:
+      - agent: "savorgbuild"
+      - agent: "savorgsecurity"
+      - agent: "savorgops"
+
+# ============================================================================
+# INPUT PIPELINE
+# ============================================================================
+input_pipeline:
+  external:
+    description: "Emails, webhooks, API calls from unknown senders"
+    flow:
+      - agent: "savorgguard"
+        action: "screen"
+      - on_clean: "savorgmanager"
+      - on_suspicious: "quarantine + alert savorgceo"
+      - on_malicious: "quarantine + block + alert savorgceo"
+
+  internal:
+    description: "Messages from Alexandros via OpenClaw"
+    flow:
+      - agent: "savorgceo"
+
+# ============================================================================
+# ESCALATION RULES
+# ============================================================================
+escalation:
+  iteration_cap_exceeded:
+    action: "escalate_to_ceo"
+    include: ["stage", "feedback_history", "blocker_summary"]
+
+  security_veto:
+    action: "alert_ceo"
+    include: ["findings", "severity", "affected_files"]
+
+  guard_quarantine:
+    action: "alert_ceo"
+    include: ["sender", "threat_type", "confidence", "raw_preview"]
+
+  agent_timeout:
+    action: "retry_once_then_escalate"
+    fallback_model: true
+
+# ============================================================================
+# COST CONTROLS
+# ============================================================================
+cost_controls:
+  daily_budget_usd: 50.0
+  per_task_cap_usd: 10.0
+  alert_threshold_percent: 80
+  tier_1_hourly_limit: 20
+  tier_3_hourly_limit: 500
+  log_all_calls: true
