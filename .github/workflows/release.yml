@@ -31,7 +31,7 @@ jobs:
         run: |
           cd apps/clawhub-mac/build/Release
           # Create zip with the app
-          zip -r -y Clawhub-${{ github.ref_name }}-macos.zip Clawhub.app
+          zip -r -y ClawHub-${{ github.ref_name }}-macos.zip ClawHub.app
           # Show what we built
           ls -la
 
@@ -39,7 +39,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mac-app
-          path: apps/clawhub-mac/build/Release/Clawhub-*.zip
+          path: apps/clawhub-mac/build/Release/ClawHub-*.zip
           retention-days: 5
 
   create-release:
@@ -68,15 +68,15 @@ jobs:
             ## Installation
 
             ### Mac App (requires backend)
-            1. Download `Clawhub-${{ github.ref_name }}-macos.zip`
-            2. Extract and move `Clawhub.app` to your Applications folder
+            1. Download `ClawHub-${{ github.ref_name }}-macos.zip`
+            2. Extract and move `ClawHub.app` to your Applications folder
             3. **Important**: The Mac app requires the backend to be running:
                ```bash
                git clone https://github.com/${{ github.repository }}.git
                cd ClawHub
                npm install && npm run db:migrate && npm run start
                ```
-            4. Open Clawhub.app (first time: right-click → Open to bypass Gatekeeper)
+            4. Open ClawHub.app (first time: right-click → Open to bypass Gatekeeper)
 
             ### Web Only (no Xcode required)
             ```bash
