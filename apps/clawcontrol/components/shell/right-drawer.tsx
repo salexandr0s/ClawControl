@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import { X } from 'lucide-react'
+import { Modal, type ModalWidth } from '@/components/ui/modal'
 
 interface RightDrawerProps {
   open: boolean
@@ -10,7 +9,7 @@ interface RightDrawerProps {
   title?: string
   description?: string
   children: React.ReactNode
-  width?: 'default' | 'lg' | 'full'
+  width?: ModalWidth
   className?: string
 }
 
@@ -23,109 +22,17 @@ export function RightDrawer({
   width = 'default',
   className,
 }: RightDrawerProps) {
-  const drawerRef = useRef<HTMLElement>(null)
-
-  // Close on escape
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open) {
-        onClose()
-      }
-    },
-    [open, onClose]
-  )
-
-  useEffect(() => {
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleKeyDown])
-
-  // Prevent body scroll when open on mobile
-  useEffect(() => {
-    if (open) {
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = ''
-    }
-    return () => {
-      document.body.style.overflow = ''
-    }
-  }, [open])
-
-  // Focus trap - focus the drawer when it opens
-  useEffect(() => {
-    if (open && drawerRef.current) {
-      drawerRef.current.focus()
-    }
-  }, [open])
-
-  const widthClasses = {
-    default: 'sm:w-[var(--drawer-width)]',
-    lg: 'sm:w-[var(--drawer-width-lg)]',
-    full: 'sm:w-full',
-  }
-
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className={cn(
-          'fixed inset-0 bg-bg-0/60 backdrop-blur-sm z-40 transition-opacity duration-300',
-          open ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        )}
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      {/* Drawer */}
-      <aside
-        ref={drawerRef}
-        tabIndex={-1}
-        className={cn(
-          'fixed z-50 flex flex-col bg-bg-1 border-bd-0',
-          'transition-transform duration-300 ease-out',
-          // Mobile: bottom sheet (full width, slides up from bottom)
-          'inset-x-0 bottom-0 max-h-[85vh] rounded-t-[var(--radius-lg)] border-t',
-          open ? 'translate-y-0' : 'translate-y-full',
-          // Desktop: right sidebar (slides in from right edge)
-          'sm:inset-y-0 sm:right-0 sm:left-auto sm:max-h-full sm:rounded-none sm:border-t-0 sm:border-l',
-          widthClasses[width],
-          open ? 'sm:translate-x-0 sm:translate-y-0' : 'sm:translate-x-full sm:translate-y-0',
-          className
-        )}
-      >
-        {/* Mobile drag handle */}
-        <div className="flex justify-center py-2 sm:hidden">
-          <div className="w-10 h-1 rounded-full bg-bg-3" />
-        </div>
-
-        {/* Header */}
-        {(title || description) && (
-          <header className="flex items-start justify-between gap-4 px-4 py-3 border-b border-bd-1 sm:p-4">
-            <div className="min-w-0 flex-1">
-              {title && (
-                <h2 className="text-sm font-semibold text-fg-0 truncate">{title}</h2>
-              )}
-              {description && (
-                <p className="text-xs text-fg-2 mt-0.5 truncate">{description}</p>
-              )}
-            </div>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-[var(--radius-sm)] text-fg-2 hover:text-fg-0 hover:bg-bg-3 transition-colors shrink-0"
-              aria-label="Close drawer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </header>
-        )}
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto overscroll-contain p-4">
-          {children}
-        </div>
-      </aside>
-    </>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      description={description}
+      width={width}
+      contentClassName={cn('bg-bg-1', className)}
+    >
+      {children}
+    </Modal>
   )
 }
 

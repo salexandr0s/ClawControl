@@ -17,6 +17,8 @@ import type {
   MirrorMode,
   GatewayFrame,
   GatewayEvent,
+  GraphNode,
+  GraphEdge,
   GraphSnapshot,
   GraphDelta,
   GraphUpdate,
@@ -74,6 +76,18 @@ export class GatewayMirrorService extends EventEmitter {
   private evictionInterval: NodeJS.Timeout | null = null
   private started = false
 
+  private deltaFlushTimeout: NodeJS.Timeout | null = null
+  private pendingDelta: {
+    addedNodes: Map<string, GraphNode>
+    updatedNodes: Map<string, GraphNode>
+    removedNodeIds: Set<string>
+    addedEdges: Map<string, GraphEdge>
+    removedEdgeIds: Set<string>
+    lastEventId: string
+  } | null = null
+
+  private readonly deltaFlushIntervalMs = 50
+
   constructor(config: MirrorConfig) {
     super()
     this.setMaxListeners(100) // Allow many SSE subscribers
@@ -116,7 +130,7 @@ export class GatewayMirrorService extends EventEmitter {
     this.evictionInterval = setInterval(() => {
       const removed = this.store.evictExpiredNodes()
       if (removed.length > 0) {
-        this.emitDelta({
+        this.queueDelta({
           addedNodes: [],
           updatedNodes: [],
           removedNodeIds: removed,
@@ -136,6 +150,12 @@ export class GatewayMirrorService extends EventEmitter {
    */
   stop(): void {
     this.started = false
+
+    if (this.deltaFlushTimeout) {
+      clearTimeout(this.deltaFlushTimeout)
+      this.deltaFlushTimeout = null
+    }
+    this.pendingDelta = null
 
     // Unsubscribe from events
     if (this.unsubscribeEvents) {
@@ -401,7 +421,7 @@ export class GatewayMirrorService extends EventEmitter {
 
     // Emit delta to subscribers
     if (addedNodes.length > 0 || updatedNodes.length > 0 || addedEdges.length > 0) {
-      this.emitDelta({
+      this.queueDelta({
         addedNodes,
         updatedNodes,
         removedNodeIds: [],
@@ -457,6 +477,88 @@ export class GatewayMirrorService extends EventEmitter {
 
   private emitDelta(delta: GraphDelta): void {
     this.emit('delta', delta)
+  }
+
+  private queueDelta(delta: GraphDelta): void {
+    if (!this.pendingDelta) {
+      this.pendingDelta = {
+        addedNodes: new Map(),
+        updatedNodes: new Map(),
+        removedNodeIds: new Set(),
+        addedEdges: new Map(),
+        removedEdgeIds: new Set(),
+        lastEventId: delta.lastEventId,
+      }
+    }
+
+    const pending = this.pendingDelta
+
+    for (const id of delta.removedNodeIds) {
+      pending.removedNodeIds.add(id)
+      pending.addedNodes.delete(id)
+      pending.updatedNodes.delete(id)
+    }
+    for (const id of delta.removedEdgeIds) {
+      pending.removedEdgeIds.add(id)
+      pending.addedEdges.delete(id)
+    }
+
+    for (const node of delta.addedNodes) {
+      pending.addedNodes.set(node.id, node)
+      pending.updatedNodes.delete(node.id)
+      pending.removedNodeIds.delete(node.id)
+    }
+
+    for (const node of delta.updatedNodes) {
+      if (pending.addedNodes.has(node.id)) {
+        pending.addedNodes.set(node.id, node)
+      } else {
+        pending.updatedNodes.set(node.id, node)
+      }
+      pending.removedNodeIds.delete(node.id)
+    }
+
+    for (const edge of delta.addedEdges) {
+      pending.addedEdges.set(edge.id, edge)
+      pending.removedEdgeIds.delete(edge.id)
+    }
+
+    pending.lastEventId = delta.lastEventId
+
+    if (!this.deltaFlushTimeout) {
+      this.deltaFlushTimeout = setTimeout(() => {
+        this.deltaFlushTimeout = null
+        this.flushQueuedDelta()
+      }, this.deltaFlushIntervalMs)
+    }
+  }
+
+  private flushQueuedDelta(): void {
+    const pending = this.pendingDelta
+    if (!pending) return
+
+    const delta: GraphDelta = {
+      addedNodes: [...pending.addedNodes.values()],
+      updatedNodes: [...pending.updatedNodes.values()],
+      removedNodeIds: [...pending.removedNodeIds.values()],
+      addedEdges: [...pending.addedEdges.values()],
+      removedEdgeIds: [...pending.removedEdgeIds.values()],
+      lastEventId: pending.lastEventId,
+    }
+
+    this.pendingDelta = null
+
+    if (
+      delta.addedNodes.length === 0 &&
+      delta.updatedNodes.length === 0 &&
+      delta.removedNodeIds.length === 0 &&
+      delta.addedEdges.length === 0 &&
+      delta.removedEdgeIds.length === 0
+    ) {
+      return
+    }
+
+    this.emitDelta(delta)
   }
 
   // ==========================================================================

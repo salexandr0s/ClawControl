@@ -6,6 +6,7 @@ import {
   PriorityPill,
 } from '@/components/ui/status-pill'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
+import { MetricCard } from '@/components/ui/metric-card'
 import { cn } from '@/lib/utils'
 import {
   Activity,
@@ -63,11 +64,18 @@ interface DashboardStats {
   completedToday: number
 }
 
+interface GatewaySummary {
+  status: 'ok' | 'degraded' | 'unavailable'
+  latencyMs: number
+  error?: string
+}
+
 interface NowDashboardProps {
   workOrders: WorkOrder[]
   approvals: PendingApproval[]
   activities: ActivityEvent[]
   stats: DashboardStats
+  gateway: GatewaySummary
 }
 
 // ============================================================================
@@ -165,49 +173,59 @@ export function NowDashboard({
   approvals,
   activities,
   stats,
+  gateway,
 }: NowDashboardProps) {
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<string | undefined>()
 
+  const gatewayValue =
+    gateway.status === 'ok'
+      ? 'Connected'
+      : gateway.status === 'degraded'
+        ? 'Degraded'
+        : 'Unavailable'
+
+  const gatewayTone =
+    gateway.status === 'ok'
+      ? 'success'
+      : gateway.status === 'degraded'
+        ? 'warning'
+        : 'danger'
+
   return (
     <div className="space-y-6 w-full">
+      {stats.totalAgents === 0 && (
+        <div className="flex items-start gap-3 p-4 rounded-[var(--radius-lg)] border border-bd-0 bg-bg-2">
+          <div className="w-10 h-10 rounded-[var(--radius-md)] bg-bg-3 flex items-center justify-center shrink-0">
+            <Globe className="w-5 h-5 text-status-info" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-fg-0">Connect to OpenClaw to see your agents</div>
+            <div className="text-xs text-fg-2 mt-1">
+              Gateway status: {gatewayValue}
+              {gateway.status !== 'unavailable' ? ` (${gateway.latencyMs}ms)` : ''}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stats Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        <StatCard
-          label="Gateway"
-          value="OK"
-          icon={Activity}
-          status="success"
-        />
-        <StatCard
-          label="Active WOs"
-          value={stats.activeWorkOrders}
-          icon={PlayCircle}
-          status="progress"
-        />
-        <StatCard
+        <MetricCard label="Gateway" value={gatewayValue} icon={Activity} tone={gatewayTone} />
+        <MetricCard label="Active WOs" value={stats.activeWorkOrders} icon={PlayCircle} tone="progress" />
+        <MetricCard
           label="Blocked"
           value={stats.blockedWorkOrders}
           icon={AlertTriangle}
-          status={stats.blockedWorkOrders > 0 ? 'warning' : 'success'}
+          tone={stats.blockedWorkOrders > 0 ? 'warning' : 'success'}
         />
-        <StatCard
+        <MetricCard
           label="Approvals"
           value={stats.pendingApprovals}
           icon={Clock}
-          status={stats.pendingApprovals > 0 ? 'info' : 'success'}
+          tone={stats.pendingApprovals > 0 ? 'info' : 'success'}
         />
-        <StatCard
-          label="Agents"
-          value={`${stats.activeAgents}/${stats.totalAgents}`}
-          icon={Bot}
-          status="success"
-        />
-        <StatCard
-          label="Completed"
-          value={stats.completedToday}
-          icon={CheckCircle}
-          status="muted"
-        />
+        <MetricCard label="Agents" value={`${stats.activeAgents}/${stats.totalAgents}`} icon={Bot} tone="success" />
+        <MetricCard label="Completed" value={stats.completedToday} icon={CheckCircle} tone="muted" />
       </div>
 
       {/* Main Grid */}
@@ -267,37 +285,6 @@ export function NowDashboard({
 // ============================================================================
 // SUB-COMPONENTS
 // ============================================================================
-
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  status,
-}: {
-  label: string
-  value: string | number
-  icon: React.ComponentType<{ className?: string }>
-  status: 'success' | 'warning' | 'danger' | 'info' | 'progress' | 'muted'
-}) {
-  const statusColors = {
-    success: 'text-status-success',
-    warning: 'text-status-warning',
-    danger: 'text-status-danger',
-    info: 'text-status-info',
-    progress: 'text-status-progress',
-    muted: 'text-fg-2',
-  }
-
-  return (
-    <div className="bg-bg-2 rounded-[var(--radius-md)] border border-bd-0 p-3 flex flex-col items-center justify-center text-center h-[72px]">
-      <Icon className={cn('w-[18px] h-[18px] mb-1.5', statusColors[status])} />
-      <div className={cn('font-mono text-sm font-semibold leading-none', statusColors[status])}>
-        {value}
-      </div>
-      <div className="text-[11px] text-fg-2 mt-1 uppercase tracking-wide">{label}</div>
-    </div>
-  )
-}
 
 function Card({
   title,

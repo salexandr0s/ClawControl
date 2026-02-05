@@ -13,6 +13,7 @@ import {
 import { cn } from '@/lib/utils'
 import {
   Cpu,
+  Plus,
   RefreshCw,
   Loader2,
   CheckCircle,
@@ -27,6 +28,7 @@ import {
   HardDrive,
   Eye,
 } from 'lucide-react'
+import { AddModelModal } from './components/add-model-modal'
 
 type ModelsState = {
   isLoading: boolean
@@ -45,6 +47,8 @@ export function ModelsClient() {
     error: null,
   })
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set())
+  const [addModalOpen, setAddModalOpen] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const fetchData = useCallback(async (isRefresh = false) => {
     setState((prev) => ({
@@ -116,20 +120,41 @@ export function ModelsClient() {
         title="Models"
         subtitle="View and manage AI model configuration"
         actions={
-          <button
-            onClick={() => fetchData(true)}
-            disabled={isRefreshing}
-            className={cn(
-              'flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium transition-colors',
-              'bg-bg-3 text-fg-0 hover:bg-bg-2',
-              'disabled:opacity-50 disabled:cursor-not-allowed'
-            )}
-          >
-            <RefreshCw className={cn('w-4 h-4', isRefreshing && 'animate-spin')} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setAddModalOpen(true)}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium transition-colors',
+                'bg-status-info text-bg-0 hover:bg-status-info/90'
+              )}
+            >
+              <Plus className="w-4 h-4" />
+              Add Model
+            </button>
+
+            <button
+              onClick={() => fetchData(true)}
+              disabled={isRefreshing}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium transition-colors',
+                'bg-bg-3 text-fg-0 hover:bg-bg-2',
+                'disabled:opacity-50 disabled:cursor-not-allowed'
+              )}
+            >
+              <RefreshCw className={cn('w-4 h-4', isRefreshing && 'animate-spin')} />
+              Refresh
+            </button>
+          </div>
         }
       />
+
+      {/* Notice Banner */}
+      {notice && (
+        <div className="p-3 rounded-md flex items-center gap-2 bg-status-success/10">
+          <CheckCircle className="w-4 h-4 text-status-success shrink-0" />
+          <span className="text-sm text-status-success">{notice}</span>
+        </div>
+      )}
 
       {/* Error Banner */}
       {error && (
@@ -260,6 +285,16 @@ export function ModelsClient() {
           )}
         </>
       )}
+
+      <AddModelModal
+        open={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onAdded={async () => {
+          setNotice('Provider added')
+          setTimeout(() => setNotice(null), 2500)
+          await fetchData(true)
+        }}
+      />
     </div>
   )
 }

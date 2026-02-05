@@ -4,7 +4,7 @@
  * Provides data access for work orders.
  */
 
-import { prisma } from '../db'
+import { prisma, RESERVED_WORK_ORDER_IDS } from '../db'
 import { indexWorkOrder } from '../db/fts'
 import type {
   WorkOrderDTO,
@@ -105,6 +105,7 @@ export function createDbWorkOrdersRepo(): WorkOrdersRepo {
 
     async countByState(): Promise<Record<string, number>> {
       const groups = await prisma.workOrder.groupBy({
+        where: buildWhere(),
         by: ['state'],
         _count: { id: true },
       })
@@ -119,6 +120,7 @@ export function createDbWorkOrdersRepo(): WorkOrdersRepo {
 
       return prisma.workOrder.count({
         where: {
+          id: { notIn: RESERVED_WORK_ORDER_IDS },
           state: 'shipped',
           shippedAt: { gte: today },
         },
@@ -146,13 +148,24 @@ export function createDbWorkOrdersRepo(): WorkOrdersRepo {
     },
 
     async create(input: CreateWorkOrderInput): Promise<WorkOrderDTO> {
-      // Generate next code
-      const lastWo = await prisma.workOrder.findFirst({
-        orderBy: { code: 'desc' },
+      // Generate next code (ignore reserved/system work orders and any non-numeric codes)
+      const existingCodes = await prisma.workOrder.findMany({
+        where: {
+          id: { notIn: RESERVED_WORK_ORDER_IDS },
+          code: { startsWith: 'WO-' },
+        },
         select: { code: true },
       })
-      const lastNum = lastWo ? parseInt(lastWo.code.replace('WO-', ''), 10) : 0
-      const code = `WO-${String(lastNum + 1).padStart(3, '0')}`
+
+      let maxNum = 0
+      for (const c of existingCodes) {
+        const match = /^WO-(\d+)$/.exec(c.code)
+        if (!match) continue
+        const n = parseInt(match[1], 10)
+        if (Number.isFinite(n) && n > maxNum) maxNum = n
+      }
+
+      const code = `WO-${String(maxNum + 1).padStart(3, '0')}`
 
       const row = await prisma.workOrder.create({
         data: {
@@ -251,8 +264,13 @@ export function createDbWorkOrdersRepo(): WorkOrdersRepo {
 // ============================================================================
 
 function buildWhere(filters?: WorkOrderFilters) {
-  if (!filters) return {}
   const where: Record<string, unknown> = {}
+
+  // Reserved/system work orders exist to satisfy FK constraints and internal
+  // receipts. They should not appear in user-facing lists or stats.
+  where.id = { notIn: RESERVED_WORK_ORDER_IDS }
+
+  if (!filters) return where
   if (filters.state) {
     where.state = Array.isArray(filters.state) ? { in: filters.state } : filters.state
   }

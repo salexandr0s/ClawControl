@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getRepos, useMockData } from '@/lib/repo'
+import { getRepos } from '@/lib/repo'
 import { prisma } from '@/lib/db'
 import { runCommand } from '@clawcontrol/adapters-openclaw'
 
@@ -112,27 +112,25 @@ export async function POST() {
   }
 
   // Prune: delete DB agents missing from OpenClaw (OpenClaw-sourced only)
-  if (!useMockData()) {
-    const operations = await repos.operations.list({})
-    const assignedAgentIds = new Set<string>()
-    for (const op of operations) {
-      for (const agentId of op.assigneeAgentIds) assignedAgentIds.add(agentId)
-    }
+  const operations = await repos.operations.list({})
+  const assignedAgentIds = new Set<string>()
+  for (const op of operations) {
+    for (const agentId of op.assigneeAgentIds) assignedAgentIds.add(agentId)
+  }
 
-    const dbOpenclawAgents = await prisma.agent.findMany({
-      where: { sessionKey: { startsWith: 'agent:' } },
-      select: { id: true, sessionKey: true },
-    })
+  const dbOpenclawAgents = await prisma.agent.findMany({
+    where: { sessionKey: { startsWith: 'agent:' } },
+    select: { id: true, sessionKey: true },
+  })
 
-    for (const dbAgent of dbOpenclawAgents) {
-      if (openclawSessionKeys.has(dbAgent.sessionKey)) continue
-      if (assignedAgentIds.has(dbAgent.id)) {
-        pruneSkippedInUse++
-        continue
-      }
-      await prisma.agent.delete({ where: { id: dbAgent.id } })
-      pruned++
+  for (const dbAgent of dbOpenclawAgents) {
+    if (openclawSessionKeys.has(dbAgent.sessionKey)) continue
+    if (assignedAgentIds.has(dbAgent.id)) {
+      pruneSkippedInUse++
+      continue
     }
+    await prisma.agent.delete({ where: { id: dbAgent.id } })
+    pruned++
   }
 
   const data = await repos.agents.list({})

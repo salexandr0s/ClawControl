@@ -365,6 +365,33 @@ export async function runCommandJson<T = unknown>(
  * Allowed dynamic commands that take runtime parameters.
  * Security: Only whitelisted command patterns are allowed.
  */
+type DynamicCommandSpec = {
+  baseArgs: readonly string[]
+  requiredParams: readonly string[]
+  optionalParams?: readonly string[]
+  danger: boolean
+  description: string
+  /**
+   * Optional per-parameter validators. If omitted, a conservative default is used.
+   * Note: validation is about preventing obviously-invalid args and log pollution, not shell injection;
+   * we always spawn without a shell.
+   */
+  paramValidators?: Record<string, (value: string) => boolean>
+  /** Whether this command accepts sensitive input via stdin (e.g. tokens). */
+  acceptsStdin?: boolean
+}
+
+const defaultParamValidator = (value: string) => /^[a-zA-Z0-9_-]+$/.test(value)
+
+const noNewlines = (maxLen: number) => (value: string) =>
+  value.length > 0 && value.length <= maxLen && !/[\u0000\r\n]/.test(value)
+
+const cronNameValidator = (value: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(value)
+
+const profileIdValidator = (value: string) => /^[a-zA-Z0-9_:-]{1,128}$/.test(value)
+
+const expiresInValidator = (value: string) => /^[0-9]{1,6}[smhdwy]$/.test(value)
+
 export const ALLOWED_DYNAMIC_COMMANDS = {
   'cron.runs': {
     baseArgs: ['cron', 'runs', '--json'],
@@ -396,6 +423,12 @@ export const ALLOWED_DYNAMIC_COMMANDS = {
     optionalParams: ['enabled'] as const,
     danger: true,
     description: 'Create a new cron job (requires --name, --schedule, --command)',
+    paramValidators: {
+      name: cronNameValidator,
+      schedule: noNewlines(256),
+      command: noNewlines(2000),
+      enabled: (v) => v === 'true' || v === 'false',
+    },
   },
   'cron.delete': {
     baseArgs: ['cron', 'delete', '--json'],
@@ -421,9 +454,52 @@ export const ALLOWED_DYNAMIC_COMMANDS = {
     danger: true,
     description: 'Disable a plugin (requires --id)',
   },
-} as const
+  'models.auth.paste-token': {
+    baseArgs: ['models', 'auth', 'paste-token'],
+    requiredParams: ['provider', 'profile-id'] as const,
+    optionalParams: ['expires-in'] as const,
+    danger: true,
+    description: 'Paste a model auth token into auth-profiles.json (requires --provider, --profile-id)',
+    acceptsStdin: true,
+    paramValidators: {
+      provider: defaultParamValidator,
+      'profile-id': profileIdValidator,
+      'expires-in': expiresInValidator,
+    },
+  },
+} as const satisfies Record<string, DynamicCommandSpec>
 
 export type AllowedDynamicCommandId = keyof typeof ALLOWED_DYNAMIC_COMMANDS
+
+function hasOnlyAllowedKeys(
+  spec: DynamicCommandSpec,
+  params: Record<string, string>
+): { ok: true } | { ok: false; error: string } {
+  const allowed = new Set<string>([
+    ...spec.requiredParams,
+    ...(spec.optionalParams ?? []),
+  ])
+
+  for (const key of Object.keys(params)) {
+    if (!allowed.has(key)) {
+      return { ok: false, error: `Unknown parameter: ${key}` }
+    }
+  }
+
+  return { ok: true }
+}
+
+function validateParam(
+  spec: DynamicCommandSpec,
+  key: string,
+  value: string
+): { ok: true } | { ok: false; error: string } {
+  const validator = spec.paramValidators?.[key] ?? defaultParamValidator
+  if (!validator(value)) {
+    return { ok: false, error: `Invalid parameter value for ${key}` }
+  }
+  return { ok: true }
+}
 
 /**
  * Execute a dynamic command with runtime parameters.
@@ -434,7 +510,7 @@ export async function runDynamicCommandJson<T = unknown>(
   params: Record<string, string>,
   options: Omit<StreamingCommandOptions, 'onChunk'> = {}
 ): Promise<{ data?: T; error?: string; exitCode: number }> {
-  const spec = ALLOWED_DYNAMIC_COMMANDS[commandId]
+  const spec = ALLOWED_DYNAMIC_COMMANDS[commandId] as DynamicCommandSpec
   if (!spec) {
     return { error: `Unknown dynamic command: ${commandId}`, exitCode: 1 }
   }
@@ -446,13 +522,24 @@ export async function runDynamicCommandJson<T = unknown>(
     }
   }
 
-  // Build args with parameters
+  const allowedKeys = hasOnlyAllowedKeys(spec, params)
+  if (!allowedKeys.ok) {
+    return { error: allowedKeys.error, exitCode: 1 }
+  }
+
+  // Build args with parameters (stable order: required then optional)
   const args: string[] = [...spec.baseArgs]
-  for (const [key, value] of Object.entries(params)) {
-    // Security: Validate param values (alphanumeric + dash/underscore only)
-    if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
-      return { error: `Invalid parameter value for ${key}: ${value}`, exitCode: 1 }
-    }
+  for (const key of spec.requiredParams) {
+    const value = params[key]
+    const valid = validateParam(spec, key, value)
+    if (!valid.ok) return { error: valid.error, exitCode: 1 }
+    args.push(`--${key}`, value)
+  }
+  for (const key of spec.optionalParams ?? []) {
+    const value = params[key]
+    if (value === undefined) continue
+    const valid = validateParam(spec, key, value)
+    if (!valid.ok) return { error: valid.error, exitCode: 1 }
     args.push(`--${key}`, value)
   }
 
@@ -512,6 +599,166 @@ export async function runDynamicCommandJson<T = unknown>(
     return {
       error: err instanceof Error ? err.message : 'Unknown error',
       exitCode: 1,
+    }
+  }
+}
+
+/**
+ * Execute a dynamic command and return raw stdout/stderr without JSON parsing.
+ * Useful for commands that are non-JSON or accept sensitive stdin.
+ */
+export async function runDynamicCommand(
+  commandId: AllowedDynamicCommandId,
+  params: Record<string, string>,
+  options: Omit<StreamingCommandOptions, 'onChunk'> & { stdin?: string } = {}
+): Promise<CommandExecutionResult> {
+  const spec = ALLOWED_DYNAMIC_COMMANDS[commandId] as DynamicCommandSpec
+
+  if (!spec) {
+    return {
+      exitCode: 1,
+      durationMs: 0,
+      stdout: '',
+      stderr: `Unknown dynamic command: ${commandId}\n`,
+      timedOut: false,
+      error: `Unknown dynamic command: ${commandId}`,
+    }
+  }
+
+  // Validate required params
+  for (const param of spec.requiredParams) {
+    if (!params[param]) {
+      return {
+        exitCode: 1,
+        durationMs: 0,
+        stdout: '',
+        stderr: `Missing required parameter: ${param}\n`,
+        timedOut: false,
+        error: `Missing required parameter: ${param}`,
+      }
+    }
+  }
+
+  const allowedKeys = hasOnlyAllowedKeys(spec, params)
+  if (!allowedKeys.ok) {
+    return {
+      exitCode: 1,
+      durationMs: 0,
+      stdout: '',
+      stderr: `${allowedKeys.error}\n`,
+      timedOut: false,
+      error: allowedKeys.error,
+    }
+  }
+
+  if (options.stdin !== undefined && !spec.acceptsStdin) {
+    return {
+      exitCode: 1,
+      durationMs: 0,
+      stdout: '',
+      stderr: 'stdin not allowed for this command\n',
+      timedOut: false,
+      error: 'stdin not allowed for this command',
+    }
+  }
+
+  // Build args with parameters (stable order: required then optional)
+  const args: string[] = [...spec.baseArgs]
+  for (const key of spec.requiredParams) {
+    const value = params[key]
+    const valid = validateParam(spec, key, value)
+    if (!valid.ok) {
+      return {
+        exitCode: 1,
+        durationMs: 0,
+        stdout: '',
+        stderr: `${valid.error}\n`,
+        timedOut: false,
+        error: valid.error,
+      }
+    }
+    args.push(`--${key}`, value)
+  }
+  for (const key of spec.optionalParams ?? []) {
+    const value = params[key]
+    if (value === undefined) continue
+    const valid = validateParam(spec, key, value)
+    if (!valid.ok) {
+      return {
+        exitCode: 1,
+        durationMs: 0,
+        stdout: '',
+        stderr: `${valid.error}\n`,
+        timedOut: false,
+        error: valid.error,
+      }
+    }
+    args.push(`--${key}`, value)
+  }
+
+  // Check CLI availability
+  const cliCheck = await checkOpenClaw()
+  if (!cliCheck.available) {
+    return {
+      exitCode: 127,
+      durationMs: 0,
+      stdout: '',
+      stderr: `OpenClaw CLI not available: ${cliCheck.error}\n`,
+      timedOut: false,
+      error: 'OpenClaw CLI not available',
+    }
+  }
+
+  const timeout = options.timeout ?? 60000
+  const start = Date.now()
+
+  try {
+    const child = spawn(OPENCLAW_BIN, args, {
+      cwd: options.cwd,
+      env: { ...process.env, ...options.env },
+      timeout,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+
+    if (options.stdin !== undefined && child.stdin) {
+      child.stdin.write(options.stdin)
+      if (!options.stdin.endsWith('\n')) child.stdin.write('\n')
+      child.stdin.end()
+    } else if (child.stdin) {
+      child.stdin.end()
+    }
+
+    let stdout = ''
+    let stderr = ''
+
+    if (child.stdout) {
+      for await (const chunk of child.stdout) stdout += chunk.toString()
+    }
+    if (child.stderr) {
+      for await (const chunk of child.stderr) stderr += chunk.toString()
+    }
+
+    const exitCode = await new Promise<number>((resolve) => {
+      child.on('close', (code) => resolve(code ?? 1))
+      child.on('error', () => resolve(1))
+    })
+
+    return {
+      exitCode,
+      durationMs: Date.now() - start,
+      stdout,
+      stderr,
+      timedOut: false,
+      error: exitCode === 0 ? undefined : (stderr || `Command failed with exit code ${exitCode}`),
+    }
+  } catch (err) {
+    return {
+      exitCode: 1,
+      durationMs: Date.now() - start,
+      stdout: '',
+      stderr: err instanceof Error ? `${err.message}\n` : 'Unknown error\n',
+      timedOut: false,
+      error: err instanceof Error ? err.message : 'Unknown error',
     }
   }
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { memo, useMemo } from 'react'
 import { Bot, Terminal, User } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { cn } from '@/lib/utils'
@@ -40,7 +40,7 @@ function TypingIndicator() {
   )
 }
 
-export function Message({
+export const Message = memo(function Message({
   role,
   content,
   timestamp,
@@ -132,5 +132,4 @@ export function Message({
       </div>
     </motion.div>
   )
-}
-
+})

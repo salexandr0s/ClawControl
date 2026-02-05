@@ -17,7 +17,6 @@
     "typecheck": "turbo typecheck --concurrency=1",
     "db:migrate": "npm run db:migrate --workspace=clawcontrol",
     "db:push": "npm run db:push --workspace=clawcontrol",
-    "db:seed": "npm run db:seed --workspace=clawcontrol",
     "db:studio": "npm run db:studio --workspace=clawcontrol",
     "clean": "turbo clean && rm -rf node_modules"
   },

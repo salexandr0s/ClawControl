@@ -5,6 +5,7 @@ import {
   getPendingApprovals,
   getRecentActivities,
   getDashboardStats,
+  getGatewayStatus,
 } from '@/lib/data'
 import { NowDashboard } from './now-dashboard'
 
@@ -12,7 +13,7 @@ import { NowDashboard } from './now-dashboard'
 let walEnabled = false
 
 export default async function NowPage() {
-  // Enable WAL mode on first request (no-op in mock mode)
+  // Enable WAL mode on first request
   if (!walEnabled) {
     await enableWalMode()
     walEnabled = true
@@ -24,11 +25,13 @@ export default async function NowPage() {
     approvals,
     activities,
     stats,
+    gateway,
   ] = await Promise.all([
     getWorkOrdersWithOps(),
     getPendingApprovals(),
     getRecentActivities(8),
     getDashboardStats(),
+    getGatewayStatus(),
   ])
 
   // Transform work orders for display
@@ -68,6 +71,11 @@ export default async function NowPage() {
         approvals={transformedApprovals}
         activities={transformedActivities}
         stats={stats}
+        gateway={{
+          status: gateway.status,
+          latencyMs: gateway.latencyMs,
+          error: gateway.error ?? undefined,
+        }}
       />
     </Suspense>
   )

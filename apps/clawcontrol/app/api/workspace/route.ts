@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { useMockData } from '@/lib/repo'
-import { mockWorkspaceFiles } from '@clawcontrol/core'
-import { listWorkspace, createWorkspaceFile, createWorkspaceFolder, encodeWorkspaceId } from '@/lib/fs/workspace-fs'
+import { listWorkspace, createWorkspaceFile, createWorkspaceFolder } from '@/lib/fs/workspace-fs'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import type { ActionKind } from '@clawcontrol/core'
 
@@ -17,21 +15,6 @@ export async function GET(request: NextRequest) {
   const path = searchParams.get('path') || '/'
 
   try {
-    if (useMockData()) {
-      const data = mockWorkspaceFiles
-        .filter((f) => f.path === path)
-        .map((f) => ({
-          id: f.id,
-          name: f.name,
-          type: f.type,
-          path: f.path,
-          size: f.size,
-          modifiedAt: f.modifiedAt,
-        }))
-
-      return NextResponse.json({ data })
-    }
-
     const data = await listWorkspace(path)
     return NextResponse.json({ data })
   } catch (err) {
@@ -86,22 +69,6 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    if (useMockData()) {
-      // Mock implementation
-      const id = encodeWorkspaceId(path === '/' ? `/${name}` : `${path}/${name}`)
-      const newEntry = {
-        id,
-        name,
-        type,
-        path,
-        size: type === 'file' ? (content?.length ?? 0) : undefined,
-        modifiedAt: new Date(),
-        content: type === 'file' ? (content ?? '') : undefined,
-      }
-      mockWorkspaceFiles.push(newEntry as typeof mockWorkspaceFiles[0])
-      return NextResponse.json({ data: newEntry })
-    }
-
     if (type === 'folder') {
       const entry = await createWorkspaceFolder(path, name)
       return NextResponse.json({ data: entry })

@@ -26,6 +26,7 @@ import {
   RefreshCw,
   X,
   ExternalLink,
+  Upload,
 } from 'lucide-react'
 
 interface Props {
@@ -56,6 +57,8 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
     agentId?: string
   }>({ scope: 'global' })
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
 
   const protectedAction = useProtectedAction()
 
@@ -76,6 +79,17 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
     } catch (err) {
       console.error('Failed to refresh skills:', err)
     }
+  }, [])
+
+  const handleUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadFile(file)
+    setShowUploadModal(true)
+
+    // Allow selecting the same file again later.
+    e.target.value = ''
   }, [])
 
   // Handle skill click - open in drawer
@@ -402,6 +416,16 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
                 <ExternalLink className="w-3.5 h-3.5" />
                 Find Skills
               </a>
+              <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-bg-2 text-fg-1 hover:bg-bg-3 border border-bd-0 rounded-[var(--radius-md)] cursor-pointer">
+                <Upload className="w-3.5 h-3.5" />
+                Upload Skill
+                <input
+                  type="file"
+                  accept=".zip"
+                  className="hidden"
+                  onChange={handleUpload}
+                />
+              </label>
               <button
                 onClick={() => setShowCreateModal(true)}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-status-info text-bg-0 hover:bg-status-info/90 rounded-[var(--radius-md)]"
@@ -677,7 +701,230 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
         agents={agents}
         protectedAction={protectedAction}
       />
+
+      {/* Upload Skill Modal */}
+      <UploadSkillModal
+        isOpen={showUploadModal}
+        file={uploadFile}
+        onClose={() => {
+          setShowUploadModal(false)
+          setUploadFile(null)
+        }}
+        onImported={refreshSkills}
+        agents={agents}
+        protectedAction={protectedAction}
+      />
     </>
+  )
+}
+
+// ============================================================================
+// UPLOAD SKILL MODAL
+// ============================================================================
+
+interface UploadSkillModalProps {
+  isOpen: boolean
+  file: File | null
+  onClose: () => void
+  onImported: () => void
+  agents: AgentDTO[]
+  protectedAction: ReturnType<typeof useProtectedAction>
+}
+
+function UploadSkillModal({
+  isOpen,
+  file,
+  onClose,
+  onImported,
+  agents,
+  protectedAction,
+}: UploadSkillModalProps) {
+  const [scope, setScope] = useState<'global' | 'agent'>('global')
+  const [agentId, setAgentId] = useState<string>('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (isOpen) {
+      setScope('global')
+      setAgentId('')
+      setError(null)
+      setIsSubmitting(false)
+    }
+  }, [isOpen])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen && !isSubmitting) {
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, isSubmitting, onClose])
+
+  const handleInstall = () => {
+    if (!file) return
+    if (scope === 'agent' && !agentId) {
+      setError('Please select an agent')
+      return
+    }
+
+    protectedAction.trigger({
+      actionKind: 'skill.install',
+      actionTitle: 'Import Skill',
+      actionDescription: `Import a skill from "${file.name}" to ${scope} scope.`,
+      onConfirm: async (typedConfirmText) => {
+        setIsSubmitting(true)
+        setError(null)
+
+        try {
+          await skillsApi.importZip({
+            file,
+            scope,
+            agentId: scope === 'agent' ? agentId : undefined,
+            typedConfirmText,
+          })
+
+          onImported()
+          onClose()
+        } catch (err) {
+          if (err instanceof HttpError) {
+            setError(err.message)
+          } else {
+            setError(err instanceof Error ? err.message : 'Failed to import skill')
+          }
+        } finally {
+          setIsSubmitting(false)
+        }
+      },
+      onError: (err) => setError(err.message),
+    })
+  }
+
+  if (!isOpen || !file) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={!isSubmitting ? onClose : undefined}
+      />
+
+      {/* Modal */}
+      <div className="relative bg-bg-1 border border-bd-1 rounded-[var(--radius-lg)] shadow-2xl w-full max-w-lg mx-4">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-bd-0">
+          <h2 className="text-base font-medium text-fg-0">Upload Skill</h2>
+          <button
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="p-1.5 text-fg-2 hover:text-fg-0 hover:bg-bg-3 rounded-[var(--radius-md)] transition-colors disabled:opacity-50"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* File */}
+          <div>
+            <div className="text-xs font-medium text-fg-1 mb-1.5">File</div>
+            <div className="px-3 py-2 text-sm bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 font-mono">
+              {file.name}
+            </div>
+          </div>
+
+          {/* Scope */}
+          <div>
+            <label className="block text-xs font-medium text-fg-1 mb-1.5">
+              Scope
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setScope('global')}
+                disabled={isSubmitting}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-[var(--radius-md)] border transition-colors',
+                  scope === 'global'
+                    ? 'bg-status-info/10 text-status-info border-status-info/30'
+                    : 'bg-bg-2 text-fg-1 border-bd-1 hover:border-bd-1'
+                )}
+              >
+                <Globe className="w-4 h-4" />
+                Global
+              </button>
+              <button
+                type="button"
+                onClick={() => setScope('agent')}
+                disabled={isSubmitting}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-[var(--radius-md)] border transition-colors',
+                  scope === 'agent'
+                    ? 'bg-status-info/10 text-status-info border-status-info/30'
+                    : 'bg-bg-2 text-fg-1 border-bd-1 hover:border-bd-1'
+                )}
+              >
+                <User className="w-4 h-4" />
+                Agent
+              </button>
+            </div>
+          </div>
+
+          {/* Agent Selector (only for agent scope) */}
+          {scope === 'agent' && (
+            <div>
+              <label htmlFor="upload-skill-agent" className="block text-xs font-medium text-fg-1 mb-1.5">
+                Agent
+              </label>
+              <select
+                id="upload-skill-agent"
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
+                disabled={isSubmitting}
+                className="w-full px-3 py-2 text-sm bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+              >
+                <option value="">Select an agent...</option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="text-xs text-status-danger bg-status-danger/10 border border-status-danger/20 rounded-[var(--radius-md)] px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSubmitting}
+              className="px-4 py-2 text-xs font-medium text-fg-1 hover:text-fg-0 bg-bg-3 rounded-[var(--radius-md)] border border-bd-0 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleInstall}
+              disabled={isSubmitting || (scope === 'agent' && !agentId)}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-bg-0 bg-status-info hover:bg-status-info/90 rounded-[var(--radius-md)] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {isSubmitting ? 'Installing...' : 'Install'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 

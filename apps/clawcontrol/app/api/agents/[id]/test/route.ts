@@ -7,7 +7,6 @@ import { checkOpenClawAvailable } from '@clawcontrol/adapters-openclaw'
  * Send a test message to an agent
  *
  * This verifies the agent can receive and respond to messages.
- * In demo mode (no OpenClaw CLI), this simulates a test response.
  */
 export async function POST(
   request: NextRequest,
@@ -46,11 +45,11 @@ export async function POST(
     },
   })
 
+  const startTime = Date.now()
+
   try {
     // Check if OpenClaw is available
     const cliCheck = await checkOpenClawAvailable()
-
-    const startTime = Date.now()
 
     await repos.receipts.append(receipt.id, {
       stream: 'stdout',
@@ -66,122 +65,49 @@ export async function POST(
     })
 
     if (!cliCheck.available) {
-      // Demo mode - simulate test response
       await repos.receipts.append(receipt.id, {
-        stream: 'stdout',
-        chunk: `\n[DEMO MODE] Simulating agent response...\n`,
+        stream: 'stderr',
+        chunk: 'OpenClaw CLI not available. Agent test requires OpenClaw.\n',
       })
-
-      // Simulate processing time
-      await new Promise((r) => setTimeout(r, 500))
-
-      const simulatedResponse = `[${agent.name}] Received and acknowledged: "${message}"`
-      await repos.receipts.append(receipt.id, {
-        stream: 'stdout',
-        chunk: `\nAgent response: ${simulatedResponse}\n`,
-      })
-
-      const durationMs = Date.now() - startTime
 
       await repos.receipts.finalize(receipt.id, {
-        exitCode: 0,
-        durationMs,
-        parsedJson: {
-          mode: 'demo',
-          agentId: id,
-          agentName: agent.name,
-          message,
-          response: simulatedResponse,
-          latencyMs: durationMs,
-        },
+        exitCode: 1,
+        durationMs: Date.now() - startTime,
+        parsedJson: { error: 'OPENCLAW_UNAVAILABLE', agentId: id, agentName: agent.name },
       })
 
-      await repos.activities.create({
-        type: 'agent.tested',
-        actor: 'user',
-        entityType: 'agent',
-        entityId: id,
-        summary: `Tested agent: ${agent.name} (demo mode)`,
-        payloadJson: {
-          mode: 'demo',
-          agentName: agent.name,
-          message,
-          latencyMs: durationMs,
-          receiptId: receipt.id,
-        },
-      })
-
-      return NextResponse.json({
-        data: {
-          mode: 'demo',
-          success: true,
-          response: simulatedResponse,
-          latencyMs: durationMs,
-        },
-        receiptId: receipt.id,
-      })
+      return NextResponse.json(
+        { error: 'OPENCLAW_UNAVAILABLE', receiptId: receipt.id },
+        { status: 503 }
+      )
     }
 
-    // Real test via OpenClaw CLI
-    // Note: In a real implementation, we'd call `openclaw agent send --session <key> --message <msg>`
-    // For now, we simulate the test since the agent CLI commands may not exist yet
-
     await repos.receipts.append(receipt.id, {
       stream: 'stdout',
-      chunk: `\nConnecting via OpenClaw CLI v${cliCheck.version}...\n`,
+      chunk: `\nOpenClaw CLI v${cliCheck.version} detected.\n`,
     })
 
-    // Simulate connection and response
-    await new Promise((r) => setTimeout(r, 300))
-
-    const liveResponse = `[${agent.name}] ACK: "${message}" (via OpenClaw gateway)`
     await repos.receipts.append(receipt.id, {
-      stream: 'stdout',
-      chunk: `\nAgent response: ${liveResponse}\n`,
+      stream: 'stderr',
+      chunk: 'Agent test messaging is not implemented in ClawControl. Use OpenClaw to send a message to the agent.\n',
     })
-
-    const durationMs = Date.now() - startTime
 
     await repos.receipts.finalize(receipt.id, {
-      exitCode: 0,
-      durationMs,
+      exitCode: 1,
+      durationMs: Date.now() - startTime,
       parsedJson: {
-        mode: 'live',
+        error: 'NOT_IMPLEMENTED',
         agentId: id,
         agentName: agent.name,
         message,
-        response: liveResponse,
-        latencyMs: durationMs,
         cliVersion: cliCheck.version,
       },
     })
 
-    // Update agent last seen
-    await repos.agents.update(id, { status: agent.status })
-
-    await repos.activities.create({
-      type: 'agent.tested',
-      actor: 'user',
-      entityType: 'agent',
-      entityId: id,
-      summary: `Tested agent: ${agent.name}`,
-      payloadJson: {
-        agentName: agent.name,
-        message,
-        latencyMs: durationMs,
-        receiptId: receipt.id,
-      },
-    })
-
-    return NextResponse.json({
-      data: {
-        mode: 'live',
-        success: true,
-        response: liveResponse,
-        latencyMs: durationMs,
-      },
-      receiptId: receipt.id,
-    })
+    return NextResponse.json(
+      { error: 'NOT_IMPLEMENTED', receiptId: receipt.id },
+      { status: 501 }
+    )
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Test failed'
 
@@ -192,7 +118,7 @@ export async function POST(
 
     await repos.receipts.finalize(receipt.id, {
       exitCode: 1,
-      durationMs: Date.now(),
+      durationMs: Date.now() - startTime,
       parsedJson: { error: errorMessage },
     })
 

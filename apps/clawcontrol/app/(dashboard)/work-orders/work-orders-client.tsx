@@ -624,8 +624,8 @@ export function WorkOrdersClient() {
             emptyState={
               <EmptyState
                 icon={<ClipboardList className="w-8 h-8" />}
-                title={activeFilterCount > 0 ? "No matching work orders" : "No work orders"}
-                description={activeFilterCount > 0 ? "Try adjusting your filters" : "Create your first work order to get started"}
+                title={activeFilterCount > 0 ? "No matching work orders" : "No work orders yet"}
+                description={activeFilterCount > 0 ? "Try adjusting your filters" : "Create one to get started."}
               />
             }
           />

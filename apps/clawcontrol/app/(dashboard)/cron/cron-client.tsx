@@ -1,18 +1,163 @@
 'use client'
 
-import { useState, useTransition, useRef, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { PageHeader, PageSection, EmptyState } from '@clawcontrol/ui'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { StatusPill } from '@/components/ui/status-pill'
 import { RightDrawer } from '@/components/shell/right-drawer'
+import { AvailabilityBadge } from '@/components/availability-badge'
 import type { CronJobDTO } from '@/lib/data'
 import { cn } from '@/lib/utils'
-import { Clock, Plus, Play, Pause, Loader2, Trash2, X } from 'lucide-react'
+import { Clock, Plus, Play, Pause, Loader2, Trash2, X, RefreshCw } from 'lucide-react'
 import type { StatusTone } from '@clawcontrol/ui/theme'
 
-interface Props {
-  cronJobs: CronJobDTO[]
+type AvailabilityStatus = 'ok' | 'degraded' | 'unavailable'
+
+type OpenClawResponse<T> = {
+  status: AvailabilityStatus
+  latencyMs: number
+  data: T | null
+  error: string | null
+  timestamp: string
+  cached: boolean
+  staleAgeMs?: number
+}
+
+/**
+ * Actual CLI job structure (differs from the UI's CronJobDTO).
+ * The OpenClaw CLI currently returns a nested `state` object.
+ */
+interface CliCronJob {
+  id: string
+  name: string
+  schedule: {
+    kind: 'at' | 'every' | 'cron'
+    atMs?: number
+    everyMs?: number
+    expr?: string
+    tz?: string
+  }
+  description?: string
+  enabled?: boolean
+  state?: {
+    lastRunAtMs?: number
+    nextRunAtMs?: number
+    lastStatus?: string
+    lastDurationMs?: number
+    runCount?: number
+  }
+  // Legacy flat fields (for backwards compat)
+  lastRunAt?: string
+  nextRunAt?: string
+  lastStatus?: 'success' | 'failed' | 'running'
+  runCount?: number
+}
+
+function parseCronExpr(expr: string, tz?: string): string {
+  const parts = expr.split(' ')
+  if (parts.length !== 5) return expr
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts
+  const tzSuffix = tz ? ` (${tz.split('/').pop()})` : ''
+
+  // Every N minutes: */N * * * *
+  if (
+    minute.startsWith('*/') &&
+    hour === '*' &&
+    dayOfMonth === '*' &&
+    month === '*' &&
+    dayOfWeek === '*'
+  ) {
+    const interval = parseInt(minute.slice(2), 10)
+    return `Every ${interval} min`
+  }
+
+  // Specific minutes each hour: M,M * * * * or M * * * *
+  if (hour === '*' && dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+    if (minute.includes(',')) {
+      const mins = minute.split(',')
+      return `${mins.length}× per hour${tzSuffix}`
+    }
+    if (minute !== '*') {
+      return `Hourly at :${minute.padStart(2, '0')}${tzSuffix}`
+    }
+  }
+
+  // Daily at specific time: M H * * *
+  if (
+    dayOfMonth === '*' &&
+    month === '*' &&
+    dayOfWeek === '*' &&
+    hour !== '*' &&
+    minute !== '*'
+  ) {
+    const h = parseInt(hour, 10)
+    const m = parseInt(minute, 10)
+    const period = h >= 12 ? 'PM' : 'AM'
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
+    return `Daily ${h12}:${String(m).padStart(2, '0')} ${period}${tzSuffix}`
+  }
+
+  // Weekly: M H * * D
+  if (dayOfMonth === '*' && month === '*' && dayOfWeek !== '*') {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const day = days[parseInt(dayOfWeek, 10)] ?? dayOfWeek
+    return `Weekly on ${day}${tzSuffix}`
+  }
+
+  return expr
+}
+
+function formatSchedule(schedule: CliCronJob['schedule']): string {
+  switch (schedule.kind) {
+    case 'cron':
+      return parseCronExpr(schedule.expr ?? '* * * * *', schedule.tz)
+    case 'every': {
+      if (!schedule.everyMs) return 'Interval unknown'
+      const ms = schedule.everyMs
+      if (ms < 60000) return `Every ${ms / 1000}s`
+      if (ms < 3600000) return `Every ${ms / 60000} min`
+      if (ms < 86400000) return `Every ${ms / 3600000}h`
+      return `Every ${ms / 86400000}d`
+    }
+    case 'at':
+      return schedule.atMs ? new Date(schedule.atMs).toLocaleString() : 'One-time (TBD)'
+    default:
+      return 'Unknown'
+  }
+}
+
+function mapToUiDto(job: CliCronJob): CronJobDTO {
+  const state = job.state
+  const lastRunAtMs = state?.lastRunAtMs
+  const nextRunAtMs = state?.nextRunAtMs
+  const lastStatus = state?.lastStatus ?? job.lastStatus
+  const runCount = state?.runCount ?? job.runCount ?? 0
+
+  const mappedStatus =
+    lastStatus === 'ok' ? 'success' : (lastStatus as CronJobDTO['lastStatus'])
+
+  return {
+    id: job.id,
+    name: job.name,
+    schedule: formatSchedule(job.schedule),
+    description: job.description ?? '',
+    enabled: job.enabled ?? true,
+    lastRunAt: lastRunAtMs
+      ? new Date(lastRunAtMs)
+      : job.lastRunAt
+        ? new Date(job.lastRunAt)
+        : null,
+    nextRunAt: nextRunAtMs
+      ? new Date(nextRunAtMs)
+      : job.nextRunAt
+        ? new Date(job.nextRunAt)
+        : null,
+    lastStatus: mappedStatus ?? null,
+    runCount,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
 }
 
 const cronColumns: Column<CronJobDTO>[] = [
@@ -66,40 +211,122 @@ const cronColumns: Column<CronJobDTO>[] = [
   },
 ]
 
-export function CronClient({ cronJobs }: Props) {
-  const router = useRouter()
+export function CronClient() {
+  const [availability, setAvailability] = useState<OpenClawResponse<unknown> | null>(null)
+  const [cronJobs, setCronJobs] = useState<CronJobDTO[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const selectedJob = selectedId ? cronJobs.find((c) => c.id === selectedId) : undefined
 
   const enabledCount = cronJobs.filter((c) => c.enabled).length
 
-  const handleJobCreated = () => {
-    router.refresh()
+  const refreshJobs = useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/openclaw/cron/jobs', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      })
+
+      const data = (await response.json()) as OpenClawResponse<unknown>
+      setAvailability(data)
+
+      if (data.status === 'unavailable') {
+        setCronJobs([])
+        setError(data.error ?? 'Unable to load cron jobs')
+        return
+      }
+
+      const raw = data.data as unknown
+      const jobsArray: CliCronJob[] = Array.isArray(raw)
+        ? (raw as CliCronJob[])
+        : (raw as { jobs?: CliCronJob[] } | null)?.jobs ?? []
+
+      setCronJobs(jobsArray.map(mapToUiDto))
+    } catch (err) {
+      setAvailability(null)
+      setCronJobs([])
+      setError(err instanceof Error ? err.message : 'Unable to load cron jobs')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshJobs()
+  }, [refreshJobs])
+
+  const handleJobCreated = async () => {
+    await refreshJobs()
     setCreateModalOpen(false)
   }
 
-  const handleJobDeleted = () => {
-    router.refresh()
+  const handleJobDeleted = async () => {
+    await refreshJobs()
     setSelectedId(undefined)
   }
 
   return (
     <>
       <div className="w-full space-y-4">
+        {availability && (
+          <div>
+            <AvailabilityBadge
+              status={availability.status}
+              latencyMs={availability.latencyMs}
+              cached={availability.cached}
+              staleAgeMs={availability.staleAgeMs}
+              label="Cron"
+              size="sm"
+            />
+          </div>
+        )}
+
         <PageHeader
           title="Cron Jobs"
           subtitle={`${enabledCount} enabled / ${cronJobs.length} total`}
           actions={
-            <button
-              onClick={() => setCreateModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-info text-bg-0 hover:bg-status-info/90"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Job
-            </button>
+            <>
+              <button
+                onClick={refreshJobs}
+                disabled={isLoading}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] border transition-colors',
+                  'bg-bg-3 text-fg-1 border-bd-0 hover:text-fg-0 hover:bg-bg-2',
+                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                )}
+              >
+                <RefreshCw className={cn('w-3.5 h-3.5', isLoading && 'animate-spin')} />
+                Refresh
+              </button>
+
+              <button
+                onClick={() => setCreateModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-info text-bg-0 hover:bg-status-info/90"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Job
+              </button>
+            </>
           }
         />
+
+        {error && (
+          <div className="p-3 bg-status-danger/10 border border-status-danger/20 rounded-[var(--radius-md)] text-status-danger text-sm">
+            {error}
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="flex items-center gap-2 text-fg-3 text-sm">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Loading crons...</span>
+          </div>
+        )}
 
         <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-bd-0 overflow-hidden">
           <CanonicalTable
@@ -112,8 +339,8 @@ export function CronClient({ cronJobs }: Props) {
             emptyState={
               <EmptyState
                 icon={<Clock className="w-8 h-8" />}
-                title="No cron jobs"
-                description="Schedule recurring tasks to automate your workflow"
+                title="No scheduled jobs"
+                description="Sync with OpenClaw to import jobs."
               />
             }
           />
@@ -131,6 +358,7 @@ export function CronClient({ cronJobs }: Props) {
           <CronDetail
             job={selectedJob}
             onClose={() => setSelectedId(undefined)}
+            onUpdated={refreshJobs}
             onDeleted={handleJobDeleted}
           />
         )}
@@ -149,14 +377,14 @@ export function CronClient({ cronJobs }: Props) {
 function CronDetail({
   job,
   onClose,
+  onUpdated,
   onDeleted,
 }: {
   job: CronJobDTO
   onClose: () => void
+  onUpdated: () => void | Promise<void>
   onDeleted?: () => void
 }) {
-  const router = useRouter()
-  const [isPending, startTransition] = useTransition()
   const [actionInProgress, setActionInProgress] = useState<'run' | 'toggle' | 'delete' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -172,10 +400,7 @@ function CronDetail({
       if (data.status === 'unavailable') {
         setError(data.error ?? 'Failed to run job')
       } else {
-        // Refresh the page to show updated state
-        startTransition(() => {
-          router.refresh()
-        })
+        await onUpdated()
         onClose()
       }
     } catch (err) {
@@ -198,10 +423,7 @@ function CronDetail({
       if (data.status === 'unavailable') {
         setError(data.error ?? `Failed to ${endpoint} job`)
       } else {
-        // Refresh the page to show updated state
-        startTransition(() => {
-          router.refresh()
-        })
+        await onUpdated()
         onClose()
       }
     } catch (err) {
@@ -228,6 +450,7 @@ function CronDetail({
         setError(data.error ?? 'Failed to delete job')
         setConfirmDelete(false)
       } else {
+        await onUpdated()
         onDeleted?.()
       }
     } catch (err) {
@@ -238,7 +461,7 @@ function CronDetail({
     }
   }
 
-  const isLoading = actionInProgress !== null || isPending
+  const isLoading = actionInProgress !== null
 
   return (
     <div className="space-y-6">
@@ -386,7 +609,7 @@ function formatRelativeTime(date: Date | string): string {
 interface CreateCronJobModalProps {
   isOpen: boolean
   onClose: () => void
-  onCreated: () => void
+  onCreated: () => void | Promise<void>
 }
 
 function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalProps) {
@@ -443,7 +666,7 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
       if (data.status === 'unavailable') {
         setError(data.error || 'Failed to create cron job')
       } else {
-        onCreated()
+        await onCreated()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create cron job')

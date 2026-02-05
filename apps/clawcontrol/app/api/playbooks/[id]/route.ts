@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { mockPlaybooks } from '@clawcontrol/core'
-import { useMockData } from '@/lib/repo'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import { getPlaybook, updatePlaybook } from '@/lib/fs/playbooks-fs'
 import type { ActionKind } from '@clawcontrol/core'
@@ -17,14 +15,6 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-
-  if (useMockData()) {
-    const playbook = mockPlaybooks.find((p) => p.id === id)
-    if (!playbook) {
-      return NextResponse.json({ error: 'Playbook not found' }, { status: 404 })
-    }
-    return NextResponse.json({ data: playbook })
-  }
 
   try {
     const playbook = await getPlaybook(id)
@@ -69,24 +59,6 @@ export async function PUT(
       },
       { status: result.errorType === 'TYPED_CONFIRM_REQUIRED' ? 428 : 403 }
     )
-  }
-
-  if (useMockData()) {
-    const playbookIndex = mockPlaybooks.findIndex((p) => p.id === id)
-    if (playbookIndex === -1) {
-      return NextResponse.json({ error: 'Playbook not found' }, { status: 404 })
-    }
-
-    // Update the playbook content (in-memory mock)
-    mockPlaybooks[playbookIndex] = {
-      ...mockPlaybooks[playbookIndex],
-      content,
-      modifiedAt: new Date(),
-    }
-
-    return NextResponse.json({
-      data: mockPlaybooks[playbookIndex],
-    })
   }
 
   try {

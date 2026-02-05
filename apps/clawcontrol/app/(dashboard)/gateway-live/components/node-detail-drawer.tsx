@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { X, Bot, MessageSquare, Wrench, Settings, Radio, Shield, Loader2, Eye, Code } from 'lucide-react'
 import { TypedConfirmModal } from '@clawcontrol/ui'
 import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
+import { ModalFrame } from '@/components/ui/modal'
 import type { GraphNode, GraphNodeKind } from '@/lib/openclaw/live-graph'
 
 interface NodeDetailDrawerProps {
@@ -63,16 +64,18 @@ export function NodeDetailDrawer({ node, onClose }: NodeDetailDrawerProps) {
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-96 bg-bg-2 border-l border-bd-0 shadow-xl z-50 flex flex-col">
+    <ModalFrame open={true} onClose={onClose} width="default" contentClassName="max-w-xl bg-bg-2">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-bd-0">
-        <div className="flex items-center gap-2">
-          <Icon className={cn('w-4 h-4', config.color)} />
-          <span className="text-sm font-medium text-fg-0">{config.label}</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <Icon className={cn('w-5 h-5 shrink-0', config.color)} />
+          <span className="text-sm font-medium text-fg-0 truncate">{config.label}</span>
+          <span className="text-xs text-fg-3 font-mono truncate">· {node.id}</span>
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 rounded-[var(--radius-sm)] hover:bg-bg-3 text-fg-2 transition-colors"
+          className="p-1.5 rounded-[var(--radius-sm)] hover:bg-bg-3 text-fg-2 transition-colors shrink-0"
+          aria-label="Close"
         >
           <X className="w-4 h-4" />
         </button>
@@ -218,7 +221,7 @@ export function NodeDetailDrawer({ node, onClose }: NodeDetailDrawerProps) {
         entityName={protectedAction.state.entityName}
         isLoading={protectedAction.state.isLoading}
       />
-    </div>
+    </ModalFrame>
   )
 }
 

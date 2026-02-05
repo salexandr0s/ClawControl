@@ -558,8 +558,8 @@ export function AgentsClient() {
                   <div className="col-span-full">
                     <EmptyState
                       icon={<Bot className="w-8 h-8" />}
-                      title="No agents registered"
-                      description="Create an agent to get started"
+                      title="No agents discovered"
+                      description="Check OpenClaw connection."
                     />
                   </div>
                 ) : (
@@ -587,8 +587,8 @@ export function AgentsClient() {
                   emptyState={
                     <EmptyState
                       icon={<Bot className="w-8 h-8" />}
-                      title="No agents registered"
-                      description="Create an agent to get started"
+                      title="No agents discovered"
+                      description="Check OpenClaw connection."
                     />
                   }
                 />

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
-import { getRepos, useMockData } from '@/lib/repo'
+import { getRepos } from '@/lib/repo'
 import { generateIdenticonSvg } from '@/lib/avatar'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import { getWorkspaceRoot, validateWorkspacePath } from '@/lib/fs/path-policy'
@@ -36,7 +36,7 @@ export async function GET(
   }
 
   // If custom avatar exists, serve it
-  if (agent.avatarPath && !useMockData()) {
+  if (agent.avatarPath) {
     try {
       const avatarAbs = join(getWorkspaceRoot(), agent.avatarPath)
       const data = await fsp.readFile(avatarAbs)
@@ -133,16 +133,6 @@ export async function POST(
     )
   }
 
-  if (useMockData()) {
-    // In mock mode, just return success without writing
-    return NextResponse.json({
-      data: {
-        avatarPath: `${AVATARS_DIR}/${agent.id}.png`,
-        message: 'Avatar uploaded (mock mode)',
-      },
-    })
-  }
-
   try {
     // Ensure avatars directory exists
     const avatarsRoot = getAvatarsRoot()
@@ -209,12 +199,6 @@ export async function DELETE(
       },
       { status: result.errorType === 'TYPED_CONFIRM_REQUIRED' ? 428 : 403 }
     )
-  }
-
-  if (useMockData()) {
-    return NextResponse.json({
-      data: { message: 'Avatar reset (mock mode)' },
-    })
   }
 
   try {

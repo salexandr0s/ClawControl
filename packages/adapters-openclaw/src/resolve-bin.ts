@@ -4,7 +4,8 @@
  * Verifies that the `openclaw` CLI is available on PATH.
  * This project requires OpenClaw only (no legacy binary support).
  *
- * If openclaw is not found, clawcontrol runs in demo mode.
+ * If openclaw is not found, OpenClaw-backed features are unavailable and
+ * clawcontrol should render empty states (no mock/demo fixtures).
  */
 
 import { spawn } from 'child_process'

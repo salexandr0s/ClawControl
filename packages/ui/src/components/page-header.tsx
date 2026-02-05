@@ -135,7 +135,7 @@ export function ActionButton({
 }: ActionButtonProps) {
   const variantClasses = {
     primary: 'bg-status-info text-bg-0 hover:bg-status-info/90',
-    secondary: 'bg-bg-3 text-fg-0 hover:bg-bg-3/80 border border-white/[0.06]',
+    secondary: 'bg-bg-3 text-fg-0 hover:bg-bg-3/80 border border-bd-0',
     ghost: 'text-fg-1 hover:text-fg-0 hover:bg-bg-3',
   }
 
@@ -177,7 +177,7 @@ export function DisabledAction({
       title={`Available in ${phase}`}
       className={[
         'px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)]',
-        'bg-bg-3/50 text-fg-3 cursor-not-allowed border border-white/[0.06]/50',
+        'bg-bg-3/50 text-fg-3 cursor-not-allowed border border-bd-0 opacity-70',
         className,
       ]
         .filter(Boolean)

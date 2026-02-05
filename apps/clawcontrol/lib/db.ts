@@ -111,6 +111,8 @@ const RESERVED_WORK_ORDERS: ReservedWorkOrderSeed[] = [
   },
 ]
 
+export const RESERVED_WORK_ORDER_IDS = RESERVED_WORK_ORDERS.map((wo) => wo.id)
+
 /**
  * Ensure reserved/system work orders exist.
  *

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { mockPlaybooks } from '@clawcontrol/core'
-import { useMockData, getRepos } from '@/lib/repo'
+import { getRepos } from '@/lib/repo'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import { getPlaybook } from '@/lib/fs/playbooks-fs'
 import type { ActionKind } from '@clawcontrol/core'
@@ -22,20 +21,11 @@ export async function POST(
 ) {
   const { id } = await params
 
-  // Get playbook from mock or real filesystem
   let playbook: { id: string; name: string; content: string; severity?: string } | null = null
-
-  if (useMockData()) {
-    const found = mockPlaybooks.find((p) => p.id === id)
-    if (found) {
-      playbook = found
-    }
-  } else {
-    try {
-      playbook = await getPlaybook(id)
-    } catch {
-      return NextResponse.json({ error: 'Failed to read playbook' }, { status: 500 })
-    }
+  try {
+    playbook = await getPlaybook(id)
+  } catch {
+    return NextResponse.json({ error: 'Failed to read playbook' }, { status: 500 })
   }
 
   if (!playbook) {
@@ -66,109 +56,29 @@ export async function POST(
     )
   }
 
-  // Parse the playbook YAML to extract steps (simplified parsing)
-  const steps = parsePlaybookSteps(playbook.content)
-
-  // Create a receipt for this execution
+  // Create a receipt for auditing (even though execution is not yet implemented)
   const repos = getRepos()
   const receipt = await repos.receipts.create({
     workOrderId: workOrderId || 'system',
     operationId: null,
     kind: 'playbook_step',
     commandName: `playbook:${playbook.name}`,
-    commandArgs: { playbookId: id, steps: steps.length },
+    commandArgs: { playbookId: id },
   })
 
-  // Simulate execution of steps
-  const stepResults = steps.map((step, index) => ({
-    index,
-    name: step.name,
-    status: 'success' as const,
-    message: `Step "${step.name}" completed successfully`,
-    durationMs: Math.floor(Math.random() * 500) + 100,
-  }))
+  await repos.receipts.append(receipt.id, {
+    stream: 'stderr',
+    chunk: 'Playbook execution is not implemented in ClawControl. Use the OpenClaw CLI or gateway to run playbooks.\n',
+  })
 
-  // Finalize the receipt
-  const totalDurationMs = stepResults.reduce((sum, s) => sum + s.durationMs, 0)
   await repos.receipts.finalize(receipt.id, {
-    exitCode: 0,
-    durationMs: totalDurationMs,
-    parsedJson: {
-      playbook: playbook.name,
-      steps: stepResults,
-      success: true,
-    },
+    exitCode: 1,
+    durationMs: 0,
+    parsedJson: { error: 'NOT_IMPLEMENTED', playbookId: id, playbookName: playbook.name },
   })
 
   return NextResponse.json({
-    data: {
-      playbookId: id,
-      playbookName: playbook.name,
-      status: 'completed',
-      steps: stepResults,
-      totalDurationMs,
-    },
+    error: 'NOT_IMPLEMENTED',
     receiptId: receipt.id,
-  })
-}
-
-/**
- * Simple YAML step parser for playbooks.
- * Extracts step names from YAML-like structure.
- */
-function parsePlaybookSteps(content: string): Array<{ name: string; command?: string }> {
-  const steps: Array<{ name: string; command?: string }> = []
-  const lines = content.split('\n')
-
-  let inSteps = false
-  let currentStep: { name: string; command?: string } | null = null
-
-  for (const line of lines) {
-    const trimmed = line.trim()
-
-    if (trimmed === 'steps:') {
-      inSteps = true
-      continue
-    }
-
-    if (inSteps) {
-      // Check for new step (- name:)
-      const nameMatch = trimmed.match(/^-\s*name:\s*(.+)$/)
-      if (nameMatch) {
-        if (currentStep) {
-          steps.push(currentStep)
-        }
-        currentStep = { name: nameMatch[1].replace(/['"]/g, '') }
-        continue
-      }
-
-      // Check for command in current step
-      const cmdMatch = trimmed.match(/^(run|command):\s*(.+)$/)
-      if (cmdMatch && currentStep) {
-        currentStep.command = cmdMatch[2].replace(/['"]/g, '')
-        continue
-      }
-
-      // Check for end of steps section (new top-level key)
-      if (/^\w+:/.test(trimmed) && !trimmed.startsWith('-')) {
-        if (currentStep) {
-          steps.push(currentStep)
-          currentStep = null
-        }
-        inSteps = false
-      }
-    }
-  }
-
-  // Push final step if exists
-  if (currentStep) {
-    steps.push(currentStep)
-  }
-
-  // If no steps found, create a default one
-  if (steps.length === 0) {
-    steps.push({ name: 'Execute playbook' })
-  }
-
-  return steps
+  }, { status: 501 })
 }

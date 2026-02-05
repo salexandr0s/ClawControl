@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { enforceTypedConfirm } from '@/lib/with-governor'
-import { getRepos, useMockData } from '@/lib/repo'
+import { getRepos } from '@/lib/repo'
 import {
   getTemplateById,
   getTemplateFiles,
@@ -8,7 +8,6 @@ import {
   scanTemplates,
 } from '@/lib/templates'
 import { deleteWorkspaceEntry, encodeWorkspaceId } from '@/lib/fs/workspace-fs'
-import { mockWorkspaceFiles, mockFileContents } from '@clawcontrol/core'
 
 /**
  * GET /api/agent-templates/:id
@@ -97,35 +96,9 @@ export async function DELETE(
     const templatePath = template.path
     let filesRemoved = 0
 
-    if (useMockData()) {
-      // Remove all files in template folder
-      const filesToRemove = mockWorkspaceFiles.filter(
-        (f) => f.path === templatePath && f.type === 'file'
-      )
-      filesRemoved = filesToRemove.length
-
-      for (const file of filesToRemove) {
-        // Remove file content
-        delete mockFileContents[file.id]
-        // Remove file from array
-        const fileIndex = mockWorkspaceFiles.findIndex((f) => f.id === file.id)
-        if (fileIndex >= 0) {
-          mockWorkspaceFiles.splice(fileIndex, 1)
-        }
-      }
-
-      // Remove folder
-      const folderIndex = mockWorkspaceFiles.findIndex(
-        (f) => f.path === '/agent-templates' && f.name === id && f.type === 'folder'
-      )
-      if (folderIndex >= 0) {
-        mockWorkspaceFiles.splice(folderIndex, 1)
-      }
-    } else {
-      const files = await getTemplateFiles(id)
-      filesRemoved = files.length
-      await deleteWorkspaceEntry(encodeWorkspaceId(templatePath))
-    }
+    const files = await getTemplateFiles(id)
+    filesRemoved = files.length
+    await deleteWorkspaceEntry(encodeWorkspaceId(templatePath))
 
     // Rescan templates
     await scanTemplates()

@@ -1,6 +1,4 @@
 import { NextResponse } from 'next/server'
-import { useMockData } from '@/lib/repo'
-import { mockPlaybooks } from '@clawcontrol/core'
 import { listPlaybooks } from '@/lib/fs/playbooks-fs'
 
 /**
@@ -8,18 +6,6 @@ import { listPlaybooks } from '@/lib/fs/playbooks-fs'
  * List all playbooks
  */
 export async function GET() {
-  if (useMockData()) {
-    return NextResponse.json({
-      data: mockPlaybooks.map(({ id, name, description, severity, modifiedAt }) => ({
-        id,
-        name,
-        description,
-        severity,
-        modifiedAt,
-      })),
-    })
-  }
-
   try {
     const playbooks = await listPlaybooks()
     return NextResponse.json({ data: playbooks })

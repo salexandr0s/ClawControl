@@ -2,3 +2,7 @@ export { StatusPill, WorkOrderStatePill, OperationStatusPill, PriorityPill, Gate
 export { Kbd, KbdCombo } from './kbd'
 export { CanonicalTable, StackedRows, ResponsiveTable } from './canonical-table'
 export type { Column } from './canonical-table'
+export { Modal, ModalFrame } from './modal'
+export type { ModalWidth } from './modal'
+export { MetricCard } from './metric-card'
+export type { MetricTone } from './metric-card'

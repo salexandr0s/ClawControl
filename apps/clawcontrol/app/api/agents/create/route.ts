@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
       chunk: `Creating workspace files for ${name}...\n`,
     })
 
-    const filesResult = createAgentFiles({
+    const filesResult = await createAgentFiles({
       name,
       role,
       purpose,
@@ -128,6 +128,10 @@ export async function POST(request: NextRequest) {
     await repos.receipts.append(receipt.id, {
       stream: 'stdout',
       chunk: `  Created soul file: ${filesResult.files.soul}\n`,
+    })
+    await repos.receipts.append(receipt.id, {
+      stream: 'stdout',
+      chunk: `  Created heartbeat file: ${filesResult.files.heartbeat}\n`,
     })
     await repos.receipts.append(receipt.id, {
       stream: 'stdout',

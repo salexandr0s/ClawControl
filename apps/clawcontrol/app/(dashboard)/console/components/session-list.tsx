@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useDeferredValue } from 'react'
 import { Bot, Clock, AlertCircle, CheckCircle, Pause, RefreshCw, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { StationIcon } from '@/components/station-icon'
@@ -67,11 +67,12 @@ export function SessionList({
 }: SessionListProps) {
   const [filter, setFilter] = useState<FilterState>('all')
   const [query, setQuery] = useState('')
+  const deferredQuery = useDeferredValue(query)
 
   // Filter sessions
   const filteredSessions = useMemo(() => {
     const base = filter === 'all' ? sessions : sessions.filter(s => s.state === filter)
-    const q = query.trim().toLowerCase()
+    const q = deferredQuery.trim().toLowerCase()
     if (!q) return base
 
     return base.filter((s) => {
@@ -87,15 +88,22 @@ export function SessionList({
         model.includes(q)
       )
     })
-  }, [sessions, filter, query, agentsBySessionKey])
+  }, [sessions, filter, deferredQuery, agentsBySessionKey])
 
   // Count by state
-  const counts = useMemo(() => ({
-    all: sessions.length,
-    active: sessions.filter(s => s.state === 'active').length,
-    idle: sessions.filter(s => s.state === 'idle').length,
-    error: sessions.filter(s => s.state === 'error').length,
-  }), [sessions])
+  const counts = useMemo(() => {
+    let active = 0
+    let idle = 0
+    let error = 0
+
+    for (const s of sessions) {
+      if (s.state === 'active') active++
+      else if (s.state === 'idle') idle++
+      else if (s.state === 'error') error++
+    }
+
+    return { all: sessions.length, active, idle, error }
+  }, [sessions])
 
   return (
     <div className="w-60 border-r border-bd-0 flex flex-col bg-bg-1">

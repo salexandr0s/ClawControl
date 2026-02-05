@@ -141,9 +141,9 @@ export function TypedConfirmModal({
       />
 
       {/* Modal */}
-      <div className="relative w-full max-w-md mx-4 bg-bg-1 border border-white/[0.06] rounded-[var(--radius-lg)] shadow-xl">
+      <div className="relative w-full max-w-md mx-4 bg-bg-1 border border-bd-0 rounded-[var(--radius-lg)] shadow-xl">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-white/[0.08]">
+        <div className="flex items-center justify-between p-4 border-b border-bd-0">
           <div className="flex items-center gap-3">
             <div className={`p-2 rounded-[var(--radius-md)] ${config.bgClass}`}>
               <RiskIcon className={`w-5 h-5 ${config.iconClass}`} />
@@ -197,7 +197,7 @@ export function TypedConfirmModal({
                 className={`w-full px-3 py-2 text-sm font-mono bg-bg-2 border rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-3 focus:outline-none focus:ring-1 ${
                   error
                     ? 'border-status-error focus:ring-status-error'
-                    : 'border-white/[0.06] focus:ring-status-progress'
+                    : 'border-bd-1 focus:ring-status-progress'
                 }`}
               />
               {error && (
@@ -207,7 +207,7 @@ export function TypedConfirmModal({
           )}
 
           {/* Receipt notice */}
-          <div className="flex items-center gap-2 px-3 py-2 bg-bg-2 rounded-[var(--radius-md)] border border-white/[0.06]">
+          <div className="flex items-center gap-2 px-3 py-2 bg-bg-2 rounded-[var(--radius-md)] border border-bd-0">
             <span className="text-xs text-fg-2">
               This action will be logged in the activity stream
             </span>
@@ -215,7 +215,7 @@ export function TypedConfirmModal({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 p-4 border-t border-white/[0.06]">
+        <div className="flex justify-end gap-2 p-4 border-t border-bd-0">
           <button
             onClick={onClose}
             disabled={isLoading}

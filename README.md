@@ -77,14 +77,12 @@ npm run build --workspace=clawcontrol
 
 ---
 
-## Demo Mode vs Operational Mode
+## OpenClaw Connection
 
-| Mode | When | Behavior |
-|------|------|----------|
-| **Demo** | OpenClaw not on PATH | Mock data, simulated execution, full UI |
-| **Operational** | OpenClaw detected | Real commands, real workspace, real governance |
+ClawControl is designed to show **only real data**.
 
-Demo mode is automatic — no configuration needed to explore.
+- If OpenClaw is available on PATH, ClawControl can query gateway status, cron jobs, plugins, sessions, and other OpenClaw-backed features.
+- If OpenClaw is not available, ClawControl renders empty states and OpenClaw-backed features report **Unavailable** until OpenClaw is installed and configured.
 
 ---
 
@@ -94,11 +92,11 @@ Demo mode is automatic — no configuration needed to explore.
 |-------------|---------|
 | Node.js | 20+ |
 | npm | 10+ |
-| OpenClaw | 0.1.0+ (optional for demo) |
+| OpenClaw | 0.1.0+ (recommended for full functionality) |
 
 ```bash
 node -v          # v20.x+
-openclaw --version  # 0.1.0+ (for operational mode)
+openclaw --version  # 0.1.0+ (recommended)
 ```
 
 ---
@@ -168,7 +166,7 @@ clawcontrol/
 │   │   └── data/               # SQLite (gitignored)
 │   └── clawcontrol-desktop/    # Electron desktop wrapper
 ├── packages/
-│   ├── core/                   # Types, Governor, mocks
+│   ├── core/                   # Types, Governor
 │   ├── ui/                     # Shared components
 │   └── adapters-openclaw/      # CLI adapter
 ├── docs/                       # Documentation

@@ -16,10 +16,8 @@ import {
   type AgentTemplateConfig,
   type TemplateValidationResult,
 } from '@clawcontrol/core'
-import { mockWorkspaceFiles, mockFileContents } from '@clawcontrol/core'
 import { validateWorkspacePath } from './fs/path-policy'
 import { decodeWorkspaceId, encodeWorkspaceId } from './fs/workspace-fs'
-import { useMockData } from './repo'
 
 // ============================================================================
 // VALIDATOR
@@ -143,254 +141,16 @@ export function getTemplateDir(templateId: string): string {
 }
 
 // ============================================================================
-// MOCK TEMPLATE DATA
-// ============================================================================
-
-// Initialize mock templates if they don't exist
-function ensureMockTemplatesExist() {
-  // Check if agent-templates folder exists
-  const templatesFolder = mockWorkspaceFiles.find(
-    (f) => f.path === '/' && f.name === 'agent-templates' && f.type === 'folder'
-  )
-
-  if (!templatesFolder) {
-    // Create agent-templates folder
-    mockWorkspaceFiles.push({
-      id: 'ws_templates',
-      name: 'agent-templates',
-      type: 'folder',
-      path: '/',
-      modifiedAt: new Date(),
-    })
-  }
-
-  // Add a sample template
-  const sampleTemplateFolder = mockWorkspaceFiles.find(
-    (f) => f.path === '/agent-templates' && f.name === 'clawcontrol-build' && f.type === 'folder'
-  )
-
-  if (!sampleTemplateFolder) {
-    mockWorkspaceFiles.push({
-      id: 'ws_tpl_build_folder',
-      name: 'clawcontrol-build',
-      type: 'folder',
-      path: '/agent-templates',
-      modifiedAt: new Date(),
-    })
-
-    // Add template.json
-    mockWorkspaceFiles.push({
-      id: 'ws_tpl_build_json',
-      name: 'template.json',
-      type: 'file',
-      path: '/agent-templates/clawcontrol-build',
-      size: 1024,
-      modifiedAt: new Date(),
-    })
-
-    mockFileContents['ws_tpl_build_json'] = JSON.stringify({
-      id: 'clawcontrol-build',
-      name: 'clawcontrol Build Agent',
-      description: 'A build agent for implementing features and fixes',
-      version: '1.0.0',
-      role: 'BUILD',
-      namingPattern: 'clawBUILD',
-      sessionKeyPattern: 'agent:clawcontrol-build:main',
-      paramsSchema: {
-        type: 'object',
-        properties: {
-          projectName: {
-            type: 'string',
-            description: 'Name of the project this agent works on',
-          },
-          repoPath: {
-            type: 'string',
-            description: 'Path to the repository',
-          },
-          primaryLanguage: {
-            type: 'string',
-            enum: ['TypeScript', 'Python', 'Ruby', 'Go', 'Rust'],
-            description: 'Primary programming language',
-          },
-        },
-        required: ['projectName'],
-      },
-      render: {
-        engine: 'mustache',
-        targets: [
-          { source: 'SOUL.md', destination: 'workspace/agents/{{agentName}}.soul.md' },
-          { source: 'overlay.md', destination: 'workspace/agents/{{agentName}}.md' },
-        ],
-      },
-      defaults: {
-        primaryLanguage: 'TypeScript',
-      },
-      recommendations: {
-        skills: [
-          { name: 'git-workflow', scope: 'global', required: true },
-          { name: 'code-review', scope: 'global', required: false },
-        ],
-        plugins: [
-          { name: 'github-integration', required: false },
-        ],
-      },
-      provisioning: {
-        enabled: true,
-        steps: ['create_files', 'register_agent', 'test_message'],
-      },
-      author: 'clawcontrol',
-      tags: ['build', 'implementation', 'coding'],
-    }, null, 2)
-
-    // Add SOUL.md
-    mockWorkspaceFiles.push({
-      id: 'ws_tpl_build_soul',
-      name: 'SOUL.md',
-      type: 'file',
-      path: '/agent-templates/clawcontrol-build',
-      size: 512,
-      modifiedAt: new Date(),
-    })
-
-    mockFileContents['ws_tpl_build_soul'] = `# {{agentName}} Soul
-
-## Identity
-You are {{agentName}}, a clawcontrol build agent working on {{projectName}}.
-
-## Purpose
-Implement features, fix bugs, and maintain code quality for {{projectName}}.
-
-## Primary Language
-{{primaryLanguage}}
-
-## Core Behaviors
-
-### Implementation Excellence
-- Write clean, maintainable code
-- Follow existing patterns in the codebase
-- Add appropriate tests for new functionality
-
-### Collaboration
-- Respect station boundaries
-- Hand off to QA after implementation
-- Ask for clarification when requirements are unclear
-
-## Constraints
-- WIP Limit: 2 concurrent operations
-- Must request approval for external API calls
-- Cannot modify AGENTS.md without approval
-`
-
-    // Add overlay.md
-    mockWorkspaceFiles.push({
-      id: 'ws_tpl_build_overlay',
-      name: 'overlay.md',
-      type: 'file',
-      path: '/agent-templates/clawcontrol-build',
-      size: 256,
-      modifiedAt: new Date(),
-    })
-
-    mockFileContents['ws_tpl_build_overlay'] = `# {{agentName}} Overlay
-
-## Agent: {{agentName}}
-Role: Build
-Project: {{projectName}}
-Repository: {{repoPath}}
-
-## Custom Instructions
-<!-- Add project-specific instructions here -->
-
-## Allowed Tools
-- read_file
-- write_file
-- execute_command (with approval for dangerous commands)
-- git operations
-
-## Notes
-Created from clawcontrol-build template v1.0.0
-`
-
-    // Add README.md
-    mockWorkspaceFiles.push({
-      id: 'ws_tpl_build_readme',
-      name: 'README.md',
-      type: 'file',
-      path: '/agent-templates/clawcontrol-build',
-      size: 400,
-      modifiedAt: new Date(),
-    })
-
-    mockFileContents['ws_tpl_build_readme'] = `# clawcontrol Build Agent Template
-
-This template creates a build agent optimized for implementing features and fixes.
-
-## Parameters
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| projectName | Yes | Name of the project |
-| repoPath | No | Path to the repository |
-| primaryLanguage | No | Primary programming language (default: TypeScript) |
-
-## Recommended Skills
-- git-workflow (global, required)
-- code-review (global, optional)
-
-## Recommended Plugins
-- github-integration (optional)
-
-## Files Generated
-- \`workspace/agents/<agentName>.soul.md\` - Agent soul
-- \`workspace/agents/<agentName>.md\` - Agent overlay
-`
-  }
-
-  // Add an invalid template for testing
-  const invalidTemplateFolder = mockWorkspaceFiles.find(
-    (f) => f.path === '/agent-templates' && f.name === 'broken-template' && f.type === 'folder'
-  )
-
-  if (!invalidTemplateFolder) {
-    mockWorkspaceFiles.push({
-      id: 'ws_tpl_broken_folder',
-      name: 'broken-template',
-      type: 'folder',
-      path: '/agent-templates',
-      modifiedAt: new Date(),
-    })
-
-    mockWorkspaceFiles.push({
-      id: 'ws_tpl_broken_json',
-      name: 'template.json',
-      type: 'file',
-      path: '/agent-templates/broken-template',
-      size: 128,
-      modifiedAt: new Date(),
-    })
-
-    // Invalid JSON - missing required fields
-    mockFileContents['ws_tpl_broken_json'] = JSON.stringify({
-      id: 'broken-template',
-      name: 'Broken Template',
-      // Missing: description, version, role
-    }, null, 2)
-  }
-}
-
-// ============================================================================
 // SCANNER
 // ============================================================================
 
 // Cache for scanned templates
 let templateCache: AgentTemplate[] | null = null
 let _lastScanTime: Date | null = null
-let _cacheMode: 'mock' | 'fs' | null = null
 
 function invalidateTemplateCache() {
   templateCache = null
   _lastScanTime = null
-  _cacheMode = null
 }
 
 async function readWorkspaceTextFile(workspacePath: string): Promise<string | null> {
@@ -417,102 +177,9 @@ async function ensureTemplatesBaseDirFs(): Promise<string> {
  * Scan workspace/agent-templates/ for all templates
  */
 export async function scanTemplates(): Promise<AgentTemplate[]> {
-  const mode: 'mock' | 'fs' = useMockData() ? 'mock' : 'fs'
-
-  let templates: AgentTemplate[] = []
-
-  if (mode === 'mock') {
-    templates = scanTemplatesMock()
-  } else {
-    templates = await scanTemplatesFs()
-  }
-
+  const templates = await scanTemplatesFs()
   templateCache = templates
   _lastScanTime = new Date()
-  _cacheMode = mode
-
-  return templates
-}
-
-function scanTemplatesMock(): AgentTemplate[] {
-  ensureMockTemplatesExist()
-
-  const templates: AgentTemplate[] = []
-
-  // Find all folders under /agent-templates
-  const templateFolders = mockWorkspaceFiles.filter(
-    (f) => f.path === '/agent-templates' && f.type === 'folder'
-  )
-
-  for (const folder of templateFolders) {
-    const templateId = folder.name
-    const templatePath = `${TEMPLATES_BASE_PATH}/${templateId}`
-
-    // Find template.json in this folder
-    const templateJsonFile = mockWorkspaceFiles.find(
-      (f) => f.path === templatePath && f.name === 'template.json' && f.type === 'file'
-    )
-
-    if (!templateJsonFile) {
-      // No template.json - skip this folder
-      continue
-    }
-
-    // Read and parse template.json
-    const content = mockFileContents[templateJsonFile.id]
-    let config: AgentTemplateConfig | undefined
-    let validationResult: TemplateValidationResult
-
-    try {
-      const parsed = JSON.parse(content)
-      validationResult = validateTemplateConfig(parsed, { expectedId: templateId })
-
-      if (validationResult.valid) {
-        config = parsed as AgentTemplateConfig
-      }
-    } catch (err) {
-      validationResult = {
-        valid: false,
-        errors: [{
-          path: '(root)',
-          message: err instanceof Error ? err.message : 'Invalid JSON',
-          code: 'PARSE_ERROR',
-        }],
-        warnings: [],
-      }
-    }
-
-    // Check for optional files
-    const hasReadme = mockWorkspaceFiles.some(
-      (f) => f.path === templatePath && f.name === 'README.md'
-    )
-    const hasSoul = mockWorkspaceFiles.some(
-      (f) => f.path === templatePath && f.name === 'SOUL.md'
-    )
-    const hasOverlay = mockWorkspaceFiles.some(
-      (f) => f.path === templatePath && f.name === 'overlay.md'
-    )
-
-    templates.push({
-      id: templateId,
-      name: config?.name || templateId,
-      description: config?.description || 'No description',
-      version: config?.version || 'unknown',
-      role: config?.role || 'CUSTOM',
-      path: templatePath,
-      isValid: validationResult.valid,
-      validationErrors: validationResult.errors.map((e) => `${e.path}: ${e.message}`),
-      validationWarnings: validationResult.warnings.map((w) => `${w.path}: ${w.message}`),
-      validatedAt: new Date(),
-      config,
-      hasReadme,
-      hasSoul,
-      hasOverlay,
-      createdAt: folder.modifiedAt,
-      updatedAt: templateJsonFile.modifiedAt,
-    })
-  }
-
   return templates
 }
 
@@ -601,8 +268,7 @@ async function scanTemplatesFs(): Promise<AgentTemplate[]> {
  * Get all templates (uses cache if available)
  */
 export async function getTemplates(forceRescan = false): Promise<AgentTemplate[]> {
-  const mode: 'mock' | 'fs' = useMockData() ? 'mock' : 'fs'
-  if (!forceRescan && templateCache && _cacheMode === mode) {
+  if (!forceRescan && templateCache) {
     return templateCache
   }
   return scanTemplates()
@@ -625,16 +291,6 @@ export async function getTemplateFiles(templateId: string): Promise<Array<{
   path: string
 }>> {
   const templatePath = getTemplateDir(templateId)
-
-  if (useMockData()) {
-    return mockWorkspaceFiles
-      .filter((f) => f.path === templatePath && f.type === 'file')
-      .map((f) => ({
-        id: f.id,
-        name: f.name,
-        path: `${templatePath}/${f.name}`,
-      }))
-  }
 
   const res = validateWorkspacePath(templatePath)
   if (!res.valid || !res.resolvedPath) return []
@@ -678,10 +334,6 @@ export async function getTemplateFiles(templateId: string): Promise<Array<{
  * Get template file content
  */
 export async function getTemplateFileContent(templateId: string, fileId: string): Promise<string | null> {
-  if (useMockData()) {
-    return mockFileContents[fileId] ?? null
-  }
-
   const templatePath = getTemplateDir(templateId)
 
   let decodedPath: string
@@ -701,15 +353,6 @@ export async function getTemplateFileContent(templateId: string, fileId: string)
  */
 export async function getTemplateReadme(templateId: string): Promise<string | null> {
   const templatePath = getTemplateDir(templateId)
-
-  if (useMockData()) {
-    const readmeFile = mockWorkspaceFiles.find(
-      (f) => f.path === templatePath && f.name === 'README.md'
-    )
-
-    if (!readmeFile) return null
-    return mockFileContents[readmeFile.id] ?? null
-  }
 
   return readWorkspaceTextFile(`${templatePath}/README.md`)
 }
@@ -764,92 +407,6 @@ export async function createTemplateScaffold(templateId: string, name: string, r
       enabled: true,
       steps: ['create_files', 'register_agent'],
     },
-  }
-
-  if (useMockData()) {
-    const now = new Date()
-
-    // Check if template already exists
-    const existing = mockWorkspaceFiles.find(
-      (f) => f.path === '/agent-templates' && f.name === templateId && f.type === 'folder'
-    )
-    if (existing) {
-      return { success: false, error: `Template "${templateId}" already exists` }
-    }
-
-    // Create folder
-    mockWorkspaceFiles.push({
-      id: `ws_tpl_${templateId}_folder`,
-      name: templateId,
-      type: 'folder',
-      path: '/agent-templates',
-      modifiedAt: now,
-    })
-
-    // Create template.json
-    const templateJsonId = `ws_tpl_${templateId}_json`
-    mockWorkspaceFiles.push({
-      id: templateJsonId,
-      name: 'template.json',
-      type: 'file',
-      path: templatePath,
-      size: 0,
-      modifiedAt: now,
-    })
-
-    mockFileContents[templateJsonId] = JSON.stringify(templateConfig, null, 2)
-
-    // Create SOUL.md
-    const soulId = `ws_tpl_${templateId}_soul`
-    mockWorkspaceFiles.push({
-      id: soulId,
-      name: 'SOUL.md',
-      type: 'file',
-      path: templatePath,
-      size: 0,
-      modifiedAt: now,
-    })
-
-    mockFileContents[soulId] = `# {{agentName}} Soul
-
-## Identity
-You are {{agentName}}, a clawcontrol ${role.toLowerCase()} agent.
-
-## Purpose
-<!-- Describe the agent's purpose -->
-
-## Core Behaviors
-<!-- Define core behaviors -->
-
-## Constraints
-- WIP Limit: 2 concurrent operations
-`
-
-    // Create overlay.md
-    const overlayId = `ws_tpl_${templateId}_overlay`
-    mockWorkspaceFiles.push({
-      id: overlayId,
-      name: 'overlay.md',
-      type: 'file',
-      path: templatePath,
-      size: 0,
-      modifiedAt: now,
-    })
-
-    mockFileContents[overlayId] = `# {{agentName}} Overlay
-
-## Agent: {{agentName}}
-Role: ${role}
-
-## Custom Instructions
-<!-- Add custom instructions -->
-
-## Notes
-Created from ${templateId} template
-`
-
-    invalidateTemplateCache()
-    return { success: true, templatePath }
   }
 
   // FS-backed: write to workspace
@@ -954,21 +511,12 @@ export async function previewTemplateRender(
     // Find source file
     let sourceContent: string | null = null
 
-    if (useMockData()) {
-      const sourceFile = mockWorkspaceFiles.find(
-        (f) => f.path === templatePath && f.name === target.source
-      )
-
-      if (!sourceFile) continue
-      sourceContent = mockFileContents[sourceFile.id] ?? null
-    } else {
-      // Source paths are template-relative; reject traversal/absolute.
-      const src = target.source
-      if (!src || src.includes('..') || src.includes('\\') || src.includes('\0') || src.startsWith('/')) {
-        continue
-      }
-      sourceContent = await readWorkspaceTextFile(`${templatePath}/${src}`)
+    // Source paths are template-relative; reject traversal/absolute.
+    const src = target.source
+    if (!src || src.includes('..') || src.includes('\\') || src.includes('\0') || src.startsWith('/')) {
+      continue
     }
+    sourceContent = await readWorkspaceTextFile(`${templatePath}/${src}`)
 
     if (!sourceContent) continue
 

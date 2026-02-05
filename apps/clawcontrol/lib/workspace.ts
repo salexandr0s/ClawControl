@@ -5,20 +5,8 @@
  * Includes path safety checks and template generation.
  */
 
-import { mockWorkspaceFiles, mockFileContents } from '@clawcontrol/core'
 import type { StationId } from '@clawcontrol/core'
-import { isValidWorkspacePath } from './fs/path-policy'
-
-// Re-export path validation for backward compatibility
-export { isValidWorkspacePath }
-
-/**
- * Generate a safe file ID from path
- */
-export function generateFileId(path: string, name: string): string {
-  const hash = Buffer.from(`${path}/${name}`).toString('base64').slice(0, 8)
-  return `ws_${hash}`
-}
+import { encodeWorkspaceId, readWorkspaceFileById, writeWorkspaceFileById, ensureWorkspaceRootExists } from './fs/workspace-fs'
 
 // ============================================================================
 // AGENT NAME GENERATION
@@ -148,6 +136,23 @@ Station: ${input.station}
 }
 
 /**
+ * Generate a HEARTBEAT.md template for an agent.
+ */
+export function generateHeartbeatContent(input: AgentTemplateInput): string {
+  return `# HEARTBEAT.md — ${input.name}
+
+## Checks
+- Blockers for current operations.
+- Failing tests or broken builds.
+- Missing approvals required to proceed.
+
+## Report vs Silence
+- Report only if something is blocked or failing.
+- Otherwise reply \`HEARTBEAT_OK\`.
+`
+}
+
+/**
  * Generate the section to add to AGENTS.md for a new agent
  */
 export function generateAgentsMdSection(input: AgentTemplateInput): string {
@@ -158,134 +163,6 @@ export function generateAgentsMdSection(input: AgentTemplateInput): string {
 - **Purpose:** ${input.purpose}
 - **Capabilities:** ${input.capabilities.join(', ')}
 `
-}
-
-// ============================================================================
-// FILE OPERATIONS (Mock Implementation)
-// ============================================================================
-
-/**
- * Result of a workspace file write
- */
-export interface WriteResult {
-  success: boolean
-  fileId?: string
-  error?: string
-}
-
-/**
- * Write a file to the workspace (mock implementation)
- * In production, this would write to the actual filesystem
- */
-export function writeWorkspaceFile(
-  path: string,
-  name: string,
-  content: string
-): WriteResult {
-  // Validate path
-  if (!isValidWorkspacePath(path)) {
-    return { success: false, error: 'Invalid workspace path' }
-  }
-
-  // Generate ID
-  const fileId = generateFileId(path, name)
-
-  // Check if file exists
-  const existing = mockWorkspaceFiles.find(
-    f => f.path === path && f.name === name
-  )
-
-  if (existing) {
-    // Update existing file
-    existing.modifiedAt = new Date()
-    existing.size = content.length
-    mockFileContents[existing.id] = content
-    return { success: true, fileId: existing.id }
-  }
-
-  // Create new file
-  const newFile = {
-    id: fileId,
-    name,
-    type: 'file' as const,
-    path,
-    size: content.length,
-    modifiedAt: new Date(),
-  }
-
-  mockWorkspaceFiles.push(newFile)
-  mockFileContents[fileId] = content
-
-  return { success: true, fileId }
-}
-
-/**
- * Create a folder in the workspace (mock implementation)
- */
-export function createWorkspaceFolder(
-  path: string,
-  name: string
-): WriteResult {
-  // Validate path
-  if (!isValidWorkspacePath(path)) {
-    return { success: false, error: 'Invalid workspace path' }
-  }
-
-  // Check if folder exists
-  const existing = mockWorkspaceFiles.find(
-    f => f.path === path && f.name === name && f.type === 'folder'
-  )
-
-  if (existing) {
-    return { success: true, fileId: existing.id }
-  }
-
-  // Generate ID
-  const fileId = generateFileId(path, name)
-
-  // Create folder
-  const newFolder = {
-    id: fileId,
-    name,
-    type: 'folder' as const,
-    path,
-    modifiedAt: new Date(),
-  }
-
-  mockWorkspaceFiles.push(newFolder)
-
-  return { success: true, fileId }
-}
-
-/**
- * Read a workspace file content
- */
-export function readWorkspaceFile(fileId: string): string | null {
-  return mockFileContents[fileId] ?? null
-}
-
-/**
- * Append content to a workspace file
- */
-export function appendToWorkspaceFile(
-  fileId: string,
-  content: string
-): WriteResult {
-  const existing = mockFileContents[fileId]
-  if (existing === undefined) {
-    return { success: false, error: 'File not found' }
-  }
-
-  mockFileContents[fileId] = existing + content
-
-  // Update modification time
-  const file = mockWorkspaceFiles.find(f => f.id === fileId)
-  if (file) {
-    file.modifiedAt = new Date()
-    file.size = mockFileContents[fileId].length
-  }
-
-  return { success: true, fileId }
 }
 
 // ============================================================================
@@ -304,6 +181,7 @@ export interface CreateAgentFilesResult {
   success: boolean
   files: {
     soul?: string
+    heartbeat?: string
     overlay?: string
     agentsMd?: boolean
   }
@@ -313,7 +191,7 @@ export interface CreateAgentFilesResult {
 /**
  * Create all workspace files for a new agent
  */
-export function createAgentFiles(input: CreateAgentFilesInput): CreateAgentFilesResult {
+export async function createAgentFiles(input: CreateAgentFilesInput): Promise<CreateAgentFilesResult> {
   const templateInput: AgentTemplateInput = {
     name: input.name,
     role: input.role,
@@ -322,47 +200,75 @@ export function createAgentFiles(input: CreateAgentFilesInput): CreateAgentFiles
     station: input.station,
   }
 
-  // Ensure /agents folder exists
-  createWorkspaceFolder('/', 'agents')
+  await ensureWorkspaceRootExists()
 
-  // Create soul file: /agents/<name>.soul.md
   const soulContent = generateSoulContent(templateInput)
-  const soulResult = writeWorkspaceFile(
-    '/agents',
-    `${input.name}.soul.md`,
-    soulContent
-  )
+  const soulId = encodeWorkspaceId(`/agents/${input.name}/SOUL.md`)
 
-  if (!soulResult.success) {
-    return { success: false, files: {}, error: `Failed to create soul file: ${soulResult.error}` }
-  }
-
-  // Create overlay file: /agents/<name>.md
-  const overlayContent = generateOverlayContent(templateInput)
-  const overlayResult = writeWorkspaceFile(
-    '/agents',
-    `${input.name}.md`,
-    overlayContent
-  )
-
-  if (!overlayResult.success) {
+  try {
+    await writeWorkspaceFileById(soulId, soulContent)
+  } catch (err) {
     return {
       success: false,
-      files: { soul: soulResult.fileId },
-      error: `Failed to create overlay file: ${overlayResult.error}`,
+      files: {},
+      error: `Failed to write soul file: ${err instanceof Error ? err.message : String(err)}`,
     }
   }
 
-  // Append to AGENTS.md (id: ws_01)
+  const heartbeatContent = generateHeartbeatContent(templateInput)
+  const heartbeatId = encodeWorkspaceId(`/agents/${input.name}/HEARTBEAT.md`)
+
+  try {
+    await writeWorkspaceFileById(heartbeatId, heartbeatContent)
+  } catch (err) {
+    return {
+      success: false,
+      files: { soul: soulId },
+      error: `Failed to write heartbeat file: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  }
+
+  const overlayContent = generateOverlayContent(templateInput)
+  const overlayId = encodeWorkspaceId(`/agents/${input.name}.md`)
+
+  try {
+    await writeWorkspaceFileById(overlayId, overlayContent)
+  } catch (err) {
+    return {
+      success: false,
+      files: { soul: soulId, heartbeat: heartbeatId },
+      error: `Failed to write overlay file: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  }
+
   const agentSection = generateAgentsMdSection(templateInput)
-  const appendResult = appendToWorkspaceFile('ws_01', agentSection)
+  const agentsMdId = encodeWorkspaceId('/AGENTS.md')
+  let existingAgentsMd = ''
+  try {
+    existingAgentsMd = (await readWorkspaceFileById(agentsMdId)).content
+  } catch {
+    // AGENTS.md may not exist yet; create it.
+    existingAgentsMd = '# AGENTS\n'
+  }
+
+  const needsNewline = existingAgentsMd.length > 0 && !existingAgentsMd.endsWith('\n')
+  const appendedAgentsMd = existingAgentsMd + (needsNewline ? '\n' : '') + agentSection
+
+  let agentsMdOk = false
+  try {
+    await writeWorkspaceFileById(agentsMdId, appendedAgentsMd)
+    agentsMdOk = true
+  } catch {
+    agentsMdOk = false
+  }
 
   return {
     success: true,
     files: {
-      soul: soulResult.fileId,
-      overlay: overlayResult.fileId,
-      agentsMd: appendResult.success,
+      soul: soulId,
+      heartbeat: heartbeatId,
+      overlay: overlayId,
+      agentsMd: agentsMdOk,
     },
   }
 }

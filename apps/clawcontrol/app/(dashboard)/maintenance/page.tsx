@@ -1,7 +1,7 @@
 import { getGatewayStatus, type GatewayRepoStatusDTO, type GatewayStatusDTO } from '@/lib/data'
-import { mockPlaybooks } from '@clawcontrol/core'
 import { MaintenanceClient } from './maintenance-client'
 import { AvailabilityBadge } from '@/components/availability-badge'
+import { listPlaybooks } from '@/lib/fs/playbooks-fs'
 
 /**
  * Map OpenClaw GatewayRepoStatusDTO to the UI's GatewayStatusDTO format.
@@ -43,13 +43,7 @@ export default async function MaintenancePage() {
   const gateway = mapToUiDto(response.data, response.latencyMs)
 
   // Get playbook summaries (without content)
-  const playbooks = mockPlaybooks.map(({ id, name, description, severity, modifiedAt }) => ({
-    id,
-    name,
-    description,
-    severity,
-    modifiedAt,
-  }))
+  const playbooks = await listPlaybooks()
 
   return (
     <div>

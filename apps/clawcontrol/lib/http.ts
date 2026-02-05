@@ -40,6 +40,17 @@ export class HttpError extends Error {
 // HELPERS
 // ============================================================================
 
+function formatApiErrorMessage(error: string): string {
+  switch (error) {
+    case 'NOT_IMPLEMENTED':
+      return 'This action is not implemented in ClawControl yet.'
+    case 'OPENCLAW_UNAVAILABLE':
+      return 'OpenClaw is unavailable. Check your OpenClaw installation/connection.'
+    default:
+      return error
+  }
+}
+
 function buildUrl(path: string, params?: Record<string, string | number | boolean | undefined>): string {
   const url = new URL(path, window.location.origin)
 
@@ -298,7 +309,15 @@ export const agentsApi = {
       body: JSON.stringify({ typedConfirmText }),
     }).then(async (res) => {
       const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Failed to provision agent')
+      if (!res.ok) {
+        const receiptId = (json as { receiptId?: string }).receiptId
+        throw new HttpError(
+          formatApiErrorMessage(json.error || 'Failed to provision agent'),
+          res.status,
+          json.error,
+          receiptId ? { receiptId } : undefined
+        )
+      }
       return json as { data: { mode: string; provisioned: boolean; message: string }; receiptId: string }
     }),
 
@@ -309,7 +328,15 @@ export const agentsApi = {
       body: JSON.stringify({ message }),
     }).then(async (res) => {
       const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Failed to test agent')
+      if (!res.ok) {
+        const receiptId = (json as { receiptId?: string }).receiptId
+        throw new HttpError(
+          formatApiErrorMessage(json.error || 'Failed to test agent'),
+          res.status,
+          json.error,
+          receiptId ? { receiptId } : undefined
+        )
+      }
       return json as { data: { mode: string; success: boolean; response: string; latencyMs: number }; receiptId: string }
     }),
 
@@ -636,11 +663,12 @@ export const playbooksApi = {
   }).then(async (res) => {
     if (!res.ok) {
       const errorData = await res.json()
+      const receiptId = (errorData as { receiptId?: string }).receiptId
       throw new HttpError(
-        errorData.error,
+        formatApiErrorMessage(errorData.error),
         res.status,
         errorData.error,
-        { policy: errorData.policy }
+        { policy: errorData.policy, ...(receiptId ? { receiptId } : {}) }
       )
     }
     return res.json() as Promise<{ data: PlaybookRunResult; receiptId: string }>
@@ -764,6 +792,36 @@ export const skillsApi = {
       return res.blob()
     }),
 
+  importZip: (data: {
+    file: File
+    scope: 'global' | 'agent'
+    agentId?: string
+    typedConfirmText: string
+  }) => {
+    const formData = new FormData()
+    formData.set('file', data.file)
+    formData.set('scope', data.scope)
+    if (data.agentId) formData.set('agentId', data.agentId)
+    formData.set('typedConfirmText', data.typedConfirmText)
+
+    return fetch('/api/skills/import', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      body: formData,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const errorData = await res.json()
+        throw new HttpError(
+          errorData.error,
+          res.status,
+          errorData.error,
+          { policy: errorData.policy }
+        )
+      }
+      return res.json() as Promise<{ data: SkillSummary }>
+    })
+  },
+
   duplicate: (
     scope: 'global' | 'agent',
     id: string,
@@ -822,7 +880,7 @@ export interface PluginCapabilities {
 }
 
 export interface PluginResponseMeta {
-  source: 'openclaw_cli' | 'openclaw_status' | 'mock' | 'cache' | 'unsupported'
+  source: 'openclaw_cli' | 'openclaw_status' | 'cache' | 'unsupported'
   capabilities: PluginCapabilities
   degraded: boolean
   message?: string
@@ -1280,7 +1338,6 @@ export const templatesApi = {
 export interface EnvConfig {
   OPENCLAW_WORKSPACE: string | null
   DATABASE_URL: string | null
-  USE_MOCK_DATA: string | null
   NODE_ENV: string | null
 }
 
@@ -1296,7 +1353,6 @@ export const configApi = {
   getEnv: () => apiGet<{ data: EnvConfigResponse }>('/api/config/env'),
   updateEnv: (data: Partial<{
     OPENCLAW_WORKSPACE: string | null
-    USE_MOCK_DATA: string | null
   }>) => fetch('/api/config/env', {
     method: 'PUT',
     headers: {
@@ -1476,4 +1532,29 @@ export const modelsApi = {
 
   runAction: (action: ModelAction) =>
     apiPost<{ data: ModelListResponse | ModelStatusResponse }>('/api/models', { action }),
+}
+
+// ============================================================================
+// OPENCLAW MODELS PROVISIONING
+// ============================================================================
+
+export type ModelAuthMethod = 'apiKey' | 'oauth'
+
+export interface AvailableModelProvider {
+  id: string
+  label: string
+  supported: boolean
+  auth: {
+    apiKey: boolean
+    oauth: boolean
+    oauthRequiresTty: boolean
+  }
+}
+
+export const openclawModelsApi = {
+  getAvailable: () =>
+    apiGet<{ data: { providers: AvailableModelProvider[] } }>('/api/openclaw/models/available'),
+
+  add: (body: { provider: string; authMethod: ModelAuthMethod; apiKey?: string }) =>
+    apiPost<{ data: { provider: string } }, typeof body>('/api/openclaw/models/add', body),
 }

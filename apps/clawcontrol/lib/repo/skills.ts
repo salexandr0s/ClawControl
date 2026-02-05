@@ -8,7 +8,8 @@
  */
 
 import { promises as fsp } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join, basename, dirname, posix } from 'node:path'
+import JSZip from 'jszip'
 import {
   validateWorkspacePath,
   getWorkspaceRoot,
@@ -74,6 +75,7 @@ export interface SkillsRepo {
   delete(scope: SkillScope, id: string): Promise<boolean>
   validate(scope: SkillScope, id: string): Promise<SkillValidationResult>
   duplicate(scope: SkillScope, id: string, target: DuplicateSkillTarget): Promise<SkillDTO>
+  importZip(file: File, options: { scope: SkillScope; agentId?: string }): Promise<SkillDTO>
   exportZip(scope: SkillScope, id: string): Promise<Blob>
 }
 
@@ -297,22 +299,143 @@ export function createFsSkillsRepo(): SkillsRepo {
       })
     },
 
+    async importZip(
+      file: File,
+      options: { scope: SkillScope; agentId?: string }
+    ): Promise<SkillDTO> {
+      if (options.scope === 'agent' && !options.agentId) {
+        throw new Error('Agent ID is required for agent-scoped skills')
+      }
+
+      const buffer = await file.arrayBuffer()
+      const zip = await JSZip.loadAsync(buffer)
+
+      const zipFilePaths = Object.keys(zip.files)
+        .filter((p) => !zip.files[p]?.dir)
+        .filter((p) => !isIgnoredZipPath(p))
+
+      const basePrefix = determineZipBasePrefix(zipFilePaths)
+      const skillMdZipPath = findSkillMdZipPath(zipFilePaths, basePrefix)
+      if (!skillMdZipPath) {
+        throw new Error('Invalid skill: SKILL.md (or skill.md) not found')
+      }
+
+      const skillMd = await zip.file(skillMdZipPath)!.async('string')
+
+      const folderNameFallback = basePrefix
+        ? basePrefix.replace(/\/$/, '')
+        : file.name.replace(/\.zip$/i, '')
+
+      const derivedName = deriveSkillNameFromMd(skillMd) ?? folderNameFallback
+      const skillName = slugifySkillName(derivedName)
+
+      if (!isValidSkillName(skillName)) {
+        throw new Error('Invalid skill name derived from ZIP')
+      }
+
+      const existing = await this.getByName(options.scope, skillName, options.agentId)
+      if (existing) {
+        throw new Error(`Skill "${skillName}" already exists`)
+      }
+
+      const skillPath = options.scope === 'global'
+        ? `/skills/${skillName}`
+        : `/agents/${options.agentId}/skills/${skillName}`
+
+      const dirResult = validateWorkspacePath(skillPath)
+      if (!dirResult.valid || !dirResult.resolvedPath) {
+        throw new Error(dirResult.error || 'Invalid path')
+      }
+
+      await fsp.mkdir(dirResult.resolvedPath, { recursive: true })
+
+      for (const originalPath of zipFilePaths) {
+        const stripped = basePrefix && originalPath.startsWith(basePrefix)
+          ? originalPath.slice(basePrefix.length)
+          : originalPath
+
+        const normalized = normalizeZipRelativePath(stripped)
+        if (!normalized) continue
+
+        const outRel = isSkillMdFilename(normalized) ? 'skill.md' : normalized
+        const outWorkspacePath = `${skillPath}/${outRel}`
+
+        const fileResult = validateWorkspacePath(outWorkspacePath)
+        if (!fileResult.valid || !fileResult.resolvedPath) {
+          throw new Error(fileResult.error || `Invalid path: ${outRel}`)
+        }
+
+        const zipEntry = zip.file(originalPath)
+        if (!zipEntry) continue
+        const content = await zipEntry.async('nodebuffer')
+
+        await fsp.mkdir(dirname(fileResult.resolvedPath), { recursive: true })
+        await fsp.writeFile(fileResult.resolvedPath, content)
+      }
+
+      const created = await parseSkillFromDirectory(skillPath, options.scope, options.agentId)
+      if (!created) throw new Error('Failed to import skill')
+      return created
+    },
+
     async exportZip(scope: SkillScope, id: string): Promise<Blob> {
       const skill = await this.getById(scope, id)
       if (!skill) throw new Error('Skill not found')
 
-      // Create a simple manifest - real impl would use archiver or similar
-      const manifest = {
-        name: skill.name,
-        version: skill.version,
-        description: skill.description,
-        scope: skill.scope,
-        exportedAt: new Date().toISOString(),
-        files: ['skill.md', ...(skill.config ? ['config.json'] : [])],
+      const skillPath = decodeWorkspaceId(id.replace(/^skill_[ga]_/, ''))
+      const pathResult = validateWorkspacePath(skillPath)
+      if (!pathResult.valid || !pathResult.resolvedPath) {
+        throw new Error(pathResult.error || 'Invalid path')
       }
 
-      // For now, return JSON manifest - full impl would create actual zip
-      return new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/zip' })
+      const absSkillDir = pathResult.resolvedPath
+
+      const zip = new JSZip()
+
+      const files = await walkDirFiles(absSkillDir)
+      const exportedFileNames: string[] = []
+
+      for (const f of files) {
+        if (isIgnoredExportPath(f.relPosixPath)) continue
+
+        const data = await fsp.readFile(f.absPath)
+        if (f.relPosixPath === 'skill.md') {
+          zip.file('SKILL.md', data)
+          exportedFileNames.push('SKILL.md')
+          continue
+        }
+
+        zip.file(f.relPosixPath, data)
+        exportedFileNames.push(f.relPosixPath)
+      }
+
+      // Small manifest for provenance/debugging
+      zip.file(
+        'manifest.json',
+        JSON.stringify(
+          {
+            name: skill.name,
+            version: skill.version,
+            description: skill.description,
+            scope: skill.scope,
+            agentId: skill.agentId ?? null,
+            exportedAt: new Date().toISOString(),
+            files: exportedFileNames.sort(),
+          },
+          null,
+          2
+        )
+      )
+
+      const zipBytes = await zip.generateAsync({
+        type: 'uint8array',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 },
+      })
+
+      const zipArrayBuffer = new ArrayBuffer(zipBytes.byteLength)
+      new Uint8Array(zipArrayBuffer).set(zipBytes)
+      return new Blob([zipArrayBuffer], { type: 'application/zip' })
     },
   }
 }
@@ -320,6 +443,109 @@ export function createFsSkillsRepo(): SkillsRepo {
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+function isIgnoredZipPath(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/')
+  if (normalized.startsWith('__MACOSX/')) return true
+  if (normalized.endsWith('/.DS_Store') || normalized.endsWith('.DS_Store')) return true
+  return false
+}
+
+function determineZipBasePrefix(filePaths: string[]): string {
+  const rootHasSkillMd = filePaths.some((p) => isSkillMdFilename(posix.basename(p)) && !p.includes('/'))
+  if (rootHasSkillMd) return ''
+
+  const firstSegments = new Set(
+    filePaths
+      .map((p) => p.split('/')[0])
+      .filter(Boolean)
+  )
+
+  if (firstSegments.size !== 1) return ''
+  const [segment] = [...firstSegments]
+
+  const segmentHasSkillMd = filePaths.some((p) => p === `${segment}/SKILL.md` || p === `${segment}/skill.md`)
+  return segmentHasSkillMd ? `${segment}/` : ''
+}
+
+function findSkillMdZipPath(filePaths: string[], basePrefix: string): string | null {
+  const candidates = new Set<string>()
+  for (const p of filePaths) {
+    if (basePrefix && !p.startsWith(basePrefix)) continue
+    const stripped = basePrefix ? p.slice(basePrefix.length) : p
+    if (!stripped || stripped.includes('/')) continue
+    if (isSkillMdFilename(stripped)) candidates.add(p)
+  }
+
+  if (candidates.size === 0) return null
+  if (candidates.has(basePrefix ? `${basePrefix}SKILL.md` : 'SKILL.md')) {
+    return basePrefix ? `${basePrefix}SKILL.md` : 'SKILL.md'
+  }
+  return [...candidates][0] ?? null
+}
+
+function isSkillMdFilename(name: string): boolean {
+  return name === 'SKILL.md' || name === 'skill.md'
+}
+
+function normalizeZipRelativePath(path: string): string | null {
+  const fixed = path.replace(/\\/g, '/').trim()
+  if (!fixed) return null
+  if (fixed.startsWith('/')) return null
+
+  const normalized = posix.normalize(fixed)
+  if (normalized === '.' || normalized === '') return null
+  if (normalized.startsWith('..')) return null
+  if (posix.isAbsolute(normalized)) return null
+  if (normalized.includes('\0')) return null
+  return normalized
+}
+
+function deriveSkillNameFromMd(skillMd: string): string | null {
+  const match = skillMd.match(/^#\s+(.+)$/m)
+  return match?.[1]?.trim() || null
+}
+
+function slugifySkillName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function isIgnoredExportPath(relPosixPath: string): boolean {
+  const parts = relPosixPath.split('/')
+  if (parts.includes('node_modules')) return true
+  if (parts.includes('.git')) return true
+  if (relPosixPath.endsWith('.DS_Store')) return true
+  return false
+}
+
+async function walkDirFiles(absDir: string): Promise<Array<{ absPath: string; relPosixPath: string }>> {
+  const results: Array<{ absPath: string; relPosixPath: string }> = []
+
+  async function walk(currentAbs: string, prefix: string) {
+    const entries = await fsp.readdir(currentAbs, { withFileTypes: true })
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === '.git') continue
+        await walk(join(currentAbs, entry.name), prefix ? `${prefix}/${entry.name}` : entry.name)
+        continue
+      }
+      if (!entry.isFile()) continue
+      const relPosixPath = prefix ? `${prefix}/${entry.name}` : entry.name
+      results.push({ absPath: join(currentAbs, entry.name), relPosixPath })
+    }
+  }
+
+  await walk(absDir, '')
+  return results
+}
 
 async function scanSkillsDirectory(
   basePath: string,

@@ -22,7 +22,6 @@ import type {
   PluginSourceType,
   PluginStatus,
   PluginDoctorResult,
-  PluginDoctorCheck,
 } from './types'
 
 // ============================================================================

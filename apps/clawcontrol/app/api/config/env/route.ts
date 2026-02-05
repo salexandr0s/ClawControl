@@ -15,7 +15,6 @@ const ENV_PATH = resolve(process.cwd(), '.env')
 interface EnvConfig {
   OPENCLAW_WORKSPACE: string | null
   DATABASE_URL: string | null
-  USE_MOCK_DATA: string | null
   NODE_ENV: string | null
 }
 
@@ -90,7 +89,6 @@ export async function GET() {
     const config: EnvConfig = {
       OPENCLAW_WORKSPACE: parsed.OPENCLAW_WORKSPACE || null,
       DATABASE_URL: parsed.DATABASE_URL || null,
-      USE_MOCK_DATA: parsed.USE_MOCK_DATA || null,
       NODE_ENV: parsed.NODE_ENV || process.env.NODE_ENV || null,
     }
 
@@ -122,9 +120,6 @@ export async function PUT(request: Request) {
     if ('OPENCLAW_WORKSPACE' in body) {
       updates.OPENCLAW_WORKSPACE = body.OPENCLAW_WORKSPACE
     }
-    if ('USE_MOCK_DATA' in body) {
-      updates.USE_MOCK_DATA = body.USE_MOCK_DATA
-    }
 
     // Read existing content
     let content = ''
@@ -140,9 +135,6 @@ OPENCLAW_WORKSPACE=""
 
 # Database URL
 DATABASE_URL="file:../data/clawcontrol.db"
-
-# Force mock data mode (true/false)
-# USE_MOCK_DATA="false"
 `
     }
 
@@ -160,7 +152,6 @@ DATABASE_URL="file:../data/clawcontrol.db"
         config: {
           OPENCLAW_WORKSPACE: parsed.OPENCLAW_WORKSPACE || null,
           DATABASE_URL: parsed.DATABASE_URL || null,
-          USE_MOCK_DATA: parsed.USE_MOCK_DATA || null,
           NODE_ENV: parsed.NODE_ENV || process.env.NODE_ENV || null,
         },
         requiresRestart: true,

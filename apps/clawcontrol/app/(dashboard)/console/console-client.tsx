@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { PageHeader, EmptyState } from '@clawcontrol/ui'
 import { Terminal, Wifi, WifiOff, AlertCircle, RefreshCw } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useProtectedActionTrigger } from '@/components/protected-action-modal'
 import { agentsApi } from '@/lib/http'
 import { useGatewayChat } from '@/lib/hooks/useGatewayChat'
@@ -34,6 +35,24 @@ interface SessionsApiResponse {
 const POLL_INTERVAL_MS = 5000
 const RETRY_INTERVALS = [1000, 2000, 5000, 10000, 30000]
 
+function areConsoleSessionsEquivalent(a: ConsoleSessionDTO[], b: ConsoleSessionDTO[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+
+  for (let i = 0; i < a.length; i++) {
+    const prev = a[i]
+    const next = b[i]
+    if (prev.sessionId !== next.sessionId) return false
+    if (prev.state !== next.state) return false
+    if (prev.percentUsed !== next.percentUsed) return false
+    if (prev.abortedLastRun !== next.abortedLastRun) return false
+    if (String(prev.lastSeenAt) !== String(next.lastSeenAt)) return false
+    if (String(prev.updatedAt) !== String(next.updatedAt)) return false
+  }
+
+  return true
+}
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -55,13 +74,25 @@ export function ConsoleClient() {
 
   const triggerProtectedAction = useProtectedActionTrigger()
   const { sendMessage, abort } = useGatewayChat()
-  const messages = useChatStore((s) => s.messages)
-  const isStreaming = useChatStore((s) => s.isStreaming)
-  const currentRunId = useChatStore((s) => s.currentRunId)
-  const chatError = useChatStore((s) => s.error)
-  const setChatError = useChatStore((s) => s.setError)
-  const resetChat = useChatStore((s) => s.resetChat)
-  const setChatMessages = useChatStore((s) => s.setMessages)
+  const {
+    messages,
+    isStreaming,
+    currentRunId,
+    chatError,
+    setError: setChatError,
+    resetChat,
+    setMessages: setChatMessages,
+  } = useChatStore(
+    useShallow((s) => ({
+      messages: s.messages,
+      isStreaming: s.isStreaming,
+      currentRunId: s.currentRunId,
+      chatError: s.error,
+      setError: s.setError,
+      resetChat: s.resetChat,
+      setMessages: s.setMessages,
+    }))
+  )
 
   // ============================================================================
   // DATA FETCHING
@@ -72,9 +103,9 @@ export function ConsoleClient() {
       const res = await fetch('/api/openclaw/console/sessions')
       const data: SessionsApiResponse = await res.json()
 
-      setSessions(data.data)
-      setGatewayStatus(data.status)
-      setGatewayAvailable(data.gatewayAvailable)
+      setSessions((prev) => (areConsoleSessionsEquivalent(prev, data.data) ? prev : data.data))
+      setGatewayStatus((prev) => (prev === data.status ? prev : data.status))
+      setGatewayAvailable((prev) => (prev === data.gatewayAvailable ? prev : data.gatewayAvailable))
       setError(null)
       retryCountRef.current = 0 // Reset retry count on success
     } catch (err) {
@@ -214,7 +245,10 @@ export function ConsoleClient() {
   // RENDER
   // ============================================================================
 
-  const selectedSession = sessions.find(s => s.sessionId === selectedSessionId)
+  const selectedSession = useMemo(() => {
+    if (!selectedSessionId) return null
+    return sessions.find((s) => s.sessionId === selectedSessionId) ?? null
+  }, [selectedSessionId, sessions])
   const combinedError = error || chatError
 
   return (
@@ -288,8 +322,8 @@ export function ConsoleClient() {
           <div className="flex-1 flex items-center justify-center p-8">
             <EmptyState
               icon={<Terminal className="w-12 h-12" />}
-              title="No Sessions"
-              description="No OpenClaw sessions found. Sessions will appear here once agents are active."
+              title="No active sessions"
+              description="Sessions appear when agents are running."
             />
           </div>
         ) : (

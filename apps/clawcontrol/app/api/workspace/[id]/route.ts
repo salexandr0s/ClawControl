@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { mockWorkspaceFiles, mockFileContents } from '@clawcontrol/core'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import type { ActionKind } from '@clawcontrol/core'
-import { useMockData } from '@/lib/repo'
 import { readWorkspaceFileById, writeWorkspaceFileById, deleteWorkspaceEntry } from '@/lib/fs/workspace-fs'
 
 // Protected file mapping
 const PROTECTED_FILES: Record<string, ActionKind> = {
   'AGENTS.md': 'config.agents_md.edit',
   'routing.yaml': 'config.routing_template.edit',
+}
+
+function getFileNameFromWorkspaceId(id: string): string | undefined {
+  try {
+    const decoded = Buffer.from(id, 'base64url').toString('utf8')
+    return decoded.split('/').filter(Boolean).pop()
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -20,27 +27,6 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-
-  // Mock mode uses in-memory files; DB mode reads from disk
-  if (useMockData()) {
-    const file = mockWorkspaceFiles.find((f) => f.id === id)
-    if (!file) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404 })
-    }
-
-    if (file.type === 'folder') {
-      return NextResponse.json({ error: 'Cannot read folder content' }, { status: 400 })
-    }
-
-    const content = mockFileContents[id] ?? ''
-
-    return NextResponse.json({
-      data: {
-        ...file,
-        content,
-      },
-    })
-  }
 
   try {
     const file = await readWorkspaceFileById(id)
@@ -69,17 +55,7 @@ export async function PUT(
   }
 
   // Determine file name for protected-file gating
-  const fileName = useMockData()
-    ? mockWorkspaceFiles.find((f) => f.id === id)?.name
-    : (() => {
-        try {
-          // id encodes full path; take last segment
-          const decoded = Buffer.from(id, 'base64url').toString('utf8')
-          return decoded.split('/').filter(Boolean).pop()
-        } catch {
-          return undefined
-        }
-      })()
+  const fileName = getFileNameFromWorkspaceId(id)
 
   // Check if this is a protected file
   const actionKind = fileName ? PROTECTED_FILES[fileName] : undefined
@@ -99,27 +75,6 @@ export async function PUT(
         { status: result.errorType === 'TYPED_CONFIRM_REQUIRED' ? 428 : 403 }
       )
     }
-  }
-
-  if (useMockData()) {
-    const file = mockWorkspaceFiles.find((f) => f.id === id)
-    if (!file) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404 })
-    }
-
-    if (file.type === 'folder') {
-      return NextResponse.json({ error: 'Cannot write to folder' }, { status: 400 })
-    }
-
-    mockFileContents[id] = content
-
-    return NextResponse.json({
-      data: {
-        ...file,
-        content,
-        modifiedAt: new Date(),
-      },
-    })
   }
 
   try {
@@ -148,16 +103,7 @@ export async function DELETE(
   const { typedConfirmText } = body as { typedConfirmText?: string }
 
   // Determine file name for protected-file check
-  const fileName = useMockData()
-    ? mockWorkspaceFiles.find((f) => f.id === id)?.name
-    : (() => {
-        try {
-          const decoded = Buffer.from(id, 'base64url').toString('utf8')
-          return decoded.split('/').filter(Boolean).pop()
-        } catch {
-          return undefined
-        }
-      })()
+  const fileName = getFileNameFromWorkspaceId(id)
 
   // Protected files cannot be deleted
   if (fileName && PROTECTED_FILES[fileName]) {
@@ -181,20 +127,6 @@ export async function DELETE(
       },
       { status: result.errorType === 'TYPED_CONFIRM_REQUIRED' ? 428 : 403 }
     )
-  }
-
-  if (useMockData()) {
-    const fileIndex = mockWorkspaceFiles.findIndex((f) => f.id === id)
-    if (fileIndex === -1) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404 })
-    }
-
-    mockWorkspaceFiles.splice(fileIndex, 1)
-    if (mockFileContents[id]) {
-      delete mockFileContents[id]
-    }
-
-    return NextResponse.json({ success: true })
   }
 
   try {
