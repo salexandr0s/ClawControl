@@ -88,18 +88,6 @@ export function createDbSearchRepo(): SearchRepo {
   }
 }
 
-/**
- * Create a mock search repository for testing
- */
-export function createMockSearchRepo(): SearchRepo {
-  return {
-    async search(_query: string, _options?: SearchOptions): Promise<SearchResult[]> {
-      // Return empty results in mock mode
-      return []
-    },
-  }
-}
-
 // ============================================================================
 // SEARCH HELPERS
 // ============================================================================

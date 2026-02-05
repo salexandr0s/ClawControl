@@ -1,12 +1,11 @@
 /**
  * Work Orders Repository
  *
- * Provides data access for work orders with both DB and mock implementations.
+ * Provides data access for work orders.
  */
 
 import { prisma } from '../db'
 import { indexWorkOrder } from '../db/fts'
-import { mockWorkOrders, mockOperations } from '@clawcontrol/core'
 import type {
   WorkOrderDTO,
   WorkOrderWithOpsDTO,
@@ -248,143 +247,6 @@ export function createDbWorkOrdersRepo(): WorkOrdersRepo {
 }
 
 // ============================================================================
-// MOCK IMPLEMENTATION
-// ============================================================================
-
-export function createMockWorkOrdersRepo(): WorkOrdersRepo {
-  return {
-    async list(filters?: WorkOrderFilters): Promise<WorkOrderDTO[]> {
-      let result = [...mockWorkOrders]
-      if (filters?.state) {
-        const states = Array.isArray(filters.state) ? filters.state : [filters.state]
-        result = result.filter((wo) => states.includes(wo.state))
-      }
-      if (filters?.priority) {
-        const priorities = Array.isArray(filters.priority) ? filters.priority : [filters.priority]
-        result = result.filter((wo) => priorities.includes(wo.priority))
-      }
-      if (filters?.owner) {
-        result = result.filter((wo) => wo.owner === filters.owner)
-      }
-      return result.map(mockToDTO)
-    },
-
-    async listWithOps(filters?: WorkOrderFilters): Promise<WorkOrderWithOpsDTO[]> {
-      const workOrders = await this.list(filters)
-      return workOrders.map((wo) => ({
-        ...wo,
-        operations: mockOperations
-          .filter((op) => op.workOrderId === wo.id)
-          .map((op) => ({ id: op.id, status: op.status })),
-      }))
-    },
-
-    async getById(id: string): Promise<WorkOrderDTO | null> {
-      const wo = mockWorkOrders.find((w) => w.id === id)
-      return wo ? mockToDTO(wo) : null
-    },
-
-    async getByCode(code: string): Promise<WorkOrderDTO | null> {
-      const wo = mockWorkOrders.find((w) => w.code === code)
-      return wo ? mockToDTO(wo) : null
-    },
-
-    async countByState(): Promise<Record<string, number>> {
-      const counts: Record<string, number> = {}
-      for (const wo of mockWorkOrders) {
-        counts[wo.state] = (counts[wo.state] || 0) + 1
-      }
-      return counts
-    },
-
-    async countShippedToday(): Promise<number> {
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-
-      return mockWorkOrders.filter(
-        (wo) => wo.state === 'shipped' && wo.shippedAt && wo.shippedAt >= today
-      ).length
-    },
-
-    async getByIdWithOps(id: string): Promise<WorkOrderWithOpsDTO | null> {
-      const wo = mockWorkOrders.find((w) => w.id === id)
-      if (!wo) return null
-      return {
-        ...mockToDTO(wo),
-        operations: mockOperations
-          .filter((op) => op.workOrderId === id)
-          .map((op) => ({ id: op.id, status: op.status })),
-      }
-    },
-
-    async create(input: CreateWorkOrderInput): Promise<WorkOrderDTO> {
-      // Generate mock ID and code
-      const id = `wo_mock_${Date.now()}`
-      const code = `WO-${String(mockWorkOrders.length + 1).padStart(3, '0')}`
-      const now = new Date()
-
-      const newWo = {
-        id,
-        code,
-        title: input.title,
-        goalMd: input.goalMd,
-        state: 'planned' as const,
-        priority: (input.priority || 'P2') as 'P0' | 'P1' | 'P2' | 'P3',
-        owner: (input.owner || 'user') as 'user' | 'clawcontrolceo',
-        routingTemplate: input.routingTemplate || 'default_routing',
-        blockedReason: null,
-        createdAt: now,
-        updatedAt: now,
-        shippedAt: null,
-      }
-
-      // In mock mode, we don't persist - just return the DTO
-      return mockToDTO(newWo)
-    },
-
-    async update(id: string, input: UpdateWorkOrderInput): Promise<WorkOrderDTO | null> {
-      const wo = mockWorkOrders.find((w) => w.id === id)
-      if (!wo) return null
-
-      // In mock mode, we don't actually mutate - just return updated DTO
-      return {
-        ...mockToDTO(wo),
-        ...(input.title !== undefined && { title: input.title }),
-        ...(input.goalMd !== undefined && { goalMd: input.goalMd }),
-        ...(input.state !== undefined && { state: input.state as WorkOrderDTO['state'] }),
-        ...(input.priority !== undefined && { priority: input.priority as WorkOrderDTO['priority'] }),
-        ...(input.owner !== undefined && { owner: input.owner as WorkOrderDTO['owner'] }),
-        ...(input.blockedReason !== undefined && { blockedReason: input.blockedReason }),
-        updatedAt: new Date(),
-      }
-    },
-
-    async updateStateWithActivity(
-      id: string,
-      newState: string,
-      _actor: string
-    ): Promise<StateTransitionResult | null> {
-      const wo = mockWorkOrders.find((w) => w.id === id)
-      if (!wo) return null
-
-      const previousState = wo.state
-      const activityId = `act_mock_${Date.now()}`
-
-      return {
-        workOrder: {
-          ...mockToDTO(wo),
-          state: newState as WorkOrderDTO['state'],
-          updatedAt: new Date(),
-          ...(newState === 'shipped' && { shippedAt: new Date() }),
-        },
-        previousState,
-        activityId,
-      }
-    },
-  }
-}
-
-// ============================================================================
 // HELPERS
 // ============================================================================
 
@@ -430,22 +292,5 @@ function toDTO(row: {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     shippedAt: row.shippedAt,
-  }
-}
-
-function mockToDTO(wo: typeof mockWorkOrders[number]): WorkOrderDTO {
-  return {
-    id: wo.id,
-    code: wo.code,
-    title: wo.title,
-    goalMd: wo.goalMd,
-    state: wo.state as WorkOrderDTO['state'],
-    priority: wo.priority as WorkOrderDTO['priority'],
-    owner: wo.owner as WorkOrderDTO['owner'],
-    routingTemplate: wo.routingTemplate,
-    blockedReason: wo.blockedReason,
-    createdAt: wo.createdAt,
-    updatedAt: wo.updatedAt,
-    shippedAt: wo.shippedAt,
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Stations Repository
  *
- * Provides data access for stations with both DB and mock implementations.
+ * Provides data access for stations.
  */
 
 import { prisma } from '../db'
@@ -103,107 +103,6 @@ export function createDbStationsRepo(): StationsRepo {
 }
 
 // ============================================================================
-// MOCK IMPLEMENTATION
-// ============================================================================
-
-const DEFAULT_STATIONS: Array<Omit<StationDTO, 'createdAt' | 'updatedAt'>> = [
-  {
-    id: 'spec',
-    name: 'spec',
-    icon: 'file-text',
-    description: 'Planning & specifications',
-    color: null,
-    sortOrder: 10,
-  },
-  {
-    id: 'build',
-    name: 'build',
-    icon: 'hammer',
-    description: 'Implementation',
-    color: null,
-    sortOrder: 20,
-  },
-  {
-    id: 'qa',
-    name: 'qa',
-    icon: 'check-circle',
-    description: 'Quality assurance',
-    color: null,
-    sortOrder: 30,
-  },
-  {
-    id: 'ops',
-    name: 'ops',
-    icon: 'settings',
-    description: 'Operations',
-    color: null,
-    sortOrder: 40,
-  },
-]
-
-const mockStations: StationDTO[] = DEFAULT_STATIONS.map((s) => ({
-  ...s,
-  createdAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
-  updatedAt: new Date(),
-}))
-
-export function createMockStationsRepo(): StationsRepo {
-  return {
-    async list(): Promise<StationDTO[]> {
-      return [...mockStations].sort((a, b) => (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name))
-    },
-
-    async getById(id: string): Promise<StationDTO | null> {
-      return mockStations.find((s) => s.id === id) ?? null
-    },
-
-    async getByName(name: string): Promise<StationDTO | null> {
-      return mockStations.find((s) => s.name === name) ?? null
-    },
-
-    async create(input: CreateStationInput): Promise<StationDTO> {
-      const now = new Date()
-      const dto: StationDTO = {
-        id: input.id,
-        name: input.name,
-        icon: input.icon,
-        description: input.description ?? null,
-        color: input.color ?? null,
-        sortOrder: input.sortOrder ?? 0,
-        createdAt: now,
-        updatedAt: now,
-      }
-      mockStations.push(dto)
-      return dto
-    },
-
-    async update(id: string, input: UpdateStationInput): Promise<StationDTO | null> {
-      const idx = mockStations.findIndex((s) => s.id === id)
-      if (idx === -1) return null
-      const existing = mockStations[idx]
-      const updated: StationDTO = {
-        ...existing,
-        ...(input.name !== undefined && { name: input.name }),
-        ...(input.icon !== undefined && { icon: input.icon }),
-        ...(input.description !== undefined && { description: input.description ?? null }),
-        ...(input.color !== undefined && { color: input.color ?? null }),
-        ...(input.sortOrder !== undefined && { sortOrder: input.sortOrder }),
-        updatedAt: new Date(),
-      }
-      mockStations[idx] = updated
-      return updated
-    },
-
-    async delete(id: string): Promise<boolean> {
-      const idx = mockStations.findIndex((s) => s.id === id)
-      if (idx === -1) return false
-      mockStations.splice(idx, 1)
-      return true
-    },
-  }
-}
-
-// ============================================================================
 // HELPERS
 // ============================================================================
 
@@ -228,4 +127,3 @@ function toDTO(row: {
     updatedAt: row.updatedAt,
   }
 }
-

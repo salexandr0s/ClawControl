@@ -1,11 +1,10 @@
 /**
  * Operations Repository
  *
- * Provides data access for operations with both DB and mock implementations.
+ * Provides data access for operations.
  */
 
 import { prisma } from '../db'
-import { mockOperations } from '@clawcontrol/core'
 import type { OperationDTO, OperationFilters } from './types'
 
 // ============================================================================
@@ -166,104 +165,6 @@ export function createDbOperationsRepo(): OperationsRepo {
 }
 
 // ============================================================================
-// MOCK IMPLEMENTATION
-// ============================================================================
-
-export function createMockOperationsRepo(): OperationsRepo {
-  return {
-    async list(filters?: OperationFilters): Promise<OperationDTO[]> {
-      let result = [...mockOperations]
-      if (filters?.workOrderId) {
-        result = result.filter((op) => op.workOrderId === filters.workOrderId)
-      }
-      if (filters?.status) {
-        const statuses = Array.isArray(filters.status) ? filters.status : [filters.status]
-        result = result.filter((op) => statuses.includes(op.status))
-      }
-      if (filters?.station) {
-        const stations = Array.isArray(filters.station) ? filters.station : [filters.station]
-        result = result.filter((op) => stations.includes(op.station))
-      }
-      return result.map(mockToDTO)
-    },
-
-    async getById(id: string): Promise<OperationDTO | null> {
-      const op = mockOperations.find((o) => o.id === id)
-      return op ? mockToDTO(op) : null
-    },
-
-    async listForWorkOrder(workOrderId: string): Promise<OperationDTO[]> {
-      return mockOperations
-        .filter((op) => op.workOrderId === workOrderId)
-        .map(mockToDTO)
-    },
-
-    async countByStatus(): Promise<Record<string, number>> {
-      const counts: Record<string, number> = {}
-      for (const op of mockOperations) {
-        counts[op.status] = (counts[op.status] || 0) + 1
-      }
-      return counts
-    },
-
-    async create(input: CreateOperationInput): Promise<OperationDTO> {
-      const id = `op_mock_${Date.now()}`
-      const now = new Date()
-      return {
-        id,
-        workOrderId: input.workOrderId,
-        station: input.station,
-        title: input.title,
-        notes: input.notes ?? null,
-        status: 'todo',
-        assigneeAgentIds: [],
-        dependsOnOperationIds: input.dependsOnOperationIds ?? [],
-        wipClass: input.wipClass ?? 'implementation',
-        blockedReason: null,
-        createdAt: now,
-        updatedAt: now,
-      }
-    },
-
-    async update(id: string, input: UpdateOperationInput): Promise<OperationDTO | null> {
-      const op = mockOperations.find((o) => o.id === id)
-      if (!op) return null
-
-      // In mock mode, we don't actually mutate - just return updated DTO
-      return {
-        ...mockToDTO(op),
-        ...(input.status !== undefined && { status: input.status as OperationDTO['status'] }),
-        ...(input.notes !== undefined && { notes: input.notes }),
-        ...(input.blockedReason !== undefined && { blockedReason: input.blockedReason }),
-        updatedAt: new Date(),
-      }
-    },
-
-    async updateStatusWithActivity(
-      id: string,
-      newStatus: string,
-      _actor: string
-    ): Promise<StatusTransitionResult | null> {
-      const op = mockOperations.find((o) => o.id === id)
-      if (!op) return null
-
-      const previousStatus = op.status
-      const activityId = `act_mock_${Date.now()}`
-
-      return {
-        operation: {
-          ...mockToDTO(op),
-          status: newStatus as OperationDTO['status'],
-          updatedAt: new Date(),
-        },
-        previousStatus,
-        activityId,
-      }
-    },
-  }
-}
-
-// ============================================================================
 // HELPERS
 // ============================================================================
 
@@ -309,22 +210,5 @@ function toDTO(row: {
     blockedReason: row.blockedReason,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
-  }
-}
-
-function mockToDTO(op: typeof mockOperations[number]): OperationDTO {
-  return {
-    id: op.id,
-    workOrderId: op.workOrderId,
-    station: op.station,
-    title: op.title,
-    notes: op.notes ?? null,
-    status: op.status as OperationDTO['status'],
-    assigneeAgentIds: op.assigneeAgentIds,
-    dependsOnOperationIds: op.dependsOnOperationIds,
-    wipClass: op.wipClass,
-    blockedReason: op.blockedReason,
-    createdAt: op.createdAt,
-    updatedAt: op.updatedAt,
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Skills Repository
  *
- * Provides data access for skills with both mock and filesystem implementations.
+ * Provides data access for skills via the filesystem.
  * Skills are stored in the OpenClaw workspace:
  *   - Global skills: ${WORKSPACE_ROOT}/skills/<skill-name>/
  *   - Agent-scoped: ${WORKSPACE_ROOT}/agents/<agent-id>/skills/<skill-name>/
@@ -9,7 +9,6 @@
 
 import { promises as fsp } from 'node:fs'
 import { join, basename } from 'node:path'
-import { mockGlobalSkills, mockAgentSkills, mockSkillContents, mockAgents } from '@clawcontrol/core'
 import {
   validateWorkspacePath,
   getWorkspaceRoot,
@@ -76,213 +75,6 @@ export interface SkillsRepo {
   validate(scope: SkillScope, id: string): Promise<SkillValidationResult>
   duplicate(scope: SkillScope, id: string, target: DuplicateSkillTarget): Promise<SkillDTO>
   exportZip(scope: SkillScope, id: string): Promise<Blob>
-}
-
-// ============================================================================
-// MOCK IMPLEMENTATION
-// ============================================================================
-
-export function createMockSkillsRepo(): SkillsRepo {
-  return {
-    async list(filters?: SkillFilters): Promise<SkillDTO[]> {
-      let skills = [...mockGlobalSkills, ...mockAgentSkills]
-
-      if (filters?.scope === 'global') {
-        skills = skills.filter((s) => s.scope === 'global')
-      } else if (filters?.scope === 'agent') {
-        skills = skills.filter((s) => s.scope === 'agent')
-        if (filters?.agentId) {
-          skills = skills.filter((s) => s.agentId === filters.agentId)
-        }
-      }
-
-      if (filters?.enabled !== undefined) {
-        skills = skills.filter((s) => s.enabled === filters.enabled)
-      }
-
-      // Add agent names for agent-scoped skills
-      return skills.map((skill) => {
-        if (skill.scope === 'agent' && skill.agentId) {
-          const agent = mockAgents.find((a) => a.id === skill.agentId)
-          return mockToDTO(skill, agent?.name)
-        }
-        return mockToDTO(skill)
-      })
-    },
-
-    async getById(scope: SkillScope, id: string): Promise<SkillWithContentDTO | null> {
-      const skills = scope === 'global' ? mockGlobalSkills : mockAgentSkills
-      const skill = skills.find((s) => s.id === id)
-      if (!skill) return null
-
-      const content = mockSkillContents[id]
-      const agent = skill.agentId ? mockAgents.find((a) => a.id === skill.agentId) : undefined
-
-      return {
-        ...mockToDTO(skill, agent?.name),
-        skillMd: content?.skillMd ?? '',
-        config: content?.config,
-      }
-    },
-
-    async getByName(scope: SkillScope, name: string, agentId?: string): Promise<SkillWithContentDTO | null> {
-      const skills = scope === 'global' ? mockGlobalSkills : mockAgentSkills
-      const skill = skills.find((s) => {
-        if (s.name !== name) return false
-        if (scope === 'agent' && agentId && s.agentId !== agentId) return false
-        return true
-      })
-      if (!skill) return null
-
-      const content = mockSkillContents[skill.id]
-      const agent = skill.agentId ? mockAgents.find((a) => a.id === skill.agentId) : undefined
-
-      return {
-        ...mockToDTO(skill, agent?.name),
-        skillMd: content?.skillMd ?? '',
-        config: content?.config,
-      }
-    },
-
-    async create(input: CreateSkillInput): Promise<SkillDTO> {
-      const now = new Date()
-      const id = `skill_${input.scope === 'global' ? 'g' : 'a'}_${Date.now()}`
-
-      const newSkill = {
-        id,
-        name: input.name,
-        description: input.description ?? '',
-        version: '1.0.0',
-        scope: input.scope,
-        agentId: input.agentId,
-        enabled: true,
-        usageCount: 0,
-        lastUsedAt: null,
-        installedAt: now,
-        modifiedAt: now,
-        hasConfig: !!input.config,
-        hasEntrypoint: false,
-        validation: undefined,
-      }
-
-      // Add to mock data
-      if (input.scope === 'global') {
-        mockGlobalSkills.push(newSkill as typeof mockGlobalSkills[number])
-      } else {
-        mockAgentSkills.push(newSkill as typeof mockAgentSkills[number])
-      }
-
-      // Store content
-      mockSkillContents[id] = {
-        skillMd: input.skillMd,
-        config: input.config,
-      }
-
-      return mockToDTO(newSkill)
-    },
-
-    async update(scope: SkillScope, id: string, input: UpdateSkillInput): Promise<SkillDTO | null> {
-      const skills = scope === 'global' ? mockGlobalSkills : mockAgentSkills
-      const skillIndex = skills.findIndex((s) => s.id === id)
-      if (skillIndex === -1) return null
-
-      const skill = skills[skillIndex]
-
-      // Update content if provided
-      if (input.skillMd !== undefined || input.config !== undefined) {
-        const existing = mockSkillContents[id] ?? { skillMd: '' }
-        mockSkillContents[id] = {
-          skillMd: input.skillMd ?? existing.skillMd,
-          config: input.config ?? existing.config,
-        }
-      }
-
-      // Update skill metadata
-      const updated = {
-        ...skill,
-        enabled: input.enabled ?? skill.enabled,
-        hasConfig: input.config !== undefined ? !!input.config : skill.hasConfig,
-        modifiedAt: new Date(),
-      }
-      skills[skillIndex] = updated
-
-      const agent = skill.agentId ? mockAgents.find((a) => a.id === skill.agentId) : undefined
-      return mockToDTO(updated, agent?.name)
-    },
-
-    async delete(scope: SkillScope, id: string): Promise<boolean> {
-      const skills = scope === 'global' ? mockGlobalSkills : mockAgentSkills
-      const index = skills.findIndex((s) => s.id === id)
-      if (index === -1) return false
-
-      skills.splice(index, 1)
-      delete mockSkillContents[id]
-      return true
-    },
-
-    async validate(_scope: SkillScope, id: string): Promise<SkillValidationResult> {
-      const content = mockSkillContents[id]
-      const errors: SkillValidationError[] = []
-      const warnings: SkillValidationError[] = []
-
-      if (!content || !content.skillMd) {
-        errors.push({
-          code: 'SKILL_MD_MISSING',
-          message: 'skill.md file is required',
-          path: 'skill.md',
-        })
-      }
-
-      if (content?.config) {
-        try {
-          JSON.parse(content.config)
-        } catch {
-          errors.push({
-            code: 'CONFIG_INVALID_JSON',
-            message: 'config.json is not valid JSON',
-            path: 'config.json',
-          })
-        }
-      }
-
-      const status = errors.length > 0 ? 'invalid' : warnings.length > 0 ? 'warnings' : 'valid'
-
-      return {
-        status,
-        errors,
-        warnings,
-        summary: errors.length > 0
-          ? `Skill has ${errors.length} error(s)`
-          : warnings.length > 0
-            ? `Skill is valid with ${warnings.length} warning(s)`
-            : 'Skill is valid and ready to use',
-        validatedAt: new Date(),
-      }
-    },
-
-    async duplicate(scope: SkillScope, id: string, target: DuplicateSkillTarget): Promise<SkillDTO> {
-      const source = await this.getById(scope, id)
-      if (!source) throw new Error('Source skill not found')
-
-      return this.create({
-        name: target.newName ?? `${source.name}-copy`,
-        description: source.description,
-        scope: target.scope,
-        agentId: target.agentId,
-        skillMd: source.skillMd,
-        config: source.config,
-      })
-    },
-
-    async exportZip(_scope: SkillScope, id: string): Promise<Blob> {
-      const content = mockSkillContents[id]
-      if (!content) throw new Error('Skill not found')
-
-      // For mock, just return a placeholder - real impl would create actual zip
-      const manifest = JSON.stringify({ id, exportedAt: new Date().toISOString() })
-      return new Blob([manifest], { type: 'application/zip' })
-    },
-  }
 }
 
 // ============================================================================
@@ -672,24 +464,4 @@ async function fileExists(path: string): Promise<boolean> {
 function isValidSkillName(name: string): boolean {
   // Must be lowercase alphanumeric with hyphens, 2-50 chars
   return /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$/.test(name) || /^[a-z0-9]{1,2}$/.test(name)
-}
-
-function mockToDTO(skill: typeof mockGlobalSkills[number] | typeof mockAgentSkills[number], agentName?: string): SkillDTO {
-  return {
-    id: skill.id,
-    name: skill.name,
-    description: skill.description,
-    version: skill.version,
-    scope: skill.scope,
-    agentId: 'agentId' in skill ? skill.agentId : undefined,
-    agentName,
-    enabled: skill.enabled,
-    usageCount: skill.usageCount,
-    lastUsedAt: skill.lastUsedAt,
-    installedAt: skill.installedAt,
-    modifiedAt: skill.modifiedAt,
-    hasConfig: skill.hasConfig,
-    hasEntrypoint: skill.hasEntrypoint,
-    validation: skill.validation,
-  }
 }

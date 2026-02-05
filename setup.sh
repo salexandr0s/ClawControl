@@ -5,9 +5,8 @@
 # Run this once after cloning to initialize the database and dependencies.
 #
 # Usage:
-#   ./setup.sh              # Full setup (install deps, migrate, seed)
-#   ./setup.sh --reset      # Reset database and reseed
-#   ./setup.sh --seed-only  # Just run seed (requires existing DB)
+#   ./setup.sh         # Full setup (install deps, migrate)
+#   ./setup.sh --reset # Reset database and re-run migrations
 #
 # =============================================================================
 
@@ -37,39 +36,23 @@ echo ""
 
 # Parse arguments
 RESET_DB=false
-SEED_ONLY=false
 
 for arg in "$@"; do
   case $arg in
     --reset)
       RESET_DB=true
       ;;
-    --seed-only)
-      SEED_ONLY=true
-      ;;
     --help|-h)
       echo "Usage: ./setup.sh [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --reset      Drop and recreate database, then seed"
-      echo "  --seed-only  Only run seed script (DB must exist)"
+      echo "  --reset  Drop and recreate database, then run migrations"
       echo "  --help       Show this help"
       echo ""
       exit 0
       ;;
   esac
 done
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Seed-only mode
-# ─────────────────────────────────────────────────────────────────────────────
-if [[ "$SEED_ONLY" == "true" ]]; then
-  echo -e "${YELLOW}Running seed only...${NC}"
-  cd "$CLAWCONTROL_DIR"
-  npm run db:seed
-  echo -e "${GREEN}✓ Seed complete!${NC}"
-  exit 0
-fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Check prerequisites
@@ -147,14 +130,6 @@ npx prisma migrate deploy
 echo "  ✓ Migrations complete"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Seed database
-# ─────────────────────────────────────────────────────────────────────────────
-echo ""
-echo -e "${BLUE}Seeding database...${NC}"
-npm run db:seed
-echo "  ✓ Seed complete"
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Verify
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
@@ -163,11 +138,9 @@ echo -e "${BLUE}Verifying setup...${NC}"
 if [[ -f "$DB_FILE" ]]; then
   size=$(du -h "$DB_FILE" | cut -f1)
   tables=$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "0")
-  agents=$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM agents;" 2>/dev/null || echo "0")
   
   echo "  ✓ Database: $DB_FILE ($size)"
   echo "  ✓ Tables: $tables"
-  echo "  ✓ Agents: $agents"
 else
   echo -e "${RED}  ✗ Database file not created${NC}"
   exit 1

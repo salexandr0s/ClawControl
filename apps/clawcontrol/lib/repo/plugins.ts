@@ -10,7 +10,6 @@
  * - DB is only used for caching/history, never as canonical truth
  */
 
-import { mockPlugins, mockPluginConfigs } from '@clawcontrol/core'
 import { getDefaultAdapter, runDynamicCommandJson } from '@clawcontrol/adapters-openclaw'
 import {
   getOpenClawCapabilities,
@@ -51,7 +50,7 @@ export interface UpdatePluginInput {
  */
 export interface PluginResponseMeta {
   /** Where the data came from */
-  source: 'openclaw_cli' | 'openclaw_status' | 'mock' | 'cache' | 'unsupported'
+  source: 'openclaw_cli' | 'openclaw_status' | 'cache' | 'unsupported'
   /** Current capabilities */
   capabilities: PluginCapabilities
   /** Whether running in degraded mode */
@@ -94,235 +93,6 @@ export interface PluginsRepo {
   getCapabilities(): Promise<OpenClawCapabilities>
   /** Check if plugin management is available */
   isAvailable(): Promise<boolean>
-}
-
-// ============================================================================
-// MOCK IMPLEMENTATION
-// ============================================================================
-
-export function createMockPluginsRepo(): PluginsRepo {
-  const mockMeta: PluginResponseMeta = {
-    source: 'mock',
-    capabilities: {
-      supported: true,
-      listJson: true,
-      infoJson: true,
-      doctor: true,
-      install: true,
-      enable: true,
-      disable: true,
-      uninstall: true,
-      setConfig: true,
-    },
-    degraded: false,
-    message: 'Running in mock mode (USE_MOCK_DATA=true)',
-  }
-
-  return {
-    async list(filters?: PluginFilters) {
-      let plugins = [...mockPlugins]
-
-      if (filters?.status) {
-        plugins = plugins.filter((p) => p.status === filters.status)
-      }
-      if (filters?.enabled !== undefined) {
-        plugins = plugins.filter((p) => p.enabled === filters.enabled)
-      }
-      if (filters?.sourceType) {
-        plugins = plugins.filter((p) => p.sourceType === filters.sourceType)
-      }
-
-      return { data: plugins.map(mockToDTO), meta: mockMeta }
-    },
-
-    async getById(id: string) {
-      const plugin = mockPlugins.find((p) => p.id === id)
-      if (!plugin) return { data: null, meta: mockMeta }
-
-      return {
-        data: {
-          ...mockToDTO(plugin),
-          configJson: mockPluginConfigs[id] ?? {},
-        },
-        meta: mockMeta,
-      }
-    },
-
-    async getByName(name: string) {
-      const plugin = mockPlugins.find((p) => p.name === name)
-      if (!plugin) return null
-
-      return {
-        ...mockToDTO(plugin),
-        configJson: mockPluginConfigs[plugin.id] ?? {},
-      }
-    },
-
-    async install(input: InstallPluginInput) {
-      const now = new Date()
-      const id = `plugin_${Date.now()}`
-      const name = extractPluginName(input.sourceType, input.spec)
-
-      const newPlugin = {
-        id,
-        name,
-        description: `Plugin installed from ${input.sourceType}`,
-        version: '1.0.0',
-        author: 'unknown',
-        enabled: false,
-        status: 'inactive' as const,
-        sourceType: input.sourceType,
-        sourcePath: input.sourceType === 'local' ? input.spec : undefined,
-        npmSpec: input.sourceType === 'npm' ? input.spec : undefined,
-        hasConfig: false,
-        restartRequired: true,
-        installedAt: now,
-        updatedAt: now,
-      }
-
-      mockPlugins.push(newPlugin as typeof mockPlugins[number])
-      return { data: mockToDTO(newPlugin), meta: mockMeta }
-    },
-
-    async update(id: string, input: UpdatePluginInput) {
-      const index = mockPlugins.findIndex((p) => p.id === id)
-      if (index === -1) return { data: null, meta: mockMeta }
-
-      const plugin = mockPlugins[index]
-
-      if (input.enabled !== undefined) {
-        mockPlugins[index] = {
-          ...plugin,
-          enabled: input.enabled,
-          status: input.enabled ? 'active' : 'inactive',
-          restartRequired: true,
-          updatedAt: new Date(),
-        }
-      }
-
-      if (input.config !== undefined) {
-        mockPluginConfigs[id] = input.config
-        mockPlugins[index] = {
-          ...mockPlugins[index],
-          hasConfig: Object.keys(input.config).length > 0,
-          restartRequired: true,
-          updatedAt: new Date(),
-        }
-      }
-
-      return { data: mockToDTO(mockPlugins[index]), meta: mockMeta }
-    },
-
-    async uninstall(id: string) {
-      const index = mockPlugins.findIndex((p) => p.id === id)
-      if (index === -1) return { success: false, meta: mockMeta }
-
-      mockPlugins.splice(index, 1)
-      delete mockPluginConfigs[id]
-      return { success: true, meta: mockMeta }
-    },
-
-    async doctor(id: string) {
-      const plugin = mockPlugins.find((p) => p.id === id)
-      if (!plugin) {
-        return {
-          data: {
-            status: 'unhealthy' as const,
-            checks: [{ name: 'Plugin exists', status: 'fail' as const, message: 'Plugin not found' }],
-            summary: 'Plugin not found',
-            checkedAt: new Date(),
-          },
-          meta: mockMeta,
-        }
-      }
-
-      if (plugin.doctorResult) {
-        return { data: plugin.doctorResult, meta: mockMeta }
-      }
-
-      const checks: PluginDoctorCheck[] = [
-        { name: 'Plugin installed', status: 'pass', message: 'Plugin is installed' },
-        {
-          name: 'Plugin status',
-          status: plugin.status === 'error' ? 'fail' : 'pass',
-          message: `Status: ${plugin.status}`,
-        },
-      ]
-
-      return {
-        data: {
-          status: plugin.status === 'error' ? 'unhealthy' : 'healthy',
-          checks,
-          summary: plugin.status === 'error' ? 'Plugin has errors' : 'All checks passed',
-          checkedAt: new Date(),
-        },
-        meta: mockMeta,
-      }
-    },
-
-    async doctorAll() {
-      const checks: PluginDoctorCheck[] = []
-      let hasErrors = false
-      let hasWarnings = false
-
-      for (const plugin of mockPlugins) {
-        const status = plugin.status === 'error' ? 'fail' : plugin.status === 'inactive' ? 'warn' : 'pass'
-        if (status === 'fail') hasErrors = true
-        if (status === 'warn') hasWarnings = true
-
-        checks.push({
-          name: plugin.name,
-          status,
-          message: `${plugin.name}: ${plugin.status}`,
-        })
-      }
-
-      return {
-        data: {
-          status: hasErrors ? 'unhealthy' : hasWarnings ? 'warning' : 'healthy',
-          checks,
-          summary: hasErrors
-            ? 'Some plugins have errors'
-            : hasWarnings
-              ? 'Some plugins are inactive'
-              : 'All plugins healthy',
-          checkedAt: new Date(),
-        },
-        meta: mockMeta,
-      }
-    },
-
-    async restart() {
-      const restarted: string[] = []
-
-      for (let i = 0; i < mockPlugins.length; i++) {
-        if (mockPlugins[i].restartRequired) {
-          restarted.push(mockPlugins[i].name)
-          mockPlugins[i] = {
-            ...mockPlugins[i],
-            restartRequired: false,
-            updatedAt: new Date(),
-          }
-        }
-      }
-
-      return { data: { pluginsRestarted: restarted }, meta: mockMeta }
-    },
-
-    async getCapabilities() {
-      return {
-        version: 'mock',
-        available: true,
-        plugins: mockMeta.capabilities,
-        sources: { cli: false, http: false },
-        probedAt: new Date(),
-      }
-    },
-
-    async isAvailable() {
-      return true
-    },
-  }
 }
 
 // ============================================================================
@@ -682,28 +452,6 @@ function extractPluginName(sourceType: PluginSourceType, spec: string): string {
 
     default:
       return spec
-  }
-}
-
-function mockToDTO(plugin: typeof mockPlugins[number]): PluginDTO {
-  return {
-    id: plugin.id,
-    name: plugin.name,
-    description: plugin.description,
-    version: plugin.version,
-    author: plugin.author,
-    enabled: plugin.enabled,
-    status: plugin.status,
-    sourceType: plugin.sourceType,
-    sourcePath: plugin.sourcePath,
-    npmSpec: plugin.npmSpec,
-    hasConfig: plugin.hasConfig,
-    configSchema: plugin.configSchema,
-    doctorResult: plugin.doctorResult,
-    restartRequired: plugin.restartRequired,
-    lastError: plugin.lastError,
-    installedAt: plugin.installedAt,
-    updatedAt: plugin.updatedAt,
   }
 }
 

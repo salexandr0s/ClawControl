@@ -1,7 +1,7 @@
 /**
  * Receipts Repository
  *
- * Provides data access for receipts (command execution logs) with both DB and mock implementations.
+ * Provides data access for receipts (command execution logs).
  * Publishes receipt events to the pub/sub system for SSE streaming.
  */
 
@@ -147,89 +147,6 @@ export function createDbReceiptsRepo(): ReceiptsRepo {
       publishReceiptFinalized(id, input.exitCode, input.durationMs)
 
       return toDTO(row)
-    },
-  }
-}
-
-// ============================================================================
-// MOCK IMPLEMENTATION
-// ============================================================================
-
-const mockReceipts: ReceiptDTO[] = []
-
-export function createMockReceiptsRepo(): ReceiptsRepo {
-  return {
-    async list(_filters?: ReceiptFilters): Promise<ReceiptDTO[]> {
-      return [...mockReceipts].sort(
-        (a, b) => b.startedAt.getTime() - a.startedAt.getTime()
-      )
-    },
-
-    async getById(id: string): Promise<ReceiptDTO | null> {
-      return mockReceipts.find((r) => r.id === id) ?? null
-    },
-
-    async listForWorkOrder(workOrderId: string): Promise<ReceiptDTO[]> {
-      return mockReceipts.filter((r) => r.workOrderId === workOrderId)
-    },
-
-    async listForOperation(operationId: string): Promise<ReceiptDTO[]> {
-      return mockReceipts.filter((r) => r.operationId === operationId)
-    },
-
-    async listRunning(): Promise<ReceiptDTO[]> {
-      return mockReceipts.filter((r) => r.endedAt === null)
-    },
-
-    async create(input: CreateReceiptInput): Promise<ReceiptDTO> {
-      const receipt: ReceiptDTO = {
-        id: `rcpt_mock_${Date.now()}`,
-        workOrderId: input.workOrderId,
-        operationId: input.operationId ?? null,
-        kind: input.kind,
-        commandName: input.commandName,
-        commandArgsJson: input.commandArgs ?? {},
-        exitCode: null,
-        durationMs: null,
-        stdoutExcerpt: '',
-        stderrExcerpt: '',
-        parsedJson: null,
-        startedAt: new Date(),
-        endedAt: null,
-      }
-      mockReceipts.push(receipt)
-      return receipt
-    },
-
-    async append(id: string, input: AppendReceiptInput): Promise<ReceiptDTO | null> {
-      const receipt = mockReceipts.find((r) => r.id === id)
-      if (!receipt) return null
-
-      if (input.stream === 'stdout') {
-        receipt.stdoutExcerpt += input.chunk
-      } else {
-        receipt.stderrExcerpt += input.chunk
-      }
-
-      // Publish to SSE stream
-      publishReceiptChunk(id, input.stream, input.chunk)
-
-      return receipt
-    },
-
-    async finalize(id: string, input: FinalizeReceiptInput): Promise<ReceiptDTO | null> {
-      const receipt = mockReceipts.find((r) => r.id === id)
-      if (!receipt) return null
-
-      receipt.exitCode = input.exitCode
-      receipt.durationMs = input.durationMs
-      receipt.parsedJson = input.parsedJson ?? null
-      receipt.endedAt = new Date()
-
-      // Publish to SSE stream
-      publishReceiptFinalized(id, input.exitCode, input.durationMs)
-
-      return receipt
     },
   }
 }

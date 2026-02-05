@@ -1,11 +1,10 @@
 /**
  * Approvals Repository
  *
- * Provides data access for approvals with both DB and mock implementations.
+ * Provides data access for approvals.
  */
 
 import { prisma } from '../db'
-import { mockApprovals } from '@clawcontrol/core'
 import type { ApprovalDTO, ApprovalFilters } from './types'
 
 // ============================================================================
@@ -97,74 +96,6 @@ export function createDbApprovalsRepo(): ApprovalsRepo {
 }
 
 // ============================================================================
-// MOCK IMPLEMENTATION
-// ============================================================================
-
-export function createMockApprovalsRepo(): ApprovalsRepo {
-  return {
-    async list(filters?: ApprovalFilters): Promise<ApprovalDTO[]> {
-      let result = [...mockApprovals]
-      if (filters?.status) {
-        const statuses = Array.isArray(filters.status) ? filters.status : [filters.status]
-        result = result.filter((a) => statuses.includes(a.status))
-      }
-      if (filters?.type) {
-        const types = Array.isArray(filters.type) ? filters.type : [filters.type]
-        result = result.filter((a) => types.includes(a.type))
-      }
-      if (filters?.workOrderId) {
-        result = result.filter((a) => a.workOrderId === filters.workOrderId)
-      }
-      return result.map(mockToDTO)
-    },
-
-    async getById(id: string): Promise<ApprovalDTO | null> {
-      const approval = mockApprovals.find((a) => a.id === id)
-      return approval ? mockToDTO(approval) : null
-    },
-
-    async listPending(): Promise<ApprovalDTO[]> {
-      return mockApprovals
-        .filter((a) => a.status === 'pending')
-        .map(mockToDTO)
-    },
-
-    async countPending(): Promise<number> {
-      return mockApprovals.filter((a) => a.status === 'pending').length
-    },
-
-    async create(input: CreateApprovalInput): Promise<ApprovalDTO> {
-      const id = `apr_mock_${Date.now()}`
-      const now = new Date()
-      return {
-        id,
-        workOrderId: input.workOrderId,
-        operationId: input.operationId ?? null,
-        type: input.type,
-        questionMd: input.questionMd,
-        status: 'pending',
-        resolvedBy: null,
-        createdAt: now,
-        resolvedAt: null,
-      }
-    },
-
-    async update(id: string, input: UpdateApprovalInput): Promise<ApprovalDTO | null> {
-      const approval = mockApprovals.find((a) => a.id === id)
-      if (!approval) return null
-
-      // In mock mode, we don't actually mutate - just return updated DTO
-      return {
-        ...mockToDTO(approval),
-        status: input.status,
-        resolvedBy: input.resolvedBy || 'user',
-        resolvedAt: new Date(),
-      }
-    },
-  }
-}
-
-// ============================================================================
 // HELPERS
 // ============================================================================
 
@@ -204,19 +135,5 @@ function toDTO(row: {
     resolvedBy: row.resolvedBy,
     createdAt: row.createdAt,
     resolvedAt: row.resolvedAt,
-  }
-}
-
-function mockToDTO(approval: typeof mockApprovals[number]): ApprovalDTO {
-  return {
-    id: approval.id,
-    workOrderId: approval.workOrderId,
-    operationId: approval.operationId,
-    type: approval.type as ApprovalDTO['type'],
-    questionMd: approval.questionMd,
-    status: approval.status as ApprovalDTO['status'],
-    resolvedBy: approval.resolvedBy,
-    createdAt: approval.createdAt,
-    resolvedAt: approval.resolvedAt,
   }
 }

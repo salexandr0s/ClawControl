@@ -5,11 +5,10 @@
  * Pages/components should only import from this file.
  *
  * Architecture:
- *   UI Components -> data.ts -> repo layer -> DB or Mock
+ *   UI Components -> data.ts -> repo layer -> DB/FS/CLI
  */
 
-import { getRepos, useMockData } from './repo'
-import { mockWorkspaceFiles } from '@clawcontrol/core'
+import { getRepos } from './repo'
 import type { OpenClawResponse } from '@/lib/openclaw/availability'
 
 import type {
@@ -236,19 +235,6 @@ export async function getGatewayProbe(): Promise<OpenClawResponse<GatewayProbeDT
 // ============================================================================
 
 export async function getWorkspaceFiles(path = '/'): Promise<WorkspaceFileDTO[]> {
-  if (useMockData()) {
-    return mockWorkspaceFiles
-      .filter((f) => f.path === path)
-      .map((f) => ({
-        id: f.id,
-        name: f.name,
-        type: f.type,
-        path: f.path,
-        size: f.size,
-        modifiedAt: f.modifiedAt,
-      }))
-  }
-
   // Server-side listing via API helper so SSR pages work consistently.
   const { listWorkspace } = await import('./fs/workspace-fs')
   return listWorkspace(path)
@@ -268,8 +254,6 @@ export async function search(
 // ============================================================================
 // UTILITY
 // ============================================================================
-
-export { useMockData }
 
 // ============================================================================
 // TYPE RE-EXPORTS

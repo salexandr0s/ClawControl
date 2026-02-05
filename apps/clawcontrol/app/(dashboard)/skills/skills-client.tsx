@@ -25,6 +25,7 @@ import {
   XCircle,
   RefreshCw,
   X,
+  ExternalLink,
 } from 'lucide-react'
 
 interface Props {
@@ -392,6 +393,15 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
           subtitle={`${skills.length} skills • ${enabledCount} enabled`}
           actions={
             <div className="flex items-center gap-2">
+              <a
+                href="https://github.com/openclaw/skills"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-bg-2 text-fg-1 hover:bg-bg-3 border border-bd-0 rounded-[var(--radius-md)]"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Find Skills
+              </a>
               <button
                 onClick={() => setShowCreateModal(true)}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-status-info text-bg-0 hover:bg-status-info/90 rounded-[var(--radius-md)]"

@@ -13,13 +13,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
-    "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "postinstall": "prisma generate"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",
@@ -66,7 +62,6 @@
     "postcss": "^8.4.35",
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.1",
-    "tsx": "^4.7.0",
     "typescript": "^5.4.0"
   }
 }
