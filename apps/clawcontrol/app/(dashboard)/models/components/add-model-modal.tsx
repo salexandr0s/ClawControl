@@ -26,6 +26,7 @@ export function AddModelModal({
   const [step, setStep] = useState<Step>('provider')
   const [providers, setProviders] = useState<AvailableModelProvider[]>([])
   const [isLoadingProviders, setIsLoadingProviders] = useState(false)
+  const [providerSearch, setProviderSearch] = useState('')
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
 
   const [authMethod, setAuthMethod] = useState<ModelAuthMethod>('apiKey')
@@ -45,6 +46,7 @@ export function AddModelModal({
     setSelectedProviderId(null)
     setAuthMethod('apiKey')
     setApiKey('')
+    setProviderSearch('')
     setError(null)
 
     let cancelled = false
@@ -75,6 +77,15 @@ export function AddModelModal({
     () => providers.filter((p) => p.supported),
     [providers]
   )
+
+  const filteredProviders = useMemo(() => {
+    const q = providerSearch.trim().toLowerCase()
+    const sorted = [...supportedProviders].sort((a, b) => a.label.localeCompare(b.label))
+    if (!q) return sorted
+    return sorted.filter((p) =>
+      p.label.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)
+    )
+  }, [providerSearch, supportedProviders])
 
   const handleSelectProvider = (providerId: string) => {
     setSelectedProviderId(providerId)
@@ -159,16 +170,31 @@ export function AddModelModal({
               No providers discovered. Make sure OpenClaw is installed and `openclaw models list --all --json` works.
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {supportedProviders.map((p) => (
-                <ProviderCard
-                  key={p.id}
-                  provider={p}
-                  selected={false}
-                  onClick={() => handleSelectProvider(p.id)}
+            <>
+              <div className="mb-3">
+                <input
+                  value={providerSearch}
+                  onChange={(e) => setProviderSearch(e.target.value)}
+                  placeholder="Search providers…"
+                  className="w-full px-3 py-2 text-sm bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-3 focus:outline-none focus:ring-1 focus:ring-status-info/50"
                 />
-              ))}
-            </div>
+              </div>
+
+              {filteredProviders.length === 0 ? (
+                <div className="text-sm text-fg-2">No matching providers.</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {filteredProviders.map((p) => (
+                    <ProviderCard
+                      key={p.id}
+                      provider={p}
+                      selected={p.id === selectedProviderId}
+                      onClick={() => handleSelectProvider(p.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -284,4 +310,3 @@ export function AddModelModal({
     </Modal>
   )
 }
-

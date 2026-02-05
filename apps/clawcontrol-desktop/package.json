@@ -8,10 +8,11 @@
   "scripts": {
     "predev": "npx tsc -p tsconfig.json",
     "dev": "npx electron .",
-    "build": "npx tsc -p tsconfig.json && npx electron-builder",
-    "build:mac": "npx tsc -p tsconfig.json && npx electron-builder --mac",
-    "build:win": "npx tsc -p tsconfig.json && npx electron-builder --win",
-    "build:linux": "npx tsc -p tsconfig.json && npx electron-builder --linux"
+    "build:server": "npm --prefix ../clawcontrol run build",
+    "build": "npm run build:server && npx tsc -p tsconfig.json && npx electron-builder",
+    "build:mac": "npm run build:server && npx tsc -p tsconfig.json && npx electron-builder --mac",
+    "build:win": "npm run build:server && npx tsc -p tsconfig.json && npx electron-builder --win",
+    "build:linux": "npm run build:server && npx tsc -p tsconfig.json && npx electron-builder --linux"
   },
   "build": {
     "appId": "com.clawcontrol.desktop",
@@ -23,6 +24,31 @@
       "dist/**",
       "assets/**",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../clawcontrol/.next/standalone",
+        "to": "server",
+        "filter": [
+          "**/*",
+          "!**/.env",
+          "!**/.env.*"
+        ]
+      },
+      {
+        "from": "../clawcontrol/.next/static",
+        "to": "server/apps/clawcontrol/.next/static",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../clawcontrol/public",
+        "to": "server/apps/clawcontrol/public",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "mac": {
       "icon": "assets/icon.icns",

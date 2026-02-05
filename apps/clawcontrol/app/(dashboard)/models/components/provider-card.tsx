@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils'
 import type { AvailableModelProvider } from '@/lib/http'
-import { CheckCircle, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle, PlusCircle, XCircle } from 'lucide-react'
 
 export function ProviderCard({
   provider,
@@ -13,6 +13,8 @@ export function ProviderCard({
   selected: boolean
   onClick: () => void
 }) {
+  const isConfigured = provider.authStatus === 'ok' || provider.authStatus === 'expiring'
+
   return (
     <button
       type="button"
@@ -29,13 +31,16 @@ export function ProviderCard({
         <div className="text-xs text-fg-3 font-mono truncate">{provider.id}</div>
       </div>
       <div className="shrink-0 mt-0.5">
-        {provider.supported ? (
+        {!provider.supported ? (
+          <XCircle className="w-4 h-4 text-fg-3" />
+        ) : provider.authStatus === 'expired' ? (
+          <AlertTriangle className="w-4 h-4 text-status-warning" />
+        ) : isConfigured ? (
           <CheckCircle className="w-4 h-4 text-status-success" />
         ) : (
-          <XCircle className="w-4 h-4 text-fg-3" />
+          <PlusCircle className="w-4 h-4 text-fg-3" />
         )}
       </div>
     </button>
   )
 }
-

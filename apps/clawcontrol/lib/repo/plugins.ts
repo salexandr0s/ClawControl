@@ -10,7 +10,7 @@
  * - DB is only used for caching/history, never as canonical truth
  */
 
-import { getDefaultAdapter, runDynamicCommandJson } from '@clawcontrol/adapters-openclaw'
+import { createAdapter, runDynamicCommandJson } from '@clawcontrol/adapters-openclaw'
 import {
   getOpenClawCapabilities,
   type OpenClawCapabilities,
@@ -99,7 +99,7 @@ export interface PluginsRepo {
 // ============================================================================
 
 export function createCliPluginsRepo(): PluginsRepo {
-  const adapter = getDefaultAdapter()
+  const adapter = createAdapter({ mode: 'local_cli' })
 
   /**
    * Build response metadata from capabilities

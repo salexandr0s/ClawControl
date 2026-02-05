@@ -372,6 +372,16 @@ export const agentsApi = {
       }
     }>(`/api/agents/create-from-template?templateId=${templateId}`),
 
+  previewFromTemplate: (data: { templateId: string; params: Record<string, unknown> }) =>
+    apiPost<{
+      data: {
+        template: { id: string; name: string; version: string; role: string }
+        agentName: string
+        sessionKey: string
+        files: Array<{ source: string; destination: string; contentPreview: string }>
+      }
+    }>('/api/agents/create-from-template/preview', data),
+
   createFromTemplate: (data: {
     templateId: string
     params: Record<string, unknown>
@@ -1544,6 +1554,7 @@ export interface AvailableModelProvider {
   id: string
   label: string
   supported: boolean
+  authStatus: 'ok' | 'expiring' | 'expired' | 'missing'
   auth: {
     apiKey: boolean
     oauth: boolean

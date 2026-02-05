@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getDefaultAdapter, checkOpenClaw, OPENCLAW_BIN, MIN_OPENCLAW_VERSION, runCommandJson } from '@clawcontrol/adapters-openclaw'
+import { createAdapter, checkOpenClaw, OPENCLAW_BIN, MIN_OPENCLAW_VERSION, runCommandJson } from '@clawcontrol/adapters-openclaw'
 
 const CACHE_TTL_MS = 30_000
 
@@ -64,7 +64,7 @@ export async function GET() {
 
   if (!inFlight) {
     inFlight = (async (): Promise<MaintenanceResponseBody> => {
-      const adapter = getDefaultAdapter()
+      const adapter = createAdapter({ mode: 'local_cli' })
 
       // Check OpenClaw CLI availability
       const cliCheck = await checkOpenClaw()

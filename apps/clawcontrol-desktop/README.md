@@ -3,7 +3,8 @@
 This is a lightweight Electron wrapper around the existing ClawControl web app.
 
 ## Prereqs
-- The backend (Next.js) must be running at `http://127.0.0.1:3000`.
+- None for normal usage: the app will auto-start the local server on `http://127.0.0.1:3000` if it isn’t already running.
+- If something else is using port `3000`, the app will show an error and exit.
 
 ## Generate icons
 ```bash
@@ -12,10 +13,7 @@ This is a lightweight Electron wrapper around the existing ClawControl web app.
 
 ## Dev
 ```bash
-# In repo root, start backend:
-./start.sh --web
-
-# In another terminal, start Electron:
+# Start Electron (it spawns the backend automatically):
 npm run dev --workspace=clawcontrol-desktop
 ```
 
@@ -26,4 +24,3 @@ npm run build:mac --workspace=clawcontrol-desktop
 ```
 
 Artifacts will be emitted under `apps/clawcontrol-desktop/dist/release/`.
-

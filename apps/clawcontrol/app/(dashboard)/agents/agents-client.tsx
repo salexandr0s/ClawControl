@@ -558,8 +558,8 @@ export function AgentsClient() {
                   <div className="col-span-full">
                     <EmptyState
                       icon={<Bot className="w-8 h-8" />}
-                      title="No agents discovered"
-                      description="Check OpenClaw connection."
+                      title="No agents configured"
+                      description="Create your first agent to get started."
                     />
                   </div>
                 ) : (
@@ -587,8 +587,8 @@ export function AgentsClient() {
                   emptyState={
                     <EmptyState
                       icon={<Bot className="w-8 h-8" />}
-                      title="No agents discovered"
-                      description="Check OpenClaw connection."
+                      title="No agents configured"
+                      description="Create your first agent to get started."
                     />
                   }
                 />
@@ -881,6 +881,14 @@ function CreateFromTemplateWizard({
     }
   }, [isOpen])
 
+  function formatFetchError(err: unknown, fallback: string): string {
+    if (!(err instanceof Error)) return fallback
+    if (err.message === 'Failed to fetch') {
+      return 'Failed to reach the server. Check the dev server logs for build/runtime errors and try again.'
+    }
+    return err.message
+  }
+
   async function fetchTemplates() {
     setLoading(true)
     try {
@@ -888,7 +896,7 @@ function CreateFromTemplateWizard({
       // Only show valid templates
       setTemplates(result.data.filter((t) => t.isValid))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load templates')
+      setError(formatFetchError(err, 'Failed to load templates'))
     } finally {
       setLoading(false)
     }
@@ -910,7 +918,7 @@ function CreateFromTemplateWizard({
       setParams(result.data.defaults)
       setStep('params')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load template')
+      setError(formatFetchError(err, 'Failed to load template'))
     } finally {
       setLoading(false)
     }
@@ -933,17 +941,20 @@ function CreateFromTemplateWizard({
     }
     setError(null)
 
-    // Mock preview data - in a real implementation, you'd call a preview API
-    const previewData = templateInfo?.renderTargets?.map((target) => ({
-      source: target.source,
-      destination: target.destination.replace(/\{\{(\w+)\}\}/g, (_, key) =>
-        String(params[key] || `{{${key}}}`)
-      ),
-      contentPreview: `# Preview of ${target.source}\n\nParameters will be rendered here...`,
-    })) || []
+    if (!selectedTemplateId) return
 
-    setPreviewFiles(previewData)
-    setStep('preview')
+    setLoading(true)
+    agentsApi.previewFromTemplate({ templateId: selectedTemplateId, params })
+      .then((res) => {
+        setPreviewFiles(res.data.files)
+        setStep('preview')
+      })
+      .catch((err) => {
+        setError(formatFetchError(err, 'Failed to render preview'))
+      })
+      .finally(() => {
+        setLoading(false)
+      })
   }
 
   function handleConfirm() {

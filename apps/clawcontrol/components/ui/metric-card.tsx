@@ -38,7 +38,7 @@ export function MetricCard({
           <Icon className={cn('w-6 h-6', t.icon)} />
         </div>
         <div className="min-w-0">
-          <div className={cn('text-2xl font-semibold leading-none tabular-nums', t.value)}>
+          <div className={cn('text-xl font-semibold leading-none tabular-nums', t.value)}>
             {value}
           </div>
           <div className="text-sm text-fg-2 mt-1 truncate">{label}</div>
@@ -47,4 +47,3 @@ export function MetricCard({
     </div>
   )
 }
-

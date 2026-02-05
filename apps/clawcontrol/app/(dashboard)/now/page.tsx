@@ -51,7 +51,6 @@ export default async function NowPage() {
     type: apr.type,
     title: apr.questionMd.slice(0, 50) + (apr.questionMd.length > 50 ? '...' : ''),
     work_order_id: apr.workOrderId,
-    agent: 'agent', // Will be enhanced when we add agent lookup
     requested_at: formatRelativeTime(apr.createdAt),
   }))
 

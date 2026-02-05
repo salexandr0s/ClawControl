@@ -7,6 +7,7 @@ export interface AvailableModelProvider {
   id: string
   label: string
   supported: boolean
+  authStatus: 'ok' | 'expiring' | 'expired' | 'missing'
   auth: {
     apiKey: boolean
     oauth: boolean
@@ -21,7 +22,17 @@ type ModelListAllResponse = {
 
 type ModelsStatusResponse = {
   auth?: {
-    providersWithOAuth?: string[]
+    providers?: Array<{
+      provider: string
+      profiles?: { count?: number }
+      env?: { value?: string }
+    }>
+    oauth?: {
+      providers?: Array<{
+        provider: string
+        status: 'ok' | 'expiring' | 'expired' | 'missing'
+      }>
+    }
   }
 }
 
@@ -63,15 +74,35 @@ export async function getAvailableModelProviders(): Promise<AvailableModelProvid
     }
   }
 
-  const oauthProviders = new Set<string>(status.data?.auth?.providersWithOAuth ?? [])
+  const configuredProviders = new Set<string>()
+  for (const p of status.data?.auth?.providers ?? []) {
+    const profilesCount = p.profiles?.count ?? 0
+    const envValue = typeof p.env?.value === 'string' ? p.env.value : ''
+    if (profilesCount > 0 || envValue.length > 0) {
+      configuredProviders.add(p.provider)
+    }
+  }
+
+  const oauthStatusByProvider = new Map<string, AvailableModelProvider['authStatus']>()
+  for (const p of status.data?.auth?.oauth?.providers ?? []) {
+    oauthStatusByProvider.set(p.provider, p.status)
+  }
+  const oauthSupported = new Set<string>(oauthStatusByProvider.keys())
+
+  function computeAuthStatus(providerId: string): AvailableModelProvider['authStatus'] {
+    const oauthStatus = oauthStatusByProvider.get(providerId)
+    if (oauthStatus && oauthStatus !== 'missing') return oauthStatus
+    return configuredProviders.has(providerId) ? 'ok' : 'missing'
+  }
 
   const known = KNOWN_PROVIDERS.map((p) => ({
     id: p.id,
     label: p.label,
     supported: discovered.has(p.id),
+    authStatus: computeAuthStatus(p.id),
     auth: {
       apiKey: true,
-      oauth: oauthProviders.has(p.id),
+      oauth: oauthSupported.has(p.id),
       oauthRequiresTty: true,
     },
   }))
@@ -86,9 +117,10 @@ export async function getAvailableModelProviders(): Promise<AvailableModelProvid
       id,
       label: titleCaseProvider(id),
       supported: true,
+      authStatus: computeAuthStatus(id),
       auth: {
         apiKey: true,
-        oauth: oauthProviders.has(id),
+        oauth: oauthSupported.has(id),
         oauthRequiresTty: true,
       },
     }))
@@ -125,4 +157,3 @@ export async function addModelProviderApiKeyAuth(options: {
 
   return { ok: true }
 }
-

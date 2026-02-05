@@ -23,12 +23,31 @@ export interface SpawnResult {
   sessionId: string | null
 }
 
-function parseLinkageFromSessionKey(sessionKey: string): { operationId?: string; workOrderId?: string } {
-  const opMatch = sessionKey.match(/(?:^|:)op:([a-z0-9]{10,})/i)
-  const woMatch = sessionKey.match(/(?:^|:)wo:([a-z0-9]{10,})/i)
+function parseExplicitLinkage(input: {
+  sessionKey?: string
+  flags?: string[]
+  metadata?: { operationId?: string; workOrderId?: string }
+}): { operationId?: string; workOrderId?: string } {
+  // Highest precedence: explicit metadata
+  const opMeta = input.metadata?.operationId
+  const woMeta = input.metadata?.workOrderId
+
+  // Next: flags e.g. ["op:<id>","wo:<id>"]
+  const flagOp = input.flags?.find((f) => f.startsWith('op:'))?.slice(3)
+  const flagWo = input.flags?.find((f) => f.startsWith('wo:'))?.slice(3)
+
+  // Last: sessionKey label tokens (most stable across OpenClaw versions)
+  // Convention: append a segment like :op:<operationId> (or :wo:<workOrderId>)
+  const key = input.sessionKey ?? ''
+  const opMatch = key.match(/(?:^|:)op:([a-z0-9]{10,})/i)
+  const woMatch = key.match(/(?:^|:)wo:([a-z0-9]{10,})/i)
+
+  const operationId = opMeta || flagOp || opMatch?.[1]
+  const workOrderId = woMeta || flagWo || woMatch?.[1]
+
   return {
-    ...(opMatch?.[1] ? { operationId: opMatch[1] } : {}),
-    ...(woMatch?.[1] ? { workOrderId: woMatch[1] } : {}),
+    ...(operationId ? { operationId } : {}),
+    ...(workOrderId ? { workOrderId } : {}),
   }
 }
 
@@ -75,7 +94,7 @@ export async function spawnAgentSession(options: SpawnOptions): Promise<SpawnRes
   }
 
   if (sessionId) {
-    const linkage = parseLinkageFromSessionKey(label)
+    const linkage = parseExplicitLinkage({ sessionKey: label })
     const now = new Date()
 
     await prisma.agentSession.upsert({
@@ -179,7 +198,7 @@ export async function syncAgentSessions(): Promise<{ seen: number; upserted: num
 
     const updatedAtMs = BigInt(s.updatedAt)
     const lastSeenAt = new Date(s.updatedAt)
-    const linkage = parseLinkageFromSessionKey(s.key)
+    const linkage = parseExplicitLinkage({ sessionKey: s.key, flags: s.flags, metadata: s.metadata })
 
     await prisma.agentSession.upsert({
       where: { sessionId: s.sessionId },
@@ -219,4 +238,3 @@ export async function syncAgentSessions(): Promise<{ seen: number; upserted: num
 
   return { seen: recent.length, upserted }
 }
-

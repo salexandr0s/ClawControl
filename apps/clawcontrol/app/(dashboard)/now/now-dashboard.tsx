@@ -43,7 +43,6 @@ interface PendingApproval {
   type: string
   title: string
   work_order_id: string
-  agent: string
   requested_at: string
 }
 
@@ -149,13 +148,6 @@ const approvalColumns: Column<PendingApproval>[] = [
     render: (row) => <span className="truncate max-w-[180px] inline-block text-[13px]">{row.title}</span>,
   },
   {
-    key: 'agent',
-    header: 'Agent',
-    width: '90px',
-    mono: true,
-    render: (row) => <span className="text-status-progress">{row.agent}</span>,
-  },
-  {
     key: 'requested_at',
     header: 'Age',
     width: '70px',
@@ -179,10 +171,8 @@ export function NowDashboard({
 
   const gatewayValue =
     gateway.status === 'ok'
-      ? 'Connected'
-      : gateway.status === 'degraded'
-        ? 'Degraded'
-        : 'Unavailable'
+      ? 'Live'
+      : 'Error'
 
   const gatewayTone =
     gateway.status === 'ok'
@@ -270,11 +260,18 @@ export function NowDashboard({
         {/* Activity Feed */}
         <div className="col-span-12">
           <Card title="Recent Activity">
-            <div className="space-y-1">
-              {activities.map((event) => (
-                <ActivityRow key={event.id} event={event} />
-              ))}
-            </div>
+            {activities.length === 0 ? (
+              <div className="text-center py-8 text-fg-2">
+                <p>No activity yet</p>
+                <p className="text-sm mt-1">Activity will appear here as work orders run.</p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {activities.map((event) => (
+                  <ActivityRow key={event.id} event={event} />
+                ))}
+              </div>
+            )}
           </Card>
         </div>
       </div>
