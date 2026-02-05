@@ -18,6 +18,21 @@ import {
   ShieldOff,
 } from 'lucide-react'
 
+type OpenClawDiscoverOk = {
+  status: 'connected' | 'offline'
+  gatewayUrl: string
+  hasToken: boolean
+  agentCount: number
+  agents: Array<{ id: string; identity: string }>
+}
+
+type OpenClawDiscoverNotFound = {
+  status: 'not_found'
+  message: string
+}
+
+type OpenClawDiscoverResponse = OpenClawDiscoverOk | OpenClawDiscoverNotFound
+
 export default function SettingsPage() {
   const { mode, setMode, resolved } = useLayout()
   const { theme, setTheme, density, setDensity, skipTypedConfirm, setSkipTypedConfirm } = useSettings()
@@ -30,9 +45,15 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
+  // OpenClaw auto-discovery state
+  const [discoverData, setDiscoverData] = useState<OpenClawDiscoverResponse | null>(null)
+  const [discoverLoading, setDiscoverLoading] = useState(true)
+  const [discoverError, setDiscoverError] = useState<string | null>(null)
+
   // Load environment config
   useEffect(() => {
     loadEnvConfig()
+    loadDiscover()
   }, [])
 
   async function loadEnvConfig() {
@@ -46,6 +67,27 @@ export default function SettingsPage() {
       setEnvError(err instanceof Error ? err.message : 'Failed to load config')
     } finally {
       setEnvLoading(false)
+    }
+  }
+
+  async function loadDiscover() {
+    setDiscoverLoading(true)
+    setDiscoverError(null)
+
+    try {
+      const res = await fetch('/api/openclaw/discover', { cache: 'no-store' })
+      const data = (await res.json().catch(() => null)) as OpenClawDiscoverResponse | null
+
+      if (!res.ok && res.status !== 404) {
+        throw new Error(data && 'message' in data ? data.message : 'Failed to discover OpenClaw')
+      }
+
+      setDiscoverData(data)
+    } catch (err) {
+      setDiscoverError(err instanceof Error ? err.message : 'Failed to discover OpenClaw')
+      setDiscoverData(null)
+    } finally {
+      setDiscoverLoading(false)
     }
   }
 
@@ -68,6 +110,8 @@ export default function SettingsPage() {
   }
 
   const hasWorkspaceChanges = envConfig && workspacePath !== (envConfig.config.OPENCLAW_WORKSPACE || '')
+  const discovered = discoverData && discoverData.status !== 'not_found' ? discoverData : null
+  const notFound = discoverData && discoverData.status === 'not_found' ? discoverData : null
 
   return (
     <div className="max-w-2xl space-y-8">
@@ -160,6 +204,104 @@ export default function SettingsPage() {
                 This should be the directory containing your agents/, skills/, memory/, and other workspace folders.
                 Changes require a server restart.
               </p>
+            </>
+          )}
+        </div>
+      </section>
+
+      {/* OpenClaw Auto-Discovery Section */}
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-sm font-medium text-fg-0">OpenClaw</h2>
+          <p className="text-xs text-fg-2 mt-0.5">
+            Auto-detect gateway URL and installed agents from <span className="font-mono">~/.openclaw/openclaw.json</span>
+          </p>
+        </div>
+
+        <div className="p-4 rounded-[var(--radius-lg)] bg-bg-2 border border-bd-0 space-y-4">
+          {discoverLoading ? (
+            <div className="flex items-center gap-2 text-fg-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="text-sm">Scanning local OpenClaw config...</span>
+            </div>
+          ) : discoverError ? (
+            <div className="flex items-center gap-2 text-status-danger">
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-sm">{discoverError}</span>
+              <button
+                onClick={loadDiscover}
+                className="ml-auto p-1 hover:bg-bg-3 rounded"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      'w-2 h-2 rounded-full',
+                      discoverData?.status === 'connected'
+                        ? 'bg-status-success'
+                        : discoverData?.status === 'offline'
+                          ? 'bg-status-danger'
+                          : 'bg-status-warning'
+                    )}
+                  />
+                  <span className="text-sm text-fg-1">
+                    {discoverData?.status === 'connected'
+                      ? 'Connected'
+                      : discoverData?.status === 'offline'
+                        ? 'Offline'
+                        : 'Not Found'}
+                  </span>
+                </div>
+
+                <button
+                  onClick={loadDiscover}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-1 hover:bg-bg-4 transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Refresh
+                </button>
+              </div>
+
+              {discoverData?.status === 'not_found' ? (
+                <div className="flex items-center gap-2 p-2 rounded bg-status-warning/10 text-status-warning text-xs">
+                  <AlertCircle className="w-3 h-3 shrink-0" />
+                  <span>{notFound?.message || 'OpenClaw config not found'}</span>
+                </div>
+              ) : (
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-fg-3">Gateway URL:</span>
+                    <span className="font-mono text-fg-2">{discovered?.gatewayUrl || '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-fg-3">Token detected:</span>
+                    <span className="text-fg-2">{discovered?.hasToken ? 'Yes' : 'No'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-fg-3">Agents discovered:</span>
+                    <span className="text-fg-2">{typeof discovered?.agentCount === 'number' ? discovered.agentCount : '—'}</span>
+                  </div>
+
+                  {discovered && discovered.agents.length > 0 && (
+                    <div className="pt-2 border-t border-bd-0">
+                      <p className="text-fg-3">Agents:</p>
+                      <p className="text-fg-2 mt-1">
+                        {discovered.agents
+                          .slice(0, 8)
+                          .map((a) => a.identity || a.id)
+                          .filter(Boolean)
+                          .join(', ')}
+                        {discovered.agents.length > 8 ? '…' : ''}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>

@@ -13,5 +13,15 @@ export async function register() {
     const { enableWalMode } = await import('./lib/db')
     await enableWalMode()
     console.log('[boot] WAL mode enabled')
+
+    try {
+      const { syncAgentsFromOpenClaw } = await import('./lib/sync-agents')
+      const result = await syncAgentsFromOpenClaw()
+      if (result.added || result.updated) {
+        console.log(`[boot] Synced agents from OpenClaw: ${result.added} added, ${result.updated} updated`)
+      }
+    } catch (err) {
+      console.warn('[boot] OpenClaw agent sync skipped:', err instanceof Error ? err.message : String(err))
+    }
   }
 }
