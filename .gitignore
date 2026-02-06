@@ -66,3 +66,10 @@ docs/audit/
 
 # Internal work order artifacts
 artifacts/
+
+# Private config (not for public repo)
+openclaw/
+agents/
+AGENTS.md
+SOUL.md
+docs/
