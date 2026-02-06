@@ -59,7 +59,7 @@ export function useGatewayStatus(options: UseGatewayStatusOptions = {}) {
   const normalizedStatus = status?.status ?? options.initialStatus ?? 'unavailable'
   const isOnline =
     normalizedStatus !== 'unavailable' &&
-    (status?.data?.running ?? normalizedStatus !== 'unavailable')
+    (status?.data?.running ?? true)
 
   return {
     status: normalizedStatus,
