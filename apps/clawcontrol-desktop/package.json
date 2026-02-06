@@ -1,6 +1,6 @@
 {
   "name": "clawcontrol-desktop",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "description": "ClawControl Desktop - Local-first multi-agent orchestration platform",
   "author": "ClawControl",
   "private": true,
