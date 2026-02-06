@@ -11,6 +11,10 @@ type OpenClawAgentConfig = {
     name?: string
     emoji?: string
   }
+  model?: string | {
+    primary?: string
+    fallbacks?: string[]
+  }
 }
 
 function inferDisplayName(agentId: string, cfg: OpenClawAgentConfig): string {
@@ -19,6 +23,34 @@ function inferDisplayName(agentId: string, cfg: OpenClawAgentConfig): string {
 
 function inferSessionKey(agentId: string): string {
   return buildOpenClawSessionKey(agentId)
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items = value
+    .map((item) => asString(item))
+    .filter((item): item is string => Boolean(item))
+  return items
+}
+
+function extractModelConfig(input: OpenClawAgentConfig['model']): { model?: string; fallbacks?: string[] } {
+  if (!input) return {}
+
+  if (typeof input === 'string') {
+    const model = asString(input)
+    return model ? { model } : {}
+  }
+
+  const hasModelNode = 'primary' in input || 'fallbacks' in input
+  if (!hasModelNode) return {}
+
+  const model = asString(input.primary)
+  const fallbacks = asStringArray(input.fallbacks) ?? []
+  return { ...(model ? { model } : {}), fallbacks }
 }
 
 async function getDefaultStationId(): Promise<string> {
@@ -86,6 +118,7 @@ export async function POST() {
 
     const name = inferDisplayName(a.id, a)
     const sessionKey = inferSessionKey(a.id)
+    const modelConfig = extractModelConfig(a.model)
     openclawSessionKeys.add(sessionKey)
 
     // Upsert by sessionKey (unique)
@@ -111,6 +144,10 @@ export async function POST() {
           name,
           station: defaultStationId,
         }),
+        ...(modelConfig.model ? { model: modelConfig.model } : {}),
+        ...(modelConfig.fallbacks !== undefined
+          ? { fallbacks: JSON.stringify(modelConfig.fallbacks) }
+          : {}),
       })
       created++
     } else {
@@ -122,6 +159,10 @@ export async function POST() {
               nameSource: 'openclaw',
             }),
         runtimeAgentId: a.id,
+        ...(modelConfig.model ? { model: modelConfig.model } : {}),
+        ...(modelConfig.fallbacks !== undefined
+          ? { fallbacks: JSON.stringify(modelConfig.fallbacks) }
+          : {}),
       })
       updated++
     }

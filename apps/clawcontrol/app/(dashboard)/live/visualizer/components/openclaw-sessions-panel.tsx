@@ -19,6 +19,8 @@ type SessionRow = {
   workOrderId?: string | null
 }
 
+const STALE_SESSION_AGE_MS = 5 * 60 * 1000
+
 function formatAgo(iso: string): string {
   const d = new Date(iso)
   const diff = Date.now() - d.getTime()
@@ -150,7 +152,7 @@ export function OpenClawSessionsPanel() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {byAgent.map(([agentId, rows]) => {
-          // TTL visual expiry (2 min): fade anything older than 2 min
+          // TTL visual expiry (5 min): fade anything older than the active-session window
           return (
             <div key={agentId} className="rounded-md border border-bd-0 bg-bg-1 p-2">
               <div className="flex items-center justify-between mb-2">
@@ -164,7 +166,7 @@ export function OpenClawSessionsPanel() {
               <div className="space-y-1">
                 {rows.slice(0, 6).map((s) => {
                   const ageMs = Date.now() - new Date(s.lastSeenAt).getTime()
-                  const stale = ageMs > 120_000
+                  const stale = ageMs > STALE_SESSION_AGE_MS
                   const drift = s.state === 'active' && (!s.operationId || !activeOperationIds.has(s.operationId))
 
                   return (

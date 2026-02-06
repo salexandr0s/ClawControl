@@ -49,6 +49,8 @@ export interface CreateAgentInput {
   sessionKey: string
   capabilities: Record<string, boolean>
   wipLimit?: number
+  model?: string | null
+  fallbacks?: string | null
 }
 
 export interface AgentsRepo {
@@ -136,6 +138,8 @@ export function createDbAgentsRepo(): AgentsRepo {
           sessionKey: input.sessionKey,
           capabilities: JSON.stringify(input.capabilities),
           wipLimit: input.wipLimit ?? 2,
+          ...(input.model !== undefined ? { model: input.model } : {}),
+          ...(input.fallbacks !== undefined ? { fallbacks: input.fallbacks } : {}),
         },
       })
       return toDTO(row as unknown as PrismaAgentRow)

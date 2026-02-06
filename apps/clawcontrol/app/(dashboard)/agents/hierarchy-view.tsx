@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { EmptyState, PageSection } from '@clawcontrol/ui'
 import { Bot, Loader2, RefreshCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { AgentAvatar } from '@/components/ui/agent-avatar'
+import { StationIcon } from '@/components/station-icon'
 import type {
   AgentHierarchyData,
   AgentHierarchyEdge,
@@ -19,6 +21,7 @@ interface HierarchyViewProps {
 }
 
 type EdgeFilterState = Record<AgentHierarchyEdgeType, boolean>
+type LayoutOrientation = 'top_bottom' | 'left_right'
 
 type PositionedNode = {
   node: AgentHierarchyNode
@@ -32,11 +35,13 @@ type LayoutResult = {
   positioned: PositionedNode[]
 }
 
-const NODE_WIDTH = 220
-const NODE_HEIGHT = 110
-const COLUMN_GAP = 88
-const ROW_GAP = 34
-const CANVAS_PADDING = 52
+type LayoutSizing = {
+  nodeWidth: number
+  nodeHeight: number
+  columnGap: number
+  rowGap: number
+  padding: number
+}
 
 const EDGE_LABELS: Record<AgentHierarchyEdgeType, string> = {
   reports_to: 'Reports To',
@@ -63,7 +68,12 @@ function defaultEdgeFilters(): EdgeFilterState {
   }
 }
 
-function buildLayout(nodes: AgentHierarchyNode[], edges: AgentHierarchyEdge[]): LayoutResult {
+function buildLayout(
+  nodes: AgentHierarchyNode[],
+  edges: AgentHierarchyEdge[],
+  orientation: LayoutOrientation,
+  sizing: LayoutSizing
+): LayoutResult {
   if (nodes.length === 0) {
     return {
       width: 680,
@@ -118,17 +128,17 @@ function buildLayout(nodes: AgentHierarchyNode[], edges: AgentHierarchyEdge[]): 
     }
   }
 
-  const columns = new Map<number, AgentHierarchyNode[]>()
+  const levels = new Map<number, AgentHierarchyNode[]>()
   for (const node of nodes) {
     const level = levelById.get(node.id) ?? 0
-    const bucket = columns.get(level) ?? []
+    const bucket = levels.get(level) ?? []
     bucket.push(node)
-    columns.set(level, bucket)
+    levels.set(level, bucket)
   }
 
-  const sortedLevels = Array.from(columns.keys()).sort((a, b) => a - b)
+  const sortedLevels = Array.from(levels.keys()).sort((a, b) => a - b)
   for (const level of sortedLevels) {
-    const bucket = columns.get(level)
+    const bucket = levels.get(level)
     if (!bucket) continue
     bucket.sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === 'agent' ? -1 : 1
@@ -136,19 +146,26 @@ function buildLayout(nodes: AgentHierarchyNode[], edges: AgentHierarchyEdge[]): 
     })
   }
 
-  const maxRows = Math.max(1, ...Array.from(columns.values()).map((bucket) => bucket.length))
-  const width =
-    CANVAS_PADDING * 2 +
-    sortedLevels.length * NODE_WIDTH +
-    Math.max(0, sortedLevels.length - 1) * COLUMN_GAP
-  const height = CANVAS_PADDING * 2 + maxRows * NODE_HEIGHT + Math.max(0, maxRows - 1) * ROW_GAP
+  const maxLevelSize = Math.max(1, ...Array.from(levels.values()).map((bucket) => bucket.length))
+  const levelCount = Math.max(1, sortedLevels.length)
+
+  const width = orientation === 'left_right'
+    ? sizing.padding * 2 + levelCount * sizing.nodeWidth + Math.max(0, levelCount - 1) * sizing.columnGap
+    : sizing.padding * 2 + maxLevelSize * sizing.nodeWidth + Math.max(0, maxLevelSize - 1) * sizing.columnGap
+  const height = orientation === 'left_right'
+    ? sizing.padding * 2 + maxLevelSize * sizing.nodeHeight + Math.max(0, maxLevelSize - 1) * sizing.rowGap
+    : sizing.padding * 2 + levelCount * sizing.nodeHeight + Math.max(0, levelCount - 1) * sizing.rowGap
 
   const positioned: PositionedNode[] = []
-  sortedLevels.forEach((level, columnIndex) => {
-    const bucket = columns.get(level) ?? []
-    bucket.forEach((node, rowIndex) => {
-      const x = CANVAS_PADDING + NODE_WIDTH / 2 + columnIndex * (NODE_WIDTH + COLUMN_GAP)
-      const y = CANVAS_PADDING + NODE_HEIGHT / 2 + rowIndex * (NODE_HEIGHT + ROW_GAP)
+  sortedLevels.forEach((level, levelIndex) => {
+    const bucket = levels.get(level) ?? []
+    bucket.forEach((node, itemIndex) => {
+      const x = orientation === 'left_right'
+        ? sizing.padding + sizing.nodeWidth / 2 + levelIndex * (sizing.nodeWidth + sizing.columnGap)
+        : sizing.padding + sizing.nodeWidth / 2 + itemIndex * (sizing.nodeWidth + sizing.columnGap)
+      const y = orientation === 'left_right'
+        ? sizing.padding + sizing.nodeHeight / 2 + itemIndex * (sizing.nodeHeight + sizing.rowGap)
+        : sizing.padding + sizing.nodeHeight / 2 + levelIndex * (sizing.nodeHeight + sizing.rowGap)
       positioned.push({ node, x, y })
     })
   })
@@ -183,7 +200,19 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [stationFilter, setStationFilter] = useState<string>('all')
   const [showExternalNodes, setShowExternalNodes] = useState<boolean>(true)
+  const [showStandaloneAgents, setShowStandaloneAgents] = useState<boolean>(false)
   const [edgeFilters, setEdgeFilters] = useState<EdgeFilterState>(defaultEdgeFilters)
+  const [orientation, setOrientation] = useState<LayoutOrientation>('top_bottom')
+  const [viewportWidth, setViewportWidth] = useState<number>(1600)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const onResize = () => setViewportWidth(window.innerWidth)
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const stationOptions = useMemo(() => {
     if (!data) return []
@@ -241,13 +270,68 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
 
     const visibleIds = new Set<string>([...visibleAgentIds, ...externalIds])
 
-    const nodes = data.nodes.filter((node) => visibleIds.has(node.id))
-    const edges = baseEdges.filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to))
+    let nodes = data.nodes.filter((node) => visibleIds.has(node.id))
+    let edges = baseEdges.filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to))
+
+    if (!showStandaloneAgents) {
+      const connected = new Set<string>()
+      for (const edge of edges) {
+        connected.add(edge.from)
+        connected.add(edge.to)
+      }
+
+      const filteredIds = new Set(
+        nodes
+          .filter((node) => node.kind !== 'agent' || connected.has(node.id))
+          .map((node) => node.id)
+      )
+
+      nodes = nodes.filter((node) => filteredIds.has(node.id))
+      edges = edges.filter((edge) => filteredIds.has(edge.from) && filteredIds.has(edge.to))
+    }
 
     return { nodes, edges }
-  }, [data, edgeFilters, showExternalNodes, stationFilter])
+  }, [data, edgeFilters, showExternalNodes, showStandaloneAgents, stationFilter])
 
-  const layout = useMemo(() => buildLayout(visibleGraph.nodes, visibleGraph.edges), [visibleGraph])
+  const layoutSizing = useMemo<LayoutSizing>(() => {
+    if (viewportWidth < 1000) {
+      return {
+        nodeWidth: 164,
+        nodeHeight: 76,
+        columnGap: 24,
+        rowGap: 14,
+        padding: 18,
+      }
+    }
+
+    if (viewportWidth < 1400) {
+      return {
+        nodeWidth: 180,
+        nodeHeight: 82,
+        columnGap: 40,
+        rowGap: 18,
+        padding: 26,
+      }
+    }
+
+    return {
+      nodeWidth: 194,
+      nodeHeight: 88,
+      columnGap: 52,
+      rowGap: 22,
+      padding: 34,
+    }
+  }, [viewportWidth])
+
+  const layout = useMemo(
+    () => buildLayout(visibleGraph.nodes, visibleGraph.edges, orientation, layoutSizing),
+    [visibleGraph, orientation, layoutSizing]
+  )
+
+  const positionedById = useMemo(
+    () => new Map(layout.positioned.map((positioned) => [positioned.node.id, positioned])),
+    [layout.positioned]
+  )
 
   const nodeById = useMemo(() => {
     const map = new Map<string, AgentHierarchyNode>()
@@ -338,9 +422,9 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4">
+      <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_320px] gap-4">
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-3 p-3 rounded-[var(--radius-md)] border border-bd-0 bg-bg-2">
+          <div className="flex flex-wrap items-center gap-2 p-3 rounded-[var(--radius-md)] border border-bd-0 bg-bg-2">
             <div className="flex items-center gap-2">
               {ALL_EDGE_TYPES.map((edgeType) => (
                 <button
@@ -386,9 +470,47 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
               />
               Show external nodes
             </label>
+
+            <label className="inline-flex items-center gap-2 text-xs text-fg-1">
+              <input
+                type="checkbox"
+                checked={showStandaloneAgents}
+                onChange={(event) => setShowStandaloneAgents(event.target.checked)}
+                className="rounded border-bd-1 bg-bg-1"
+              />
+              Show standalone agents
+            </label>
+
+            <div className="flex rounded-[var(--radius-sm)] border border-bd-0 overflow-hidden">
+              <button
+                onClick={() => setOrientation('top_bottom')}
+                className={cn(
+                  'px-2 py-1 text-xs transition-colors',
+                  orientation === 'top_bottom'
+                    ? 'bg-bg-3 text-fg-0'
+                    : 'bg-bg-1 text-fg-2 hover:text-fg-1'
+                )}
+              >
+                Top-down
+              </button>
+              <button
+                onClick={() => setOrientation('left_right')}
+                className={cn(
+                  'px-2 py-1 text-xs transition-colors',
+                  orientation === 'left_right'
+                    ? 'bg-bg-3 text-fg-0'
+                    : 'bg-bg-1 text-fg-2 hover:text-fg-1'
+                )}
+              >
+                Left-right
+              </button>
+            </div>
           </div>
 
-          <div className="relative h-[560px] overflow-auto rounded-[var(--radius-lg)] border border-bd-0 bg-bg-2">
+          <div
+            className="relative overflow-auto rounded-[var(--radius-lg)] border border-bd-0 bg-bg-2 min-h-[520px]"
+            style={{ height: 'clamp(520px, calc(100vh - 250px), 1400px)' }}
+          >
             <div style={{ width: layout.width, height: layout.height }} className="relative">
               <svg className="absolute inset-0" width={layout.width} height={layout.height}>
                 <defs>
@@ -405,19 +527,26 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
                 </defs>
 
                 {visibleGraph.edges.map((edge) => {
-                  const from = layout.positioned.find((positioned) => positioned.node.id === edge.from)
-                  const to = layout.positioned.find((positioned) => positioned.node.id === edge.to)
+                  const from = positionedById.get(edge.from)
+                  const to = positionedById.get(edge.to)
                   if (!from || !to) return null
 
-                  const direction = to.x >= from.x ? 1 : -1
-                  const bend = Math.max(46, Math.abs(to.x - from.x) * 0.35)
-                  const c1x = from.x + bend * direction
-                  const c2x = to.x - bend * direction
+                  const horizontal = orientation === 'left_right'
+                  const direction = horizontal
+                    ? to.x >= from.x ? 1 : -1
+                    : to.y >= from.y ? 1 : -1
+                  const bend = horizontal
+                    ? Math.max(46, Math.abs(to.x - from.x) * 0.35)
+                    : Math.max(46, Math.abs(to.y - from.y) * 0.35)
+                  const c1x = horizontal ? from.x + bend * direction : from.x
+                  const c1y = horizontal ? from.y : from.y + bend * direction
+                  const c2x = horizontal ? to.x - bend * direction : to.x
+                  const c2y = horizontal ? to.y : to.y - bend * direction
 
                   return (
                     <path
                       key={edge.id}
-                      d={`M ${from.x} ${from.y} C ${c1x} ${from.y}, ${c2x} ${to.y}, ${to.x} ${to.y}`}
+                      d={`M ${from.x} ${from.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${to.x} ${to.y}`}
                       fill="none"
                       stroke={EDGE_STROKE[edge.type]}
                       strokeOpacity={edge.type === 'can_message' ? 0.7 : 0.92}
@@ -436,20 +565,42 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
                     key={node.id}
                     onClick={() => setSelectedNodeId(node.id)}
                     className={cn(
-                      'absolute text-left p-3 rounded-[var(--radius-md)] border transition-colors shadow-sm',
+                      'absolute text-left p-2.5 rounded-[var(--radius-md)] border transition-colors shadow-sm',
                       'bg-bg-1 hover:bg-bg-3',
                       node.kind === 'external' ? 'border-status-warning/30' : 'border-bd-0',
                       isSelected && 'border-status-progress/60 ring-1 ring-status-progress/40'
                     )}
                     style={{
-                      width: NODE_WIDTH,
-                      minHeight: NODE_HEIGHT,
-                      left: x - NODE_WIDTH / 2,
-                      top: y - NODE_HEIGHT / 2,
+                      width: layoutSizing.nodeWidth,
+                      minHeight: layoutSizing.nodeHeight,
+                      left: x - layoutSizing.nodeWidth / 2,
+                      top: y - layoutSizing.nodeHeight / 2,
                     }}
                   >
-                    <p className="text-sm font-medium text-fg-0 truncate">{node.label}</p>
-                    <p className="text-[11px] text-fg-2 truncate">{node.id}</p>
+                    <div className="flex items-start gap-2">
+                      {node.kind === 'agent' ? (
+                        <AgentAvatar
+                          agentId={node.dbAgentId ?? node.id}
+                          name={node.label}
+                          size="sm"
+                          className="mt-0.5"
+                        />
+                      ) : (
+                        <div className="w-6 h-6 mt-0.5 rounded-[var(--radius-md)] bg-bg-3 flex items-center justify-center text-fg-2">
+                          <Bot className="w-3.5 h-3.5" />
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs md:text-sm font-medium text-fg-0 truncate">{node.label}</p>
+                          {node.kind === 'agent' && node.station && (
+                            <StationIcon stationId={node.station} size="sm" className="shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-[10px] md:text-[11px] text-fg-2 truncate">{node.id}</p>
+                      </div>
+                    </div>
 
                     <div className="mt-2 flex flex-wrap gap-1">
                       {node.capabilities.delegate && <CapabilityBadge label="delegate" />}
@@ -473,7 +624,7 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-3 2xl:sticky 2xl:top-4 self-start">
           <PageSection title="Node Details">
             {!selectedNode ? (
               <p className="text-sm text-fg-2">Select a node to inspect details.</p>

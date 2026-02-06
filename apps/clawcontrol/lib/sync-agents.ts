@@ -45,6 +45,7 @@ export async function syncAgentsFromOpenClaw(
 
     const name = inferDisplayName(agent)
     const sessionKey = inferSessionKey(agent.id)
+    const fallbacks = Array.isArray(agent.fallbacks) ? agent.fallbacks : undefined
     const existing =
       (await repos.agents.getBySessionKey(sessionKey)) ??
       (await repos.agents.getByName(agent.id))
@@ -67,6 +68,8 @@ export async function syncAgentsFromOpenClaw(
           name,
           station: defaultStationId,
         }),
+        ...(agent.model ? { model: agent.model } : {}),
+        ...(fallbacks !== undefined ? { fallbacks: JSON.stringify(fallbacks) } : {}),
       })
       added++
     } else {
@@ -79,6 +82,7 @@ export async function syncAgentsFromOpenClaw(
             }),
         runtimeAgentId: agent.id,
         ...(agent.model ? { model: agent.model } : {}),
+        ...(fallbacks !== undefined ? { fallbacks: JSON.stringify(fallbacks) } : {}),
       })
       updated++
     }

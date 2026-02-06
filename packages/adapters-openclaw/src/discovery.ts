@@ -13,6 +13,7 @@ export interface DiscoveredAgent {
   id: string
   identity?: string
   model?: string
+  fallbacks?: string[]
   agentDir?: string
 }
 
@@ -20,14 +21,87 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined
 }
 
-function extractGatewayUrl(config: any): string {
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+
+  const items = value
+    .map((item) => asString(item))
+    .filter((item): item is string => Boolean(item))
+
+  return items.length > 0 ? items : undefined
+}
+
+function extractModelPrimary(value: unknown): string | undefined {
+  if (typeof value === 'string') return asString(value)
+  if (!value || typeof value !== 'object') return undefined
+
+  const node = value as {
+    primary?: unknown
+    model?: unknown
+    id?: unknown
+    key?: unknown
+  }
+
   return (
+    asString(node.primary) ||
+    asString(node.model) ||
+    asString(node.id) ||
+    asString(node.key)
+  )
+}
+
+function extractModelFallbacks(value: unknown): string[] | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const node = value as { fallbacks?: unknown }
+  if (!Object.prototype.hasOwnProperty.call(node, 'fallbacks')) return undefined
+  return asStringArray(node.fallbacks) ?? []
+}
+
+function extractGatewayUrl(config: any): string {
+  const explicitUrl =
     asString(config?.remote?.url) ||
     asString(config?.gateway?.url) ||
     asString(config?.gateway?.wsUrl) ||
-    asString(config?.gateway?.ws_url) ||
-    'http://127.0.0.1:3001'
-  )
+    asString(config?.gateway?.ws_url)
+  if (explicitUrl) return explicitUrl
+
+  const gateway = config?.gateway
+  const port = asPort(gateway?.port) ?? 18789
+  const host =
+    asString(gateway?.host) ||
+    asString(gateway?.bindAddress) ||
+    asString(gateway?.bind_address) ||
+    hostFromBind(asString(gateway?.bind)) ||
+    '127.0.0.1'
+
+  const protocol = asString(gateway?.protocol)?.toLowerCase()
+  const tlsEnabled =
+    protocol === 'https' ||
+    protocol === 'wss' ||
+    gateway?.https === true ||
+    gateway?.tls?.enabled === true
+  const scheme = tlsEnabled ? 'https' : 'http'
+
+  return `${scheme}://${host}:${port}`
+}
+
+function asPort(value: unknown): number | undefined {
+  const num = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(num)) return undefined
+
+  const port = Math.trunc(num)
+  if (port < 1 || port > 65535) return undefined
+  return port
+}
+
+function hostFromBind(value: string | undefined): string | undefined {
+  if (!value) return undefined
+
+  const bind = value.trim().toLowerCase()
+  if (!bind) return undefined
+  if (bind === 'loopback' || bind === 'localhost') return '127.0.0.1'
+  if (bind === 'all' || bind === '0.0.0.0' || bind === '::' || bind === '[::]') return '127.0.0.1'
+  return value.trim()
 }
 
 function extractToken(config: any): string | null {
@@ -43,6 +117,7 @@ function extractToken(config: any): string | null {
 function extractAgents(config: any): DiscoveredAgent[] {
   const defs: any[] =
     (Array.isArray(config?.agents?.definitions) ? config.agents.definitions : null) ||
+    (Array.isArray(config?.agents?.list) ? config.agents.list : null) ||
     (Array.isArray(config?.agents) ? config.agents : null) ||
     []
 
@@ -55,11 +130,14 @@ function extractAgents(config: any): DiscoveredAgent[] {
       asString(a?.identity) ||
       asString(a?.identity?.name) ||
       asString(a?.name)
+    const model = extractModelPrimary(a?.model)
+    const fallbacks = extractModelFallbacks(a?.model)
 
     out.push({
       id,
       identity,
-      model: asString(a?.model),
+      model,
+      fallbacks,
       agentDir: asString(a?.agentDir),
     })
   }

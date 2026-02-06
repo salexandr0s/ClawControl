@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import { getRepos } from '@/lib/repo'
-import { upsertAgentToOpenClaw } from '@/lib/services/openclaw-config'
+import { getAgentModelFromOpenClaw, upsertAgentToOpenClaw } from '@/lib/services/openclaw-config'
 import {
   checkOpenClawAvailable,
 } from '@clawcontrol/adapters-openclaw'
@@ -89,14 +89,21 @@ export async function POST(
       chunk: `Registering ${agent.displayName} in OpenClaw config...\n`,
     })
 
+    const discoveredModelConfig =
+      agent.nameSource === 'openclaw'
+        ? await getAgentModelFromOpenClaw(agent.sessionKey)
+        : null
+    const modelToProvision = discoveredModelConfig?.model ?? agent.model
+    const fallbacksToProvision = discoveredModelConfig?.fallbacks ?? agent.fallbacks
+
     const upsert = await upsertAgentToOpenClaw({
       agentId: agent.runtimeAgentId,
       runtimeAgentId: agent.runtimeAgentId,
       slug: agent.slug,
       displayName: agent.displayName,
       sessionKey: agent.sessionKey,
-      model: agent.model,
-      fallbacks: agent.fallbacks,
+      model: modelToProvision,
+      fallbacks: fallbacksToProvision,
     })
 
     if (!upsert.ok) {

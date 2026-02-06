@@ -27,11 +27,12 @@ type OpenClawStatusAll = {
 }
 
 const OPENCLAW_STATUS_TIMEOUT_MS = 15_000
+const ACTIVE_SESSION_AGE_MS = 5 * 60 * 1000
 
 function deriveState(s: { abortedLastRun?: boolean; age?: number }): string {
   if (s.abortedLastRun) return 'error'
-  // Consider anything updated within the last 2 minutes as active-ish
-  if (typeof s.age === 'number' && s.age < 120_000) return 'active'
+  // Consider anything updated within the last 5 minutes as active-ish
+  if (typeof s.age === 'number' && s.age < ACTIVE_SESSION_AGE_MS) return 'active'
   return 'idle'
 }
 

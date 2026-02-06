@@ -9,6 +9,7 @@ import { runCommandJson } from '@clawcontrol/adapters-openclaw'
 
 const execFileAsync = promisify(execFile)
 const OPENCLAW_STATUS_TIMEOUT_MS = 15_000
+const ACTIVE_SESSION_AGE_MS = 5 * 60 * 1000
 
 export interface SpawnOptions {
   agentId: string
@@ -176,7 +177,7 @@ type OpenClawStatusAll = {
 
 function deriveState(s: { abortedLastRun?: boolean; age?: number }): string {
   if (s.abortedLastRun) return 'error'
-  if (typeof s.age === 'number' && s.age < 120_000) return 'active'
+  if (typeof s.age === 'number' && s.age < ACTIVE_SESSION_AGE_MS) return 'active'
   return 'idle'
 }
 

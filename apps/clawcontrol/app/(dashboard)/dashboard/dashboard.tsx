@@ -312,6 +312,11 @@ export function Dashboard({
     [usageSummary?.series]
   )
 
+  const dailyRows = useMemo(
+    () => usageSeries.slice(-7).reverse(),
+    [usageSeries]
+  )
+
   const maxSeriesValue = usageSeries.reduce((max, point) => {
     const value = Number(point.totalTokens)
     return Number.isFinite(value) && value > max ? value : max
@@ -354,8 +359,8 @@ export function Dashboard({
         <MetricCard label="Completed" value={stats.completedToday} icon={CheckCircle} tone="muted" />
       </div>
 
-      <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-bd-0 p-4">
-        <div className="flex items-center justify-between mb-3">
+      <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-bd-0 overflow-hidden">
+        <div className="px-4 py-3 border-b border-bd-0 flex items-center justify-between">
           <h2 className="terminal-header">Usage + Cost</h2>
           <button
             onClick={handleSyncUsage}
@@ -367,73 +372,92 @@ export function Dashboard({
           </button>
         </div>
 
-        {usageLoading ? (
-          <div className="text-sm text-fg-2">Loading usage metrics…</div>
-        ) : usageSummary ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <MiniMetric
-                label="Total Tokens"
-                value={formatCompactNumber(usageSummary.totals.totalTokens)}
-              />
-              <MiniMetric
-                label="Total Cost"
-                value={formatUsdFromMicros(usageSummary.totals.totalCostMicros)}
-              />
-              <MiniMetric
-                label="Cache Efficiency"
-                value={`${usageSummary.totals.cacheEfficiencyPct.toFixed(2)}%`}
-              />
-              <MiniMetric
-                label="Cache Read"
-                value={formatCompactNumber(usageSummary.totals.cacheReadTokens)}
-              />
-            </div>
+        <div className="p-4">
+          {usageLoading ? (
+            <div className="text-sm text-fg-2">Loading usage metrics…</div>
+          ) : usageSummary ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <MiniMetric
+                  label="Total Tokens"
+                  value={formatCompactNumber(usageSummary.totals.totalTokens)}
+                />
+                <MiniMetric
+                  label="Total Cost"
+                  value={formatUsdFromMicros(usageSummary.totals.totalCostMicros)}
+                />
+                <MiniMetric
+                  label="Cache Efficiency"
+                  value={`${usageSummary.totals.cacheEfficiencyPct.toFixed(2)}%`}
+                />
+                <MiniMetric
+                  label="Cache Read"
+                  value={formatCompactNumber(usageSummary.totals.cacheReadTokens)}
+                />
+              </div>
 
-            <div>
-              <div className="text-xs text-fg-2 mb-2">Daily usage (tokens)</div>
-              {usageSeries.length === 0 ? (
-                <div className="text-xs text-fg-3">No usage data yet.</div>
-              ) : (
-                <div className="h-24 flex items-end gap-1">
-                  {usageSeries.map((point) => {
-                    const value = Number(point.totalTokens)
-                    const heightPct =
-                      maxSeriesValue > 0 && Number.isFinite(value)
-                        ? Math.max(6, (value / maxSeriesValue) * 100)
-                        : 6
-                    return (
-                      <div
-                        key={point.bucketStart}
-                        className="flex-1 bg-status-info/25 hover:bg-status-info/45 rounded-t transition-colors"
-                        style={{ height: `${heightPct}%` }}
-                        title={`${new Date(point.bucketStart).toLocaleDateString()} · ${formatCompactNumber(point.totalTokens)} tokens`}
-                      />
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <div className="text-xs text-fg-2 mb-2">By model cost split</div>
-              {usageBreakdown && usageBreakdown.groups.length > 0 ? (
-                <div className="space-y-1">
-                  {usageBreakdown.groups.slice(0, 5).map((group) => (
-                    <div key={group.key} className="flex items-center justify-between text-xs">
-                      <span className="text-fg-1 truncate max-w-[260px]">{group.key}</span>
-                      <span className="font-mono text-fg-2">{formatUsdFromMicros(group.totalCostMicros)}</span>
+              <div>
+                <div className="text-xs text-fg-2 mb-2">Daily usage (tokens)</div>
+                {usageSeries.length === 0 ? (
+                  <div className="text-xs text-fg-3">No usage data yet.</div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="h-28 flex items-end gap-1.5 p-2 rounded border border-bd-0 bg-bg-3/70">
+                      {usageSeries.map((point) => {
+                        const value = Number(point.totalTokens)
+                        const heightPct =
+                          maxSeriesValue > 0 && Number.isFinite(value)
+                            ? Math.max(8, (value / maxSeriesValue) * 100)
+                            : 8
+                        return (
+                          <div
+                            key={point.bucketStart}
+                            className="flex-1 bg-status-info rounded-sm hover:opacity-90 transition-opacity"
+                            style={{ height: `${heightPct}%` }}
+                            title={`${new Date(point.bucketStart).toLocaleDateString()} · ${formatCompactNumber(point.totalTokens)} tokens · ${formatUsdFromMicros(point.totalCostMicros)}`}
+                          />
+                        )
+                      })}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-xs text-fg-3">No model-level usage data yet.</div>
-              )}
+
+                    <div className="rounded border border-bd-0 overflow-hidden">
+                      <div className="grid grid-cols-[120px_1fr_120px] px-3 py-1.5 text-[11px] text-fg-2 bg-bg-3">
+                        <span>Date</span>
+                        <span>Tokens</span>
+                        <span className="text-right">Cost</span>
+                      </div>
+                      {dailyRows.map((row) => (
+                        <div key={`day-${row.bucketStart}`} className="grid grid-cols-[120px_1fr_120px] px-3 py-1.5 text-xs border-t border-bd-0/60">
+                          <span className="text-fg-2">{new Date(row.bucketStart).toLocaleDateString()}</span>
+                          <span className="text-fg-1 font-mono">{formatCompactNumber(row.totalTokens)}</span>
+                          <span className="text-fg-2 font-mono text-right">{formatUsdFromMicros(row.totalCostMicros)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="text-xs text-fg-2 mb-2">By model cost split</div>
+                {usageBreakdown && usageBreakdown.groups.length > 0 ? (
+                  <div className="space-y-1">
+                    {usageBreakdown.groups.slice(0, 5).map((group) => (
+                      <div key={group.key} className="flex items-center justify-between text-xs">
+                        <span className="text-fg-1 truncate max-w-[260px]">{group.key}</span>
+                        <span className="font-mono text-fg-2">{formatUsdFromMicros(group.totalCostMicros)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-fg-3">No model-level usage data yet.</div>
+                )}
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="text-sm text-fg-2">Usage metrics unavailable.</div>
-        )}
+          ) : (
+            <div className="text-sm text-fg-2">Usage metrics unavailable.</div>
+          )}
+        </div>
       </div>
 
       {/* Main Grid */}
