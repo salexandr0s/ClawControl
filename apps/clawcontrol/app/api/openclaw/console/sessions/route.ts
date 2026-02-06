@@ -21,6 +21,10 @@ export interface ConsoleSessionDTO {
   abortedLastRun: boolean
   operationId: string | null
   workOrderId: string | null
+  totalTokens: string | null
+  totalCostMicros: string | null
+  toolSummary: Array<{ name: string; count: string }>
+  hasErrors: boolean
   lastSeenAt: Date
   createdAt: Date
   updatedAt: Date
@@ -116,6 +120,9 @@ export async function GET(request: NextRequest) {
   const agentId = searchParams.get('agentId')
   const state = searchParams.get('state')
   const kind = searchParams.get('kind')
+  const containsErrors = searchParams.get('containsErrors')
+  const minCostMicros = searchParams.get('minCostMicros')
+  const toolUsed = searchParams.get('toolUsed')?.trim().toLowerCase() || null
   const limit = Math.min(Number(searchParams.get('limit') ?? 200), 500)
 
   try {
@@ -147,6 +154,61 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const sessionIds = rows.map((r) => r.sessionId)
+    const usageRows = sessionIds.length > 0
+      ? await prisma.sessionUsageAggregate.findMany({
+        where: { sessionId: { in: sessionIds } },
+      })
+      : []
+
+    const usageBySessionId = new Map(usageRows.map((row) => [row.sessionId, row]))
+
+    const toolRows = sessionIds.length > 0
+      ? await prisma.sessionToolUsage.findMany({
+        where: { sessionId: { in: sessionIds } },
+        orderBy: [{ callCount: 'desc' }],
+      })
+      : []
+
+    const toolsBySessionId = new Map<string, Array<{ name: string; count: bigint }>>()
+    for (const tool of toolRows) {
+      const bucket = toolsBySessionId.get(tool.sessionId) ?? []
+      bucket.push({ name: tool.toolName, count: tool.callCount })
+      toolsBySessionId.set(tool.sessionId, bucket)
+    }
+
+    if (containsErrors === 'true' || containsErrors === 'false' || minCostMicros || toolUsed) {
+      let costFloor: bigint | null = null
+      if (minCostMicros) {
+        try {
+          costFloor = BigInt(minCostMicros)
+        } catch {
+          return NextResponse.json({ error: 'Invalid minCostMicros' }, { status: 400 })
+        }
+      }
+
+      rows = rows.filter((row) => {
+        const usage = usageBySessionId.get(row.sessionId)
+        const tools = toolsBySessionId.get(row.sessionId) ?? []
+        const hasErrors = Boolean(row.abortedLastRun || usage?.hasErrors)
+
+        if (containsErrors === 'true' && !hasErrors) return false
+        if (containsErrors === 'false' && hasErrors) return false
+
+        if (costFloor !== null) {
+          if (!usage) return false
+          if (usage.totalCostMicros < costFloor) return false
+        }
+
+        if (toolUsed) {
+          const hasTool = tools.some((t) => t.name.toLowerCase().includes(toolUsed))
+          if (!hasTool) return false
+        }
+
+        return true
+      })
+    }
+
     // Check gateway availability in parallel
     const availability = await checkGatewayAvailability()
 
@@ -164,6 +226,15 @@ export async function GET(request: NextRequest) {
       abortedLastRun: r.abortedLastRun,
       operationId: r.operationId,
       workOrderId: r.workOrderId,
+      totalTokens: usageBySessionId.get(r.sessionId)?.totalTokens?.toString() ?? null,
+      totalCostMicros: usageBySessionId.get(r.sessionId)?.totalCostMicros?.toString() ?? null,
+      toolSummary: (toolsBySessionId.get(r.sessionId) ?? [])
+        .slice(0, 3)
+        .map((tool) => ({
+          name: tool.name,
+          count: tool.count.toString(),
+        })),
+      hasErrors: Boolean(r.abortedLastRun || usageBySessionId.get(r.sessionId)?.hasErrors),
       lastSeenAt: r.lastSeenAt,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,

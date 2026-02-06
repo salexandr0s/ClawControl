@@ -12,13 +12,22 @@ import { AgentCard } from '@/components/agent-card'
 import { StationIcon } from '@/components/station-icon'
 import { FileEditorModal } from '@/components/file-editor-modal'
 import { SkillSelector } from '@/components/skill-selector'
-import { agentsApi, operationsApi, templatesApi, skillsApi, type TemplateSummary, type SkillSummary } from '@/lib/http'
+import {
+  agentsApi,
+  operationsApi,
+  templatesApi,
+  skillsApi,
+  type AgentHierarchyData,
+  type TemplateSummary,
+  type SkillSummary,
+} from '@/lib/http'
 import { AVAILABLE_MODELS, DEFAULT_MODEL } from '@/lib/models'
 import type { AgentDTO, OperationDTO } from '@/lib/repo'
 import { slugifyDisplayName } from '@/lib/agent-identity'
 import { useStations } from '@/lib/stations-context'
 import { cn } from '@/lib/utils'
 import { StationsTab, StationUpsertModal } from './stations-tab'
+import { HierarchyView } from './hierarchy-view'
 import {
   Bot,
   Plus,
@@ -175,7 +184,11 @@ export function AgentsClient() {
   const [activeTab, setActiveTab] = useState<'agents' | 'stations'>('agents')
 
   // View mode state
-  const [viewMode, setViewMode] = useState<'list' | 'card'>('card')
+  const [agentView, setAgentView] = useState<'list' | 'hierarchy'>('list')
+  const [listViewMode, setListViewMode] = useState<'list' | 'card'>('card')
+  const [hierarchyData, setHierarchyData] = useState<AgentHierarchyData | null>(null)
+  const [hierarchyLoading, setHierarchyLoading] = useState(false)
+  const [hierarchyError, setHierarchyError] = useState<string | null>(null)
 
   // Create agent modal state
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -194,6 +207,19 @@ export function AgentsClient() {
     fetchData()
   }, [])
 
+  useEffect(() => {
+    if (activeTab !== 'agents') return
+    if (agentView !== 'hierarchy') return
+    if (hierarchyData || hierarchyLoading) return
+    fetchHierarchy()
+  }, [activeTab, agentView, hierarchyData, hierarchyLoading])
+
+  useEffect(() => {
+    if (agentView === 'hierarchy') {
+      setSelectedId(undefined)
+    }
+  }, [agentView])
+
   async function fetchData() {
     try {
       setLoading(true)
@@ -207,6 +233,22 @@ export function AgentsClient() {
       setError(err instanceof Error ? err.message : 'Failed to load agents')
     } finally {
       setLoading(false)
+      if (agentView === 'hierarchy') {
+        void fetchHierarchy()
+      }
+    }
+  }
+
+  async function fetchHierarchy() {
+    try {
+      setHierarchyLoading(true)
+      setHierarchyError(null)
+      const result = await agentsApi.hierarchy()
+      setHierarchyData(result.data)
+    } catch (err) {
+      setHierarchyError(err instanceof Error ? err.message : 'Failed to load hierarchy')
+    } finally {
+      setHierarchyLoading(false)
     }
   }
 
@@ -498,33 +540,63 @@ export function AgentsClient() {
 
               {activeTab === 'agents' && (
                 <>
-                  {/* View Toggle */}
-                  <div className="flex rounded-[var(--radius-md)] border border-bd-0 overflow-hidden">
+                  {/* Primary View Toggle */}
+                  <div className="flex items-center gap-1 bg-bg-2 rounded-[var(--radius-md)] border border-bd-0 p-0.5">
                     <button
-                      onClick={() => setViewMode('card')}
+                      onClick={() => setAgentView('list')}
                       className={cn(
-                        'p-1.5 transition-colors',
-                        viewMode === 'card'
-                          ? 'bg-status-progress text-white'
-                          : 'bg-bg-2 text-fg-2 hover:text-fg-0'
+                        'px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-sm)] transition-colors',
+                        agentView === 'list'
+                          ? 'bg-bg-3 text-fg-0'
+                          : 'text-fg-2 hover:text-fg-1'
                       )}
-                      title="Card view"
                     >
-                      <LayoutGrid className="w-4 h-4" />
+                      List
                     </button>
                     <button
-                      onClick={() => setViewMode('list')}
+                      onClick={() => {
+                        setAgentView('hierarchy')
+                        void fetchHierarchy()
+                      }}
                       className={cn(
-                        'p-1.5 transition-colors',
-                        viewMode === 'list'
-                          ? 'bg-status-progress text-white'
-                          : 'bg-bg-2 text-fg-2 hover:text-fg-0'
+                        'px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-sm)] transition-colors',
+                        agentView === 'hierarchy'
+                          ? 'bg-bg-3 text-fg-0'
+                          : 'text-fg-2 hover:text-fg-1'
                       )}
-                      title="List view"
                     >
-                      <List className="w-4 h-4" />
+                      Hierarchy
                     </button>
                   </div>
+
+                  {agentView === 'list' && (
+                    <div className="flex rounded-[var(--radius-md)] border border-bd-0 overflow-hidden">
+                      <button
+                        onClick={() => setListViewMode('card')}
+                        className={cn(
+                          'p-1.5 transition-colors',
+                          listViewMode === 'card'
+                            ? 'bg-status-progress text-white'
+                            : 'bg-bg-2 text-fg-2 hover:text-fg-0'
+                        )}
+                        title="Card view"
+                      >
+                        <LayoutGrid className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setListViewMode('list')}
+                        className={cn(
+                          'p-1.5 transition-colors',
+                          listViewMode === 'list'
+                            ? 'bg-status-progress text-white'
+                            : 'bg-bg-2 text-fg-2 hover:text-fg-0'
+                        )}
+                        title="Table view"
+                      >
+                        <List className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
 
                   <button
                     onClick={() => setShowTemplateWizard(true)}
@@ -576,49 +648,60 @@ export function AgentsClient() {
           <StationsTab />
         ) : (
           <>
-            {/* Content: Card View or Table View */}
-            {viewMode === 'card' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {agents.length === 0 ? (
-                  <div className="col-span-full">
-                    <EmptyState
-                      icon={<Bot className="w-8 h-8" />}
-                      title="No agents configured"
-                      description="Create your first agent to get started."
-                    />
+            {agentView === 'hierarchy' ? (
+              <HierarchyView
+                data={hierarchyData}
+                loading={hierarchyLoading}
+                error={hierarchyError}
+                onRetry={() => void fetchHierarchy()}
+              />
+            ) : (
+              <>
+                {/* Content: Card View or Table View */}
+                {listViewMode === 'card' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {agents.length === 0 ? (
+                      <div className="col-span-full">
+                        <EmptyState
+                          icon={<Bot className="w-8 h-8" />}
+                          title="No agents configured"
+                          description="Create your first agent to get started."
+                        />
+                      </div>
+                    ) : (
+                      agents.map((agent) => (
+                        <AgentCard
+                          key={agent.id}
+                          agent={agent}
+                          selected={selectedId === agent.id}
+                          onProvision={() => handleProvisionAgent(agent)}
+                          onTest={() => handleTestAgent(agent)}
+                          onEditFile={(filePath, fileName) => handleFileEdit(filePath, fileName)}
+                          onClick={() => setSelectedId(agent.id)}
+                        />
+                      ))
+                    )}
                   </div>
                 ) : (
-                  agents.map((agent) => (
-                    <AgentCard
-                      key={agent.id}
-                      agent={agent}
-                      selected={selectedId === agent.id}
-                      onProvision={() => handleProvisionAgent(agent)}
-                      onTest={() => handleTestAgent(agent)}
-                      onEditFile={(filePath, fileName) => handleFileEdit(filePath, fileName)}
-                      onClick={() => setSelectedId(agent.id)}
+                  <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-bd-0 overflow-hidden">
+                    <CanonicalTable
+                      columns={agentColumns}
+                      rows={agents}
+                      rowKey={(row) => row.id}
+                      onRowClick={(row) => setSelectedId(row.id)}
+                      selectedKey={selectedId}
+                      density="compact"
+                      emptyState={
+                        <EmptyState
+                          icon={<Bot className="w-8 h-8" />}
+                          title="No agents configured"
+                          description="Create your first agent to get started."
+                        />
+                      }
                     />
-                  ))
+                  </div>
                 )}
-              </div>
-            ) : (
-              <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-bd-0 overflow-hidden">
-                <CanonicalTable
-                  columns={agentColumns}
-                  rows={agents}
-                  rowKey={(row) => row.id}
-                  onRowClick={(row) => setSelectedId(row.id)}
-                  selectedKey={selectedId}
-                  density="compact"
-                  emptyState={
-                    <EmptyState
-                      icon={<Bot className="w-8 h-8" />}
-                      title="No agents configured"
-                      description="Create your first agent to get started."
-                    />
-                  }
-                />
-              </div>
+              </>
             )}
           </>
         )}
@@ -652,26 +735,28 @@ export function AgentsClient() {
           />
 
           {/* Detail Drawer */}
-          <RightDrawer
-            open={!!selectedAgent}
-            onClose={() => setSelectedId(undefined)}
-            title={selectedAgent?.displayName}
-            description={selectedAgent?.role}
-          >
-            {selectedAgent && (
-              <AgentDetail
-                agent={selectedAgent}
-                assignedOps={assignedOps}
-                onProvision={() => handleProvisionAgent(selectedAgent)}
-                onTest={() => handleTestAgent(selectedAgent)}
-                onEdit={(patch) => handleEditAgent(selectedAgent, patch)}
-                onAvatarUpload={(file) => handleAvatarUpload(selectedAgent, file)}
-                onAvatarReset={() => handleAvatarReset(selectedAgent)}
-                onDuplicateSkills={(skillIds) => handleDuplicateSkills(selectedAgent, skillIds)}
-                onEditFile={(filePath, fileName) => handleFileEdit(filePath, fileName)}
-              />
-            )}
-          </RightDrawer>
+          {agentView === 'list' && (
+            <RightDrawer
+              open={!!selectedAgent}
+              onClose={() => setSelectedId(undefined)}
+              title={selectedAgent?.displayName}
+              description={selectedAgent?.role}
+            >
+              {selectedAgent && (
+                <AgentDetail
+                  agent={selectedAgent}
+                  assignedOps={assignedOps}
+                  onProvision={() => handleProvisionAgent(selectedAgent)}
+                  onTest={() => handleTestAgent(selectedAgent)}
+                  onEdit={(patch) => handleEditAgent(selectedAgent, patch)}
+                  onAvatarUpload={(file) => handleAvatarUpload(selectedAgent, file)}
+                  onAvatarReset={() => handleAvatarReset(selectedAgent)}
+                  onDuplicateSkills={(skillIds) => handleDuplicateSkills(selectedAgent, skillIds)}
+                  onEditFile={(filePath, fileName) => handleFileEdit(filePath, fileName)}
+                />
+              )}
+            </RightDrawer>
+          )}
         </>
       )}
     </>

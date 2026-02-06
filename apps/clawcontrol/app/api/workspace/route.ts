@@ -13,9 +13,12 @@ const CREATE_ACTION: ActionKind = 'action.caution'
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const path = searchParams.get('path') || '/'
+  const sort = searchParams.get('sort') as 'name' | 'recentlyEdited' | 'newestCreated' | 'oldestCreated' | null
 
   try {
-    const data = await listWorkspace(path)
+    const data = await listWorkspace(path, {
+      sort: sort ?? undefined,
+    })
     return NextResponse.json({ data })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to list workspace'

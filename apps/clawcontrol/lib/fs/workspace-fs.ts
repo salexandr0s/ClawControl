@@ -19,6 +19,8 @@ export interface WorkspaceEntry {
   path: string // parent path, starts with '/'
   size?: number
   modifiedAt: Date
+  createdAt: Date | null
+  lastEditedAt: Date
 }
 
 export interface WorkspaceEntryWithContent extends WorkspaceEntry {
@@ -47,7 +49,17 @@ export function decodeWorkspaceId(id: string): string {
   return decoded
 }
 
-export async function listWorkspace(path = '/'): Promise<WorkspaceEntry[]> {
+export type WorkspaceSort = 'name' | 'recentlyEdited' | 'newestCreated' | 'oldestCreated'
+
+export function reliableCreatedAtFromStat(stat: { birthtime: Date }): Date | null {
+  const birth = stat.birthtime
+  if (!birth || Number.isNaN(birth.getTime())) return null
+  if (birth.getTime() <= 0) return null
+  if (birth.getTime() > Date.now() + 60_000) return null
+  return birth
+}
+
+export async function listWorkspace(path = '/', options?: { sort?: WorkspaceSort }): Promise<WorkspaceEntry[]> {
   const res = validateWorkspacePath(path)
   if (!res.valid || !res.resolvedPath) throw new Error(res.error || 'Invalid path')
 
@@ -81,12 +93,32 @@ export async function listWorkspace(path = '/'): Promise<WorkspaceEntry[]> {
       path,
       size: ent.isDirectory() ? undefined : st.size,
       modifiedAt: st.mtime,
+      createdAt: reliableCreatedAtFromStat(st),
+      lastEditedAt: st.mtime,
     })
   }
 
-  // Sort: folders first, then files; then name
+  const sort = options?.sort ?? 'name'
+
   out.sort((a, b) => {
     if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
+
+    if (sort === 'recentlyEdited') {
+      return b.lastEditedAt.getTime() - a.lastEditedAt.getTime()
+    }
+
+    if (sort === 'newestCreated') {
+      const aTime = a.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY
+      const bTime = b.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY
+      return bTime - aTime
+    }
+
+    if (sort === 'oldestCreated') {
+      const aTime = a.createdAt?.getTime() ?? Number.POSITIVE_INFINITY
+      const bTime = b.createdAt?.getTime() ?? Number.POSITIVE_INFINITY
+      return aTime - bTime
+    }
+
     return a.name.localeCompare(b.name)
   })
 
@@ -114,6 +146,8 @@ export async function readWorkspaceFileById(id: string): Promise<WorkspaceEntryW
     path: parentPath === '/' ? '/' : parentPath,
     size: st.size,
     modifiedAt: st.mtime,
+    createdAt: reliableCreatedAtFromStat(st),
+    lastEditedAt: st.mtime,
     content,
   }
 }
@@ -139,6 +173,8 @@ export async function writeWorkspaceFileById(id: string, content: string): Promi
     path: parentPath === '/' ? '/' : parentPath,
     size: st.size,
     modifiedAt: st.mtime,
+    createdAt: reliableCreatedAtFromStat(st),
+    lastEditedAt: st.mtime,
     content,
   }
 }
@@ -179,6 +215,8 @@ export async function createWorkspaceFile(
     path: parentPath,
     size: st.size,
     modifiedAt: st.mtime,
+    createdAt: reliableCreatedAtFromStat(st),
+    lastEditedAt: st.mtime,
     content,
   }
 }
@@ -211,6 +249,8 @@ export async function createWorkspaceFolder(
     type: 'folder',
     path: parentPath,
     modifiedAt: st.mtime,
+    createdAt: reliableCreatedAtFromStat(st),
+    lastEditedAt: st.mtime,
   }
 }
 

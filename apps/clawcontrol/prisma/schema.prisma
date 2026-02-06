@@ -197,6 +197,130 @@ model AgentSession {
 }
 
 // ============================================================================
+// USAGE + COST ANALYTICS (PHASE 1)
+// ============================================================================
+
+model UsageIngestionCursor {
+  id           String   @id @default(cuid())
+  sourcePath   String   @unique @map("source_path")
+  agentId      String   @map("agent_id")
+  sessionId    String   @map("session_id")
+  deviceId     BigInt   @map("device_id")
+  inode        BigInt
+  offsetBytes  BigInt   @default(0) @map("offset_bytes")
+  fileMtimeMs  BigInt   @map("file_mtime_ms")
+  fileSizeBytes BigInt  @map("file_size_bytes")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([agentId])
+  @@index([sessionId])
+  @@map("usage_ingestion_cursors")
+}
+
+model SessionUsageAggregate {
+  id               String   @id @default(cuid())
+  sessionId        String   @unique @map("session_id")
+  agentId          String   @map("agent_id")
+  model            String?
+  inputTokens      BigInt   @default(0) @map("input_tokens")
+  outputTokens     BigInt   @default(0) @map("output_tokens")
+  cacheReadTokens  BigInt   @default(0) @map("cache_read_tokens")
+  cacheWriteTokens BigInt   @default(0) @map("cache_write_tokens")
+  totalTokens      BigInt   @default(0) @map("total_tokens")
+  totalCostMicros  BigInt   @default(0) @map("total_cost_micros")
+  hasErrors        Boolean  @default(false) @map("has_errors")
+  firstSeenAt      DateTime? @map("first_seen_at")
+  lastSeenAt       DateTime? @map("last_seen_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  toolUsages       SessionToolUsage[]
+
+  @@index([agentId, lastSeenAt])
+  @@index([model, lastSeenAt])
+  @@index([totalCostMicros])
+  @@index([hasErrors])
+  @@map("session_usage_aggregates")
+}
+
+model SessionToolUsage {
+  id         String   @id @default(cuid())
+  sessionId  String   @map("session_id")
+  toolName   String   @map("tool_name")
+  callCount  BigInt   @default(0) @map("call_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  session SessionUsageAggregate @relation(fields: [sessionId], references: [sessionId], onDelete: Cascade)
+
+  @@unique([sessionId, toolName])
+  @@index([toolName])
+  @@index([sessionId])
+  @@map("session_tool_usage")
+}
+
+// ============================================================================
+// ERROR INGESTION + SIGNATURES
+// ============================================================================
+
+model ErrorIngestionCursor {
+  id            String   @id @default(cuid())
+  sourcePath    String   @unique @map("source_path")
+  deviceId      BigInt   @map("device_id")
+  inode         BigInt
+  offsetBytes   BigInt   @default(0) @map("offset_bytes")
+  fileMtimeMs   BigInt   @map("file_mtime_ms")
+  fileSizeBytes BigInt   @map("file_size_bytes")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("error_ingestion_cursors")
+}
+
+model ErrorSignatureAggregate {
+  id                 String   @id @default(cuid())
+  signatureHash      String   @unique @map("signature_hash")
+  signatureText      String   @map("signature_text")
+  count              BigInt   @default(0)
+  firstSeenAt        DateTime @map("first_seen_at")
+  lastSeenAt         DateTime @map("last_seen_at")
+  lastSampleSanitized String  @default("") @map("last_sample_sanitized")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@index([count])
+  @@index([lastSeenAt])
+  @@map("error_signature_aggregates")
+}
+
+model ErrorDailyAggregate {
+  id         String   @id @default(cuid())
+  day        DateTime @unique
+  count      BigInt   @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([day])
+  @@map("error_daily_aggregates")
+}
+
+// ============================================================================
+// INGESTION LEASES
+// ============================================================================
+
+model IngestionLease {
+  name       String   @id
+  ownerId    String   @map("owner_id")
+  acquiredAt DateTime @map("acquired_at")
+  expiresAt  DateTime @map("expires_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([expiresAt])
+  @@map("ingestion_leases")
+}
+
+// ============================================================================
 // APPROVALS
 // ============================================================================
 

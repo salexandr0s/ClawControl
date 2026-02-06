@@ -69,6 +69,28 @@ interface CronJobRow extends CronJobDTO {
   rawScheduleText: string
 }
 
+interface CronHealthJob {
+  id: string
+  name: string
+  successRatePct: number
+  failureCount: number
+  lastFailureReason: string | null
+  failureTrend: 'up' | 'flat' | 'down'
+  flakinessScore: number
+  isFlaky: boolean
+}
+
+interface CronHealthReport {
+  summary: {
+    jobsTotal: number
+    jobsWithFailures: number
+    flakyJobs: number
+    avgSuccessRatePct: number
+    totalFailures: number
+  }
+  jobs: CronHealthJob[]
+}
+
 type EditMode = 'every' | 'cron' | 'at'
 
 function formatDurationShort(ms: number): string {
@@ -286,9 +308,53 @@ const cronColumns: Column<CronJobRow>[] = [
   },
 ]
 
+const cronHealthColumns: Column<CronHealthJob>[] = [
+  {
+    key: 'name',
+    header: 'Job',
+    render: (row) => <span className="text-fg-0">{row.name}</span>,
+  },
+  {
+    key: 'successRatePct',
+    header: 'Success',
+    width: '90px',
+    align: 'right',
+    render: (row) => <span className="font-mono text-fg-1">{row.successRatePct.toFixed(1)}%</span>,
+  },
+  {
+    key: 'failureCount',
+    header: 'Fails',
+    width: '70px',
+    align: 'right',
+    render: (row) => (
+      <span className={cn('font-mono', row.failureCount > 0 ? 'text-status-danger' : 'text-fg-2')}>
+        {row.failureCount}
+      </span>
+    ),
+  },
+  {
+    key: 'flakinessScore',
+    header: 'Flaky',
+    width: '80px',
+    align: 'right',
+    render: (row) => (
+      <span className={cn('font-mono', row.isFlaky ? 'text-status-warning' : 'text-fg-2')}>
+        {(row.flakinessScore * 100).toFixed(0)}%
+      </span>
+    ),
+  },
+  {
+    key: 'lastFailureReason',
+    header: 'Last failure reason',
+    render: (row) => <span className="text-xs text-fg-2">{row.lastFailureReason || '—'}</span>,
+  },
+]
+
 export function CronClient() {
   const [availability, setAvailability] = useState<OpenClawResponse<unknown> | null>(null)
   const [cronJobs, setCronJobs] = useState<CronJobRow[]>([])
+  const [healthReport, setHealthReport] = useState<CronHealthReport | null>(null)
+  const [healthSort, setHealthSort] = useState<'failures' | 'success' | 'flaky'>('failures')
   const [searchText, setSearchText] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -322,18 +388,43 @@ export function CronClient() {
     })
   }, [cronJobs, searchText])
 
+  const sortedHealthJobs = useMemo(() => {
+    const rows = [...(healthReport?.jobs ?? [])]
+    if (healthSort === 'success') {
+      rows.sort((a, b) => b.successRatePct - a.successRatePct)
+      return rows
+    }
+    if (healthSort === 'flaky') {
+      rows.sort((a, b) => b.flakinessScore - a.flakinessScore)
+      return rows
+    }
+    rows.sort((a, b) => b.failureCount - a.failureCount)
+    return rows
+  }, [healthReport?.jobs, healthSort])
+
   const refreshJobs = useCallback(async () => {
     setIsLoading(true)
     setError(null)
 
     try {
-      const response = await fetch('/api/openclaw/cron/jobs', {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      })
+      const [response, healthResponse] = await Promise.all([
+        fetch('/api/openclaw/cron/jobs', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        }),
+        fetch('/api/openclaw/cron/health?days=7', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        }),
+      ])
 
       const data = (await response.json()) as OpenClawResponse<unknown>
       setAvailability(data)
+
+      if (healthResponse.ok) {
+        const health = (await healthResponse.json()) as { data: CronHealthReport }
+        setHealthReport(health.data)
+      }
 
       if (data.status === 'unavailable') {
         setCronJobs([])
@@ -429,6 +520,39 @@ export function CronClient() {
             className="w-full pl-9 pr-3 py-2 text-sm bg-bg-3 border border-bd-0 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-3 focus:outline-none focus:ring-1 focus:ring-status-info/50"
           />
         </div>
+
+        {healthReport && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <HealthCard label="Avg success" value={`${healthReport.summary.avgSuccessRatePct.toFixed(1)}%`} />
+              <HealthCard label="Failures (7d)" value={String(healthReport.summary.totalFailures)} />
+              <HealthCard label="Jobs w/ failures" value={String(healthReport.summary.jobsWithFailures)} />
+              <HealthCard label="Flaky jobs" value={String(healthReport.summary.flakyJobs)} />
+            </div>
+
+            <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-bd-0 overflow-hidden">
+              <div className="px-4 py-3 border-b border-bd-0 flex items-center justify-between">
+                <h2 className="text-sm font-medium text-fg-0">Reliability</h2>
+                <select
+                  value={healthSort}
+                  onChange={(e) => setHealthSort(e.target.value as 'failures' | 'success' | 'flaky')}
+                  className="text-xs px-2 py-1 bg-bg-3 border border-bd-0 rounded text-fg-1"
+                >
+                  <option value="failures">Sort: failures</option>
+                  <option value="success">Sort: success</option>
+                  <option value="flaky">Sort: flaky</option>
+                </select>
+              </div>
+              <CanonicalTable
+                columns={cronHealthColumns}
+                rows={sortedHealthJobs}
+                rowKey={(row) => row.id}
+                density="compact"
+                emptyState="No cron health data"
+              />
+            </div>
+          </>
+        )}
 
         {error && (
           <div className="p-3 bg-status-danger/10 border border-status-danger/20 rounded-[var(--radius-md)] text-status-danger text-sm">
@@ -882,6 +1006,15 @@ function CronDetail({
           </dd>
         </dl>
       </PageSection>
+    </div>
+  )
+}
+
+function HealthCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="p-3 bg-bg-2 rounded-[var(--radius-md)] border border-bd-0">
+      <div className="text-xs text-fg-2">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-fg-0">{value}</div>
     </div>
   )
 }

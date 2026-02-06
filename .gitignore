@@ -69,10 +69,16 @@ artifacts/
 
 # Private config (not for public repo)
 openclaw/
-agents/
+/agents/
 AGENTS.md
 SOUL.md
 docs/
+
+# Keep clawcontrol OpenClaw app/runtime code tracked
+!apps/clawcontrol/lib/openclaw/
+!apps/clawcontrol/lib/openclaw/**
+!apps/clawcontrol/app/api/openclaw/
+!apps/clawcontrol/app/api/openclaw/**
 
 # Keep template system sources tracked
 !templates/

@@ -203,6 +203,89 @@ import type {
   SearchResult,
 } from './repo'
 
+export type AgentHierarchyEdgeType = 'reports_to' | 'delegates_to' | 'receives_from' | 'can_message'
+export type AgentHierarchyEdgeConfidence = 'high' | 'medium'
+export type AgentHierarchyNodeKind = 'agent' | 'external'
+
+export interface AgentHierarchyNodeCapabilities {
+  delegate: boolean
+  message: boolean
+  exec: boolean
+  write: boolean
+}
+
+export interface AgentHierarchyToolPolicy {
+  allow: string[]
+  deny: string[]
+  execSecurity: string | null
+  source: 'runtime' | 'fallback'
+}
+
+export interface AgentHierarchyNode {
+  id: string
+  normalizedId: string
+  kind: AgentHierarchyNodeKind
+  label: string
+  dbAgentId: string | null
+  role: string | null
+  station: string | null
+  status: string | null
+  agentKind: string | null
+  runtimeAgentId: string | null
+  capabilities: AgentHierarchyNodeCapabilities
+  toolPolicy: AgentHierarchyToolPolicy | null
+  sources: string[]
+}
+
+export interface AgentHierarchyEdge {
+  id: string
+  type: AgentHierarchyEdgeType
+  from: string
+  to: string
+  confidence: AgentHierarchyEdgeConfidence
+  source: string
+  sources: string[]
+}
+
+export interface AgentHierarchyWarning {
+  code: string
+  message: string
+  source?: string
+  relatedNodeId?: string
+}
+
+export interface AgentHierarchySourceStatus {
+  yaml: {
+    available: boolean
+    path: string
+    error?: string
+  }
+  runtime: {
+    available: boolean
+    command: 'config.agents.list.json'
+    error?: string
+  }
+  fallback: {
+    available: boolean
+    used: boolean
+    path: string
+    error?: string
+  }
+  db: {
+    available: boolean
+    count: number
+  }
+}
+
+export interface AgentHierarchyData {
+  nodes: AgentHierarchyNode[]
+  edges: AgentHierarchyEdge[]
+  meta: {
+    sources: AgentHierarchySourceStatus
+    warnings: AgentHierarchyWarning[]
+  }
+}
+
 // Work Orders
 export const workOrdersApi = {
   list: (filters?: {
@@ -281,6 +364,8 @@ export const agentsApi = {
   }) => apiGet<{ data: AgentDTO[] }>('/api/agents', filters),
 
   get: (id: string) => apiGet<{ data: AgentDTO }>(`/api/agents/${id}`),
+
+  hierarchy: () => apiGet<{ data: AgentHierarchyData }>('/api/agents/hierarchy'),
 
   create: (data: {
     role: string
@@ -540,6 +625,8 @@ export interface WorkspaceFileSummary {
   path: string
   size?: number
   modifiedAt: Date
+  createdAt: Date | null
+  lastEditedAt: Date
 }
 
 export interface WorkspaceFileWithContent extends WorkspaceFileSummary {
@@ -547,7 +634,10 @@ export interface WorkspaceFileWithContent extends WorkspaceFileSummary {
 }
 
 export const workspaceApi = {
-  list: (path = '/') => apiGet<{ data: WorkspaceFileSummary[] }>('/api/workspace', { path }),
+  list: (
+    path = '/',
+    options?: { sort?: 'name' | 'recentlyEdited' | 'newestCreated' | 'oldestCreated' }
+  ) => apiGet<{ data: WorkspaceFileSummary[] }>('/api/workspace', { path, sort: options?.sort }),
 
   get: (id: string) => apiGet<{ data: WorkspaceFileWithContent }>(`/api/workspace/${id}`),
 
@@ -620,6 +710,47 @@ export const workspaceApi = {
     }
     return res.json() as Promise<{ success: boolean }>
   }),
+}
+
+export interface WorkspaceFavoritesResponse {
+  favorites: string[]
+  recents: Array<{ path: string; touchedAt: string }>
+  pinToday?: boolean
+}
+
+export const workspaceFavoritesApi = {
+  get: () => apiGet<{ data: WorkspaceFavoritesResponse }>('/api/workspace/favorites'),
+  update: (action: 'add' | 'remove' | 'toggle', path: string) =>
+    apiPost<{ data: WorkspaceFavoritesResponse }, { action: 'add' | 'remove' | 'toggle'; path: string }>(
+      '/api/workspace/favorites',
+      { action, path }
+    ),
+  touchRecent: (path: string) =>
+    apiPost<{ data: WorkspaceFavoritesResponse }, { path: string }>('/api/workspace/recents', { path }),
+}
+
+export interface WorkspaceCalendarDay {
+  day: string
+  count: number
+  files: Array<{
+    id: string
+    path: string
+    name: string
+    createdAt: string | null
+    lastEditedAt: string
+  }>
+}
+
+export interface WorkspaceCalendarResponse {
+  month: string
+  root: string
+  folder: string
+  days: WorkspaceCalendarDay[]
+}
+
+export const workspaceCalendarApi = {
+  get: (params: { month: string; root?: string; folder?: string }) =>
+    apiGet<{ data: WorkspaceCalendarResponse }>('/api/workspace/calendar', params),
 }
 
 // Playbooks

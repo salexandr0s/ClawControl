@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useDeferredValue } from 'react'
-import { Bot, Clock, AlertCircle, CheckCircle, Pause, RefreshCw, Search, X, Loader2 } from 'lucide-react'
+import { Bot, Clock, AlertCircle, CheckCircle, Pause, RefreshCw, Search, X, Loader2, DollarSign, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AgentAvatar } from '@/components/ui/agent-avatar'
 import type { ConsoleSessionDTO } from '@/app/api/openclaw/console/sessions/route'
@@ -22,6 +22,16 @@ interface SessionListProps {
   syncing: boolean
   onEndSession: (session: ConsoleSessionDTO) => void
   endingSessionIds: Record<string, boolean>
+  filters: {
+    containsErrors: boolean
+    minCostUsd: string
+    toolUsed: string
+  }
+  onFiltersChange: (filters: {
+    containsErrors: boolean
+    minCostUsd: string
+    toolUsed: string
+  }) => void
 }
 
 type FilterState = 'all' | 'active' | 'idle' | 'error'
@@ -54,6 +64,20 @@ function getStateIcon(state: string) {
   }
 }
 
+function formatMicrosToUsd(micros: string | null): string {
+  if (!micros) return '—'
+  const value = Number(micros) / 1_000_000
+  if (!Number.isFinite(value)) return '—'
+  return `$${value.toFixed(value >= 10 ? 2 : 4)}`
+}
+
+function formatCompactTokens(tokens: string | null): string {
+  if (!tokens) return '—'
+  const value = Number(tokens)
+  if (!Number.isFinite(value)) return tokens
+  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+}
+
 // ============================================================================
 // COMPONENT
 // ============================================================================
@@ -68,6 +92,8 @@ export function SessionList({
   syncing,
   onEndSession,
   endingSessionIds,
+  filters,
+  onFiltersChange,
 }: SessionListProps) {
   const [filter, setFilter] = useState<FilterState>('all')
   const [query, setQuery] = useState('')
@@ -154,6 +180,29 @@ export function SessionList({
         </div>
       </div>
 
+      <div className="px-3 py-2 border-b border-bd-0 space-y-2">
+        <label className="flex items-center justify-between text-xs text-fg-2">
+          <span>Contains errors</span>
+          <input
+            type="checkbox"
+            checked={filters.containsErrors}
+            onChange={(e) => onFiltersChange({ ...filters, containsErrors: e.target.checked })}
+          />
+        </label>
+        <input
+          value={filters.minCostUsd}
+          onChange={(e) => onFiltersChange({ ...filters, minCostUsd: e.target.value })}
+          placeholder="Min cost (USD)"
+          className="w-full px-2 py-1.5 text-xs bg-bg-0 border border-bd-0 rounded-[var(--radius-sm)] text-fg-0 placeholder:text-fg-3 focus:outline-none"
+        />
+        <input
+          value={filters.toolUsed}
+          onChange={(e) => onFiltersChange({ ...filters, toolUsed: e.target.value })}
+          placeholder="Tool used"
+          className="w-full px-2 py-1.5 text-xs bg-bg-0 border border-bd-0 rounded-[var(--radius-sm)] text-fg-0 placeholder:text-fg-3 focus:outline-none"
+        />
+      </div>
+
       {/* Filter chips */}
       <div className="p-2 border-b border-bd-0 flex flex-wrap gap-1">
         {(['all', 'active', 'idle', 'error'] as const).map((f) => (
@@ -235,6 +284,22 @@ export function SessionList({
                     </span>
                   </div>
 
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-fg-2">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-2">
+                      <DollarSign className="w-3 h-3" />
+                      {formatMicrosToUsd(session.totalCostMicros)}
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-bg-2">
+                      <Wrench className="w-3 h-3" />
+                      {formatCompactTokens(session.totalTokens)} tok
+                    </span>
+                    {session.toolSummary.length > 0 && (
+                      <span className="truncate max-w-[140px]">
+                        {session.toolSummary.map((tool) => tool.name).join(', ')}
+                      </span>
+                    )}
+                  </div>
+
                   {/* Context usage */}
                   {session.percentUsed !== null && (
                     <div className="mt-2">
@@ -258,10 +323,10 @@ export function SessionList({
                   )}
 
                   {/* Error indicator */}
-                  {session.abortedLastRun && (
+                  {(session.abortedLastRun || session.hasErrors) && (
                     <div className="mt-1.5 text-xs text-status-danger flex items-center gap-1">
                       <AlertCircle className="w-3 h-3" />
-                      <span>Last run aborted</span>
+                      <span>{session.abortedLastRun ? 'Last run aborted' : 'Contains errors'}</span>
                     </div>
                   )}
                   </button>

@@ -27,6 +27,12 @@ interface SessionsApiResponse {
   error?: string
 }
 
+interface SessionQueryFilters {
+  containsErrors: boolean
+  minCostUsd: string
+  toolUsed: string
+}
+
 // ============================================================================
 // CONSTANTS
 // ============================================================================
@@ -46,6 +52,14 @@ function areConsoleSessionsEquivalent(a: ConsoleSessionDTO[], b: ConsoleSessionD
     if (prev.state !== next.state) return false
     if (prev.percentUsed !== next.percentUsed) return false
     if (prev.abortedLastRun !== next.abortedLastRun) return false
+    if (prev.totalTokens !== next.totalTokens) return false
+    if (prev.totalCostMicros !== next.totalCostMicros) return false
+    if (prev.hasErrors !== next.hasErrors) return false
+    if ((prev.toolSummary?.length ?? 0) !== (next.toolSummary?.length ?? 0)) return false
+    for (let t = 0; t < (prev.toolSummary?.length ?? 0); t++) {
+      if (prev.toolSummary[t]?.name !== next.toolSummary[t]?.name) return false
+      if (prev.toolSummary[t]?.count !== next.toolSummary[t]?.count) return false
+    }
     if (String(prev.lastSeenAt) !== String(next.lastSeenAt)) return false
     if (String(prev.updatedAt) !== String(next.updatedAt)) return false
   }
@@ -68,6 +82,11 @@ export function ConsoleClient() {
   const [agentsBySessionKey, setAgentsBySessionKey] = useState<Record<string, AgentDTO>>({})
   const [syncingSessions, setSyncingSessions] = useState(false)
   const [endingSessionIds, setEndingSessionIds] = useState<Record<string, boolean>>({})
+  const [queryFilters, setQueryFilters] = useState<SessionQueryFilters>({
+    containsErrors: false,
+    minCostUsd: '',
+    toolUsed: '',
+  })
 
   // Refs for retry logic
   const retryCountRef = useRef(0)
@@ -100,7 +119,17 @@ export function ConsoleClient() {
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch('/api/openclaw/console/sessions')
+      const params = new URLSearchParams()
+      if (queryFilters.containsErrors) params.set('containsErrors', 'true')
+      if (queryFilters.toolUsed.trim()) params.set('toolUsed', queryFilters.toolUsed.trim())
+      if (queryFilters.minCostUsd.trim()) {
+        const parsed = Number(queryFilters.minCostUsd)
+        if (Number.isFinite(parsed) && parsed > 0) {
+          params.set('minCostMicros', String(Math.round(parsed * 1_000_000)))
+        }
+      }
+
+      const res = await fetch(`/api/openclaw/console/sessions${params.toString() ? `?${params.toString()}` : ''}`)
       const data: SessionsApiResponse = await res.json()
 
       setSessions((prev) => (areConsoleSessionsEquivalent(prev, data.data) ? prev : data.data))
@@ -127,7 +156,7 @@ export function ConsoleClient() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [queryFilters.containsErrors, queryFilters.minCostUsd, queryFilters.toolUsed])
 
   const fetchAgents = useCallback(async () => {
     try {
@@ -207,6 +236,11 @@ export function ConsoleClient() {
     setLoading(true)
     fetchSessions()
   }, [fetchSessions])
+
+  const handleFilterChange = useCallback((next: SessionQueryFilters) => {
+    setQueryFilters(next)
+    setLoading(true)
+  }, [])
 
   const handleSync = useCallback(async () => {
     if (syncingSessions) return
@@ -327,6 +361,8 @@ export function ConsoleClient() {
               syncing={syncingSessions}
               onEndSession={handleEndSession}
               endingSessionIds={endingSessionIds}
+              filters={queryFilters}
+              onFiltersChange={handleFilterChange}
             />
 
             {/* Chat panel (main area) */}

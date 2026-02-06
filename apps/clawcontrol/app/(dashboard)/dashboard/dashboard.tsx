@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Route } from 'next'
 import {
@@ -25,6 +25,7 @@ import {
   CalendarClock,
   CheckSquare,
   LayoutDashboard,
+  RefreshCw,
 } from 'lucide-react'
 
 // ============================================================================
@@ -80,6 +81,35 @@ interface DashboardProps {
   activities: ActivityEvent[]
   stats: DashboardStats
   initialGateway: GatewaySummary
+}
+
+interface UsageSummaryApi {
+  data: {
+    totals: {
+      inputTokens: string
+      outputTokens: string
+      cacheReadTokens: string
+      cacheWriteTokens: string
+      totalTokens: string
+      totalCostMicros: string
+      cacheEfficiencyPct: number
+    }
+    series: Array<{
+      bucketStart: string
+      totalTokens: string
+      totalCostMicros: string
+    }>
+  }
+}
+
+interface UsageBreakdownApi {
+  data: {
+    groups: Array<{
+      key: string
+      totalCostMicros: string
+      totalTokens: string
+    }>
+  }
 }
 
 // ============================================================================
@@ -196,8 +226,96 @@ export function Dashboard({
     resolvedGatewayStatus === 'ok'
       ? 'success'
       : resolvedGatewayStatus === 'degraded'
-        ? 'warning'
-        : 'danger'
+      ? 'warning'
+      : 'danger'
+
+  const [usageSummary, setUsageSummary] = useState<UsageSummaryApi['data'] | null>(null)
+  const [usageBreakdown, setUsageBreakdown] = useState<UsageBreakdownApi['data'] | null>(null)
+  const [usageLoading, setUsageLoading] = useState(true)
+  const [usageSyncing, setUsageSyncing] = useState(false)
+
+  useEffect(() => {
+    const loadUsage = async () => {
+      setUsageLoading(true)
+      try {
+        const [summaryRes, breakdownRes] = await Promise.all([
+          fetch('/api/openclaw/usage/summary?range=daily'),
+          fetch('/api/openclaw/usage/breakdown?groupBy=model'),
+        ])
+
+        if (summaryRes.ok) {
+          const summaryJson = (await summaryRes.json()) as UsageSummaryApi
+          setUsageSummary(summaryJson.data)
+        }
+
+        if (breakdownRes.ok) {
+          const breakdownJson = (await breakdownRes.json()) as UsageBreakdownApi
+          setUsageBreakdown(breakdownJson.data)
+        }
+      } finally {
+        setUsageLoading(false)
+      }
+    }
+
+    void loadUsage()
+  }, [])
+
+  useEffect(() => {
+    const warmSync = async () => {
+      try {
+        await fetch('/api/openclaw/usage/sync', { method: 'POST' })
+        const [summaryRes, breakdownRes] = await Promise.all([
+          fetch('/api/openclaw/usage/summary?range=daily'),
+          fetch('/api/openclaw/usage/breakdown?groupBy=model'),
+        ])
+        if (summaryRes.ok) {
+          const summaryJson = (await summaryRes.json()) as UsageSummaryApi
+          setUsageSummary(summaryJson.data)
+        }
+        if (breakdownRes.ok) {
+          const breakdownJson = (await breakdownRes.json()) as UsageBreakdownApi
+          setUsageBreakdown(breakdownJson.data)
+        }
+      } catch {
+        // Keep dashboard responsive even when sync is unavailable.
+      }
+    }
+    void warmSync()
+  }, [])
+
+  const handleSyncUsage = async () => {
+    setUsageSyncing(true)
+    try {
+      await fetch('/api/openclaw/usage/sync', { method: 'POST' })
+
+      const [summaryRes, breakdownRes] = await Promise.all([
+        fetch('/api/openclaw/usage/summary?range=daily'),
+        fetch('/api/openclaw/usage/breakdown?groupBy=model'),
+      ])
+
+      if (summaryRes.ok) {
+        const summaryJson = (await summaryRes.json()) as UsageSummaryApi
+        setUsageSummary(summaryJson.data)
+      }
+
+      if (breakdownRes.ok) {
+        const breakdownJson = (await breakdownRes.json()) as UsageBreakdownApi
+        setUsageBreakdown(breakdownJson.data)
+      }
+    } finally {
+      setUsageSyncing(false)
+    }
+  }
+
+  const usageSeries = useMemo(
+    () => (usageSummary?.series ?? []).slice(-14),
+    [usageSummary?.series]
+  )
+
+  const maxSeriesValue = usageSeries.reduce((max, point) => {
+    const value = Number(point.totalTokens)
+    return Number.isFinite(value) && value > max ? value : max
+  }, 0)
 
   return (
     <div className="space-y-6 w-full">
@@ -234,6 +352,88 @@ export function Dashboard({
         />
         <MetricCard label="Agents" value={`${stats.activeAgents}/${stats.totalAgents}`} icon={Bot} tone="success" />
         <MetricCard label="Completed" value={stats.completedToday} icon={CheckCircle} tone="muted" />
+      </div>
+
+      <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-bd-0 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="terminal-header">Usage + Cost</h2>
+          <button
+            onClick={handleSyncUsage}
+            disabled={usageSyncing}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-bg-3 text-fg-1 hover:bg-bg-1 disabled:opacity-50"
+          >
+            <RefreshCw className={cn('w-3.5 h-3.5', usageSyncing && 'animate-spin')} />
+            Sync Usage
+          </button>
+        </div>
+
+        {usageLoading ? (
+          <div className="text-sm text-fg-2">Loading usage metrics…</div>
+        ) : usageSummary ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <MiniMetric
+                label="Total Tokens"
+                value={formatCompactNumber(usageSummary.totals.totalTokens)}
+              />
+              <MiniMetric
+                label="Total Cost"
+                value={formatUsdFromMicros(usageSummary.totals.totalCostMicros)}
+              />
+              <MiniMetric
+                label="Cache Efficiency"
+                value={`${usageSummary.totals.cacheEfficiencyPct.toFixed(2)}%`}
+              />
+              <MiniMetric
+                label="Cache Read"
+                value={formatCompactNumber(usageSummary.totals.cacheReadTokens)}
+              />
+            </div>
+
+            <div>
+              <div className="text-xs text-fg-2 mb-2">Daily usage (tokens)</div>
+              {usageSeries.length === 0 ? (
+                <div className="text-xs text-fg-3">No usage data yet.</div>
+              ) : (
+                <div className="h-24 flex items-end gap-1">
+                  {usageSeries.map((point) => {
+                    const value = Number(point.totalTokens)
+                    const heightPct =
+                      maxSeriesValue > 0 && Number.isFinite(value)
+                        ? Math.max(6, (value / maxSeriesValue) * 100)
+                        : 6
+                    return (
+                      <div
+                        key={point.bucketStart}
+                        className="flex-1 bg-status-info/25 hover:bg-status-info/45 rounded-t transition-colors"
+                        style={{ height: `${heightPct}%` }}
+                        title={`${new Date(point.bucketStart).toLocaleDateString()} · ${formatCompactNumber(point.totalTokens)} tokens`}
+                      />
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="text-xs text-fg-2 mb-2">By model cost split</div>
+              {usageBreakdown && usageBreakdown.groups.length > 0 ? (
+                <div className="space-y-1">
+                  {usageBreakdown.groups.slice(0, 5).map((group) => (
+                    <div key={group.key} className="flex items-center justify-between text-xs">
+                      <span className="text-fg-1 truncate max-w-[260px]">{group.key}</span>
+                      <span className="font-mono text-fg-2">{formatUsdFromMicros(group.totalCostMicros)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-fg-3">No model-level usage data yet.</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-fg-2">Usage metrics unavailable.</div>
+        )}
       </div>
 
       {/* Main Grid */}
@@ -293,6 +493,27 @@ export function Dashboard({
           </Card>
         </div>
       </div>
+    </div>
+  )
+}
+
+function formatCompactNumber(value: string): string {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return value
+  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(parsed)
+}
+
+function formatUsdFromMicros(micros: string): string {
+  const parsed = Number(micros) / 1_000_000
+  if (!Number.isFinite(parsed)) return '$0.00'
+  return `$${parsed.toFixed(parsed >= 10 ? 2 : 4)}`
+}
+
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="p-2.5 rounded border border-bd-0 bg-bg-3">
+      <div className="text-[11px] text-fg-2">{label}</div>
+      <div className="text-sm text-fg-0 font-medium mt-0.5">{value}</div>
     </div>
   )
 }

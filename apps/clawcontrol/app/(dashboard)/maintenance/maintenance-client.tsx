@@ -40,6 +40,21 @@ interface Props {
   }>
 }
 
+interface ErrorSummaryData {
+  trend: Array<{ day: string; count: string }>
+  topSignatures: Array<{
+    signatureHash: string
+    signatureText: string
+    count: string
+    sample: string
+  }>
+  spike: {
+    detected: boolean
+    yesterdayCount: number
+    baseline: number
+  }
+}
+
 type MaintenanceAction = 'health' | 'doctor' | 'doctor-fix' | 'cache-clear' | 'sessions-reset' | 'gateway-restart' | 'recover'
 
 const ACTION_CONFIG: Record<MaintenanceAction, {
@@ -119,6 +134,8 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
   } | null>(null)
 
   const [localOnly, setLocalOnly] = useState<MaintenanceStatus['localOnly'] | null>(null)
+  const [errorSummary, setErrorSummary] = useState<ErrorSummaryData | null>(null)
+  const [errorSummaryLoading, setErrorSummaryLoading] = useState(false)
 
   const protectedAction = useProtectedAction({ skipTypedConfirm })
 
@@ -150,9 +167,25 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
     }
   }, [applyMaintenanceStatus])
 
+  const refreshErrors = useCallback(async () => {
+    setErrorSummaryLoading(true)
+    try {
+      const res = await fetch('/api/openclaw/errors/summary?days=14')
+      if (res.ok) {
+        const payload = (await res.json()) as { data: ErrorSummaryData }
+        setErrorSummary(payload.data)
+      }
+    } catch (err) {
+      console.error('Failed to load error summary:', err)
+    } finally {
+      setErrorSummaryLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     refreshStatus()
-  }, [refreshStatus])
+    refreshErrors()
+  }, [refreshStatus, refreshErrors])
 
   // Handle playbook click - open in drawer
   const handlePlaybookClick = useCallback(async (id: string) => {
@@ -558,6 +591,72 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
                 isRunning={runningPlaybookId === playbook.id}
               />
             ))}
+          </div>
+        </PageSection>
+
+        <PageSection title="Error Dashboard" description="Gateway error signatures and trend">
+          <div className="p-4 bg-bg-3 rounded-[var(--radius-lg)] border border-bd-0 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-medium text-fg-0">Error trend (14 days)</h3>
+                {errorSummary?.spike.detected ? (
+                  <span className="px-2 py-0.5 text-xs rounded bg-status-danger/15 text-status-danger">
+                    Spike detected
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 text-xs rounded bg-status-success/15 text-status-success">
+                    Stable
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={refreshErrors}
+                disabled={errorSummaryLoading}
+                className="btn-secondary text-xs flex items-center gap-1.5"
+              >
+                {errorSummaryLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                Refresh
+              </button>
+            </div>
+
+            {!errorSummary || errorSummary.trend.length === 0 ? (
+              <div className="text-xs text-fg-2">No error events ingested yet.</div>
+            ) : (
+              <div className="space-y-4">
+                <div className="h-24 flex items-end gap-1">
+                  {(() => {
+                    const max = Math.max(...errorSummary.trend.map((item) => Number(item.count)), 1)
+                    return errorSummary.trend.map((item) => {
+                      const value = Number(item.count)
+                      const height = Math.max(6, (value / max) * 100)
+                      return (
+                        <div
+                          key={item.day}
+                          className="flex-1 bg-status-danger/25 hover:bg-status-danger/40 rounded-t"
+                          style={{ height: `${height}%` }}
+                          title={`${new Date(item.day).toLocaleDateString()} · ${item.count}`}
+                        />
+                      )
+                    })
+                  })()}
+                </div>
+
+                <div className="text-xs text-fg-2">
+                  Yesterday: {errorSummary.spike.yesterdayCount} | Baseline: {errorSummary.spike.baseline}
+                </div>
+
+                <div className="space-y-1">
+                  {errorSummary.topSignatures.slice(0, 8).map((sig) => (
+                    <div key={sig.signatureHash} className="grid grid-cols-[80px_1fr] gap-3 text-xs">
+                      <span className="font-mono text-fg-2">{sig.count}</span>
+                      <span className="text-fg-1 truncate" title={sig.signatureText}>
+                        {sig.signatureText}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </PageSection>
       </div>

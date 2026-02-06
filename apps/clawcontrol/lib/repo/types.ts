@@ -364,4 +364,6 @@ export interface WorkspaceFileDTO {
   path: string
   size?: number
   modifiedAt: Date
+  createdAt: Date | null
+  lastEditedAt: Date
 }
