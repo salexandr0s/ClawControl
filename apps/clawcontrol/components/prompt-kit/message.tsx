@@ -214,6 +214,7 @@ export const Message = memo(function Message({
   const bubbleClasses = cn(
     'group relative w-fit max-w-full px-4 py-3 text-sm break-words',
     'rounded-[10px]',
+    'border border-bd-0',
     isOperator
       ? 'bg-bg-2 text-fg-0'
       : isSystem

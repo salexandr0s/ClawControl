@@ -94,6 +94,12 @@ function mergeStatus(
   return current
 }
 
+function isSyntheticIdleSeenAt(agent: AgentDTO): boolean {
+  if (agent.status !== 'idle') return false
+  if (!agent.lastSeenAt) return false
+  return Math.abs(agent.updatedAt.getTime() - agent.lastSeenAt.getTime()) <= 1_000
+}
+
 async function overlaySessionStatus(agents: AgentDTO[]): Promise<AgentDTO[]> {
   if (agents.length === 0) return agents
 
@@ -155,17 +161,20 @@ async function overlaySessionStatus(agents: AgentDTO[]): Promise<AgentDTO[]> {
       }
     }
 
-    if (!best) return agent
+    if (!best) {
+      if (!isSyntheticIdleSeenAt(agent)) return agent
+      return { ...agent, lastSeenAt: null }
+    }
 
     const status = mergeStatus(agent.status, best.state)
-    const shouldUpdateSeenAt = !agent.lastSeenAt || best.seenAtMs > agent.lastSeenAt.getTime()
+    const shouldUpdateSeenAt = !agent.lastSeenAt || best.seenAtMs !== agent.lastSeenAt.getTime()
 
     if (status === agent.status && !shouldUpdateSeenAt) return agent
 
     return {
       ...agent,
       status,
-      lastSeenAt: shouldUpdateSeenAt ? new Date(best.seenAtMs) : agent.lastSeenAt,
+      lastSeenAt: new Date(best.seenAtMs),
     }
   })
 }

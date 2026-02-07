@@ -99,20 +99,14 @@ export async function GET(
       // Fall back to activities transcript
     }
 
-    // Build history from activities related to this session
-    // Filter by entityId matching sessionId or entityType 'session'
+    // Build history from local activities when gateway transcript is unavailable.
+    // Primary key for session chat activities is `session.sessionKey`.
     const activities = await prisma.activity.findMany({
       where: {
         OR: [
-          // Activities directly about this session
+          { entityType: 'session', entityId: session.sessionKey },
+          // Backward compatibility for older rows that used sessionId
           { entityType: 'session', entityId: sessionId },
-          // Chat activities for this session
-          {
-            type: 'openclaw.chat.send',
-            payloadJson: { contains: sessionId },
-          },
-          // Agent activities for this agent (fallback)
-          { entityType: 'agent', entityId: session.agentId },
         ],
       },
       orderBy: { ts: 'asc' },
@@ -123,27 +117,32 @@ export async function GET(
     const messages: HistoryMessage[] = activities.map((a) => {
       // Determine role based on actor and type
       let role: 'operator' | 'agent' | 'system' = 'system'
-      if (a.actor.startsWith('operator:') || a.actor === 'user') {
+      if (a.type === 'openclaw.session.chat') {
+        role = 'operator'
+      } else if (a.type === 'openclaw.session.chat.response') {
+        role = 'agent'
+      } else if (a.actor.startsWith('operator:') || a.actor === 'user') {
         role = 'operator'
       } else if (a.actor.startsWith('agent:') || a.type.includes('.response')) {
         role = 'agent'
       }
 
-      let payload: Record<string, unknown> | undefined
-      try {
-        payload = a.payloadJson ? JSON.parse(a.payloadJson) : undefined
-      } catch {
-        // Ignore parse errors
-      }
+      const payload = parseRecord(a.payloadJson)
+      const extracted = extractTextFromActivityPayload(payload)
+      const content = extracted || a.summary
+      const summary = content.length > 140 ? `${content.slice(0, 140)}…` : content
 
       return {
         id: a.id,
         ts: a.ts,
         type: a.type,
         actor: a.actor,
-        summary: a.summary,
+        summary,
         role,
-        payload,
+        payload: {
+          ...(payload ?? {}),
+          content,
+        },
       }
     })
 
@@ -198,4 +197,42 @@ function extractTextFromContent(content: unknown): string {
   }
 
   return ''
+}
+
+function parseRecord(raw: string | null): Record<string, unknown> | undefined {
+  if (!raw) return undefined
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>)
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function extractTextFromActivityPayload(payload?: Record<string, unknown>): string | null {
+  if (!payload) return null
+
+  const directText = [
+    payload.content,
+    payload.message,
+    payload.messagePreview,
+    payload.response,
+    payload.responsePreview,
+    payload.partialResponse,
+    payload.error,
+  ].find((value) => typeof value === 'string' && value.trim().length > 0)
+
+  if (typeof directText === 'string') {
+    return directText.trim()
+  }
+
+  // Handle nested transcript-like content fields if present.
+  if ('content' in payload) {
+    const nested = extractTextFromContent(payload.content)
+    if (nested.trim().length > 0) return nested.trim()
+  }
+
+  return null
 }

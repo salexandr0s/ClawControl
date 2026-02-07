@@ -16,6 +16,9 @@
  */
 
 import 'server-only'
+import { existsSync, readFileSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
 import {
   createAdapter,
   createWsAdapter,
@@ -32,6 +35,7 @@ import {
   type ChatEvent,
   type SessionsDeleteParams,
   type SessionsDeleteResult,
+  type DeviceIdentity,
 } from '@clawcontrol/adapters-openclaw'
 
 // ============================================================================
@@ -58,6 +62,84 @@ export interface GatewayAvailability {
   available: boolean
   latencyMs: number
   error?: string
+}
+
+interface ResolvedWsAuth {
+  token?: string
+  deviceIdentity?: DeviceIdentity
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+}
+
+function loadDeviceIdentity(): DeviceIdentity | undefined {
+  const identityPath = process.env.OPENCLAW_DEVICE_IDENTITY_PATH
+    ? process.env.OPENCLAW_DEVICE_IDENTITY_PATH
+    : join(homedir(), '.openclaw', 'identity', 'device.json')
+
+  if (!existsSync(identityPath)) return undefined
+
+  try {
+    const raw = JSON.parse(readFileSync(identityPath, 'utf-8'))
+    if (raw?.version === 1 && raw?.deviceId && raw?.publicKeyPem && raw?.privateKeyPem) {
+      return {
+        deviceId: raw.deviceId,
+        publicKeyPem: raw.publicKeyPem,
+        privateKeyPem: raw.privateKeyPem,
+      }
+    }
+  } catch {
+    // ignore malformed local identity file
+  }
+
+  return undefined
+}
+
+function loadDeviceAuthToken(deviceId: string, role = 'operator'): string | undefined {
+  const authPath = join(homedir(), '.openclaw', 'identity', 'device-auth.json')
+  if (!existsSync(authPath)) return undefined
+
+  try {
+    const raw = JSON.parse(readFileSync(authPath, 'utf-8'))
+    if (raw?.version === 1 && raw?.deviceId === deviceId) {
+      return asString(raw?.tokens?.[role]?.token)
+    }
+  } catch {
+    // ignore malformed local auth cache
+  }
+
+  return undefined
+}
+
+function loadGatewayTokenFromConfigFile(): string | undefined {
+  const configPath = join(homedir(), '.openclaw', 'openclaw.json')
+  if (!existsSync(configPath)) return undefined
+
+  try {
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
+    return (
+      asString(raw?.gateway?.auth?.token) ||
+      asString(raw?.auth?.token) ||
+      asString(raw?.token) ||
+      asString(raw?.operator_token)
+    )
+  } catch {
+    return undefined
+  }
+}
+
+function resolveWsAuth(config?: ConsoleClientConfig): ResolvedWsAuth {
+  const deviceIdentity = loadDeviceIdentity()
+  const token = config?.wsToken
+    ?? process.env.OPENCLAW_GATEWAY_TOKEN
+    ?? (deviceIdentity ? loadDeviceAuthToken(deviceIdentity.deviceId, 'operator') : undefined)
+    ?? loadGatewayTokenFromConfigFile()
+
+  return {
+    token,
+    deviceIdentity: deviceIdentity ?? undefined,
+  }
 }
 
 // Re-export types for consumers
@@ -123,7 +205,7 @@ export function createWsConsoleClient(config?: ConsoleClientConfig): WsAdapter {
     ?? process.env.OPENCLAW_GATEWAY_WS_URL
     ?? DEFAULT_WS_URL
 
-  const token = config?.wsToken ?? process.env.OPENCLAW_GATEWAY_TOKEN
+  const { token, deviceIdentity } = resolveWsAuth(config)
 
   // Security: enforce loopback unless explicitly overridden
   if (!process.env.OPENCLAW_ALLOW_NON_LOOPBACK) {
@@ -144,6 +226,7 @@ export function createWsConsoleClient(config?: ConsoleClientConfig): WsAdapter {
     wsClientId: 'cli',
     wsClientMode: 'backend',
     wsReadonly: false,
+    ...(deviceIdentity ? { wsDeviceIdentity: deviceIdentity } : {}),
   })
 }
 

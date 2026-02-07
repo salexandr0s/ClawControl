@@ -149,11 +149,15 @@ export function createDbAgentsRepo(): AgentsRepo {
       const existing = await prisma.agent.findUnique({ where: { id } })
       if (!existing) return null
 
-      const updateData: Record<string, unknown> = {
-        lastSeenAt: new Date(),
-      }
+      const updateData: Record<string, unknown> = {}
 
-      if (input.status !== undefined) updateData.status = input.status
+      if (input.status !== undefined) {
+        updateData.status = input.status
+        // `lastSeenAt` should track runtime activity, not generic metadata edits.
+        if (input.status === 'active') {
+          updateData.lastSeenAt = new Date()
+        }
+      }
       if (input.role !== undefined) updateData.role = input.role
       if (input.station !== undefined) updateData.station = input.station
       if (input.capabilities !== undefined) updateData.capabilities = JSON.stringify(input.capabilities)

@@ -114,6 +114,7 @@ export async function POST(
   const repos = getRepos()
   const startTime = Date.now()
   const idempotencyKey = randomUUID()
+  const messagePreview = text.slice(0, 2000)
 
   // Create receipt for tracking
   const receipt = await repos.receipts.create({
@@ -125,7 +126,7 @@ export async function POST(
       sessionId,
       sessionKey: session.sessionKey,
       agentId: session.agentId,
-      messagePreview: text.slice(0, 100),
+      messagePreview: messagePreview.slice(0, 100),
       attachmentCount: attachments.length,
       mode: 'session_chat', // TRUE session injection
       idempotencyKey,
@@ -145,6 +146,7 @@ export async function POST(
       sessionId,
       sessionKey: session.sessionKey,
       messageLength: text.length,
+      messagePreview,
       attachmentCount: attachments.length,
       mode: 'session_chat',
       idempotencyKey,
@@ -269,6 +271,7 @@ export async function POST(
             runId,
             sessionKey: session.sessionKey,
             responseLength: fullResponse.length,
+            responsePreview: fullResponse.slice(0, 2000),
             durationMs,
             mode: 'session_chat',
           },
