@@ -17,6 +17,7 @@ import {
 } from '@/lib/cron/calendar'
 import type { CronJobDTO } from '@/lib/data'
 import { cn } from '@/lib/utils'
+import { timedClientFetch, usePageReadyTiming } from '@/lib/perf/client-timing'
 import {
   Clock,
   Plus,
@@ -188,8 +189,6 @@ type TimelineRenderData = {
 }
 
 const TIMELINE_HEIGHT_PX = 1280
-const TIMELINE_WEEK_MIN_WIDTH_PX = 1080
-const TIMELINE_DAY_MIN_WIDTH_PX = 700
 const TIMELINE_EVENT_MIN_HEIGHT_PERCENT = 1.2
 const TIMELINE_WEEK_MAX_COLUMNS = 3
 const TIMELINE_DAY_MAX_COLUMNS = 4
@@ -779,13 +778,21 @@ function layoutTimelineEvents(
 
   return working.map((item) => {
     const laneCount = Math.max(1, clusterLaneCount.get(item.clusterId) ?? 1)
+    const topPercent = (item.startMinute / 1440) * 100
+    const rawHeightPercent = Math.max(
+      (item.endMinute - item.startMinute) / 1440 * 100,
+      TIMELINE_EVENT_MIN_HEIGHT_PERCENT
+    )
+    const remainingPercent = Math.max(0, 100 - topPercent)
+    const heightPercent = Math.max(0.06, Math.min(rawHeightPercent, remainingPercent))
+
     return {
       ...item.event,
       lane: item.lane,
       laneCount,
       clusterId: item.clusterId,
-      topPercent: (item.startMinute / 1440) * 100,
-      heightPercent: Math.max((item.endMinute - item.startMinute) / 1440 * 100, TIMELINE_EVENT_MIN_HEIGHT_PERCENT),
+      topPercent,
+      heightPercent,
     }
   })
 }
@@ -831,6 +838,22 @@ function buildTimelineRenderData(events: LaidOutTimelineEvent[], maxColumns: num
   return { visibleEvents, overflowBadges }
 }
 
+function timelineColumnInsets(
+  event: LaidOutTimelineEvent,
+  maxColumns: number,
+  insetPx: number
+): { left: string; right: string; columns: number } {
+  const columns = Math.min(Math.max(event.laneCount, 1), maxColumns)
+  const safeLane = Math.max(0, Math.min(event.lane, columns - 1))
+  const leftPercent = (safeLane / columns) * 100
+  const rightPercent = ((columns - safeLane - 1) / columns) * 100
+  return {
+    left: `calc(${leftPercent}% + ${insetPx}px)`,
+    right: `calc(${rightPercent}% + ${insetPx}px)`,
+    columns,
+  }
+}
+
 function buildAgentTokenMap(agents: AgentModelRow[]): Map<string, AgentModelRow> {
   const map = new Map<string, AgentModelRow>()
 
@@ -858,6 +881,24 @@ function formatPercent(value: number | null | undefined, digits = 1): string {
   return `${value.toFixed(digits)}%`
 }
 
+async function timedFetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+  meta: { page: string; name: string }
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort('timeout'), timeoutMs)
+  try {
+    return await timedClientFetch(input, {
+      ...init,
+      signal: controller.signal,
+    }, meta)
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export function CronClient() {
   const [availability, setAvailability] = useState<OpenClawResponse<unknown> | null>(null)
   const [cronJobs, setCronJobs] = useState<CronJobRow[]>([])
@@ -874,6 +915,12 @@ export function CronClient() {
   const [usageByAgent, setUsageByAgent] = useState<InsightsGroup[]>([])
   const [usageByModel, setUsageByModel] = useState<InsightsGroup[]>([])
   const [defaultModelId, setDefaultModelId] = useState<string | null>(null)
+  const [isHealthLoading, setIsHealthLoading] = useState(false)
+  const [isUsageLoading, setIsUsageLoading] = useState(false)
+  const [isAgentOverlayLoading, setIsAgentOverlayLoading] = useState(false)
+  const [isModelInfoLoading, setIsModelInfoLoading] = useState(false)
+
+  usePageReadyTiming('cron', !isLoading)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const selectedJob = selectedId ? cronJobs.find((c) => c.id === selectedId) : undefined
 
@@ -1241,52 +1288,165 @@ export function CronClient() {
     return { tokens, cost }
   }, [costEstimateByJob])
 
+  const isBackgroundLoading =
+    isHealthLoading || isUsageLoading || isAgentOverlayLoading || isModelInfoLoading
+
+  const hydrateHealth = useCallback(async () => {
+    setIsHealthLoading(true)
+    try {
+      const response = await timedFetchWithTimeout(
+        '/api/openclaw/cron/health?days=7',
+        {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        },
+        12_000,
+        {
+          page: 'cron',
+          name: 'cron.health',
+        }
+      )
+
+      if (!response.ok) return
+
+      const health = (await response.json()) as { data?: CronHealthReport }
+      if (health.data) {
+        setHealthReport(health.data)
+      }
+    } catch {
+      // Non-critical: keep stale health data instead of blocking interaction.
+    } finally {
+      setIsHealthLoading(false)
+    }
+  }, [])
+
+  const hydrateUsage = useCallback(async () => {
+    setIsUsageLoading(true)
+    try {
+      const response = await timedFetchWithTimeout(
+        '/api/openclaw/usage/breakdown?groupBy=both',
+        {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        },
+        12_000,
+        {
+          page: 'cron',
+          name: 'usage.breakdown.both',
+        }
+      )
+
+      if (!response.ok) return
+
+      const payload = (await response.json()) as {
+        data?: {
+          byAgent?: InsightsGroup[]
+          byModel?: InsightsGroup[]
+          groups?: InsightsGroup[]
+          groupBy?: 'both' | 'agent' | 'model'
+        }
+      }
+
+      if (payload.data?.groupBy === 'both') {
+        setUsageByAgent(Array.isArray(payload.data.byAgent) ? payload.data.byAgent : [])
+        setUsageByModel(Array.isArray(payload.data.byModel) ? payload.data.byModel : [])
+        return
+      }
+
+      // Backward compatibility if server does not support groupBy=both yet.
+      if (Array.isArray(payload.data?.groups)) {
+        setUsageByModel(payload.data.groups)
+      }
+    } catch {
+      // Non-critical.
+    } finally {
+      setIsUsageLoading(false)
+    }
+  }, [])
+
+  const hydrateAgentOverlays = useCallback(async () => {
+    setIsAgentOverlayLoading(true)
+    try {
+      const response = await timedFetchWithTimeout(
+        '/api/agents?mode=light&includeSessionOverlay=0&includeModelOverlay=0&syncSessions=0',
+        {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        },
+        12_000,
+        {
+          page: 'cron',
+          name: 'agents.light',
+        }
+      )
+
+      if (!response.ok) return
+
+      const payload = (await response.json()) as { data?: AgentModelRow[] }
+      if (Array.isArray(payload.data)) {
+        setAgentModels(payload.data)
+      }
+    } catch {
+      // Non-critical.
+    } finally {
+      setIsAgentOverlayLoading(false)
+    }
+  }, [])
+
+  const hydrateModelInfo = useCallback(async () => {
+    setIsModelInfoLoading(true)
+    try {
+      const response = await timedFetchWithTimeout(
+        '/api/models',
+        {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        },
+        12_000,
+        {
+          page: 'cron',
+          name: 'models.status',
+        }
+      )
+
+      if (!response.ok) return
+
+      const modelsPayload = (await response.json()) as {
+        data?: { status?: { resolvedDefault?: string; defaultModel?: string } }
+      }
+
+      setDefaultModelId(
+        modelsPayload.data?.status?.resolvedDefault ??
+          modelsPayload.data?.status?.defaultModel ??
+          null
+      )
+    } catch {
+      // Non-critical.
+    } finally {
+      setIsModelInfoLoading(false)
+    }
+  }, [])
+
   const refreshJobs = useCallback(async () => {
     setIsLoading(true)
     setError(null)
 
     try {
-      const [
-        response,
-        healthResponse,
-        agentsResponse,
-        usageByAgentResponse,
-        usageByModelResponse,
-        modelsResponse,
-      ] = await Promise.all([
-        fetch('/api/openclaw/cron/jobs', {
+      const response = await timedFetchWithTimeout(
+        '/api/openclaw/cron/jobs',
+        {
           method: 'GET',
           headers: { Accept: 'application/json' },
-        }),
-        fetch('/api/openclaw/cron/health?days=7', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        }),
-        fetch('/api/agents', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        }),
-        fetch('/api/openclaw/usage/breakdown?groupBy=agent', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        }),
-        fetch('/api/openclaw/usage/breakdown?groupBy=model', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        }),
-        fetch('/api/models', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        }),
-      ])
+        },
+        15_000,
+        {
+          page: 'cron',
+          name: 'cron.jobs',
+        }
+      )
 
       const data = (await response.json()) as OpenClawResponse<unknown>
       setAvailability(data)
-
-      if (healthResponse.ok) {
-        const health = (await healthResponse.json()) as { data: CronHealthReport }
-        setHealthReport(health.data)
-      }
 
       if (data.status === 'unavailable') {
         setCronJobs([])
@@ -1301,41 +1461,13 @@ export function CronClient() {
 
       setCronJobs(jobsArray.map(mapToUiDto))
 
-      if (agentsResponse.ok) {
-        const agentsPayload = (await agentsResponse.json()) as { data?: AgentModelRow[] }
-        if (Array.isArray(agentsPayload.data)) {
-          setAgentModels(agentsPayload.data)
-        }
-      } else {
-        setAgentModels([])
-      }
-
-      if (usageByAgentResponse.ok) {
-        const usagePayload = (await usageByAgentResponse.json()) as {
-          data?: { groups?: InsightsGroup[] }
-        }
-        setUsageByAgent(Array.isArray(usagePayload.data?.groups) ? usagePayload.data.groups : [])
-      } else {
-        setUsageByAgent([])
-      }
-
-      if (usageByModelResponse.ok) {
-        const usagePayload = (await usageByModelResponse.json()) as {
-          data?: { groups?: InsightsGroup[] }
-        }
-        setUsageByModel(Array.isArray(usagePayload.data?.groups) ? usagePayload.data.groups : [])
-      } else {
-        setUsageByModel([])
-      }
-
-      if (modelsResponse.ok) {
-        const modelsPayload = (await modelsResponse.json()) as {
-          data?: { status?: { resolvedDefault?: string; defaultModel?: string } }
-        }
-        setDefaultModelId(modelsPayload.data?.status?.resolvedDefault ?? modelsPayload.data?.status?.defaultModel ?? null)
-      } else {
-        setDefaultModelId(null)
-      }
+      // Hydrate non-critical datasets in the background.
+      void Promise.allSettled([
+        hydrateHealth(),
+        hydrateUsage(),
+        hydrateAgentOverlays(),
+        hydrateModelInfo(),
+      ])
     } catch (err) {
       setAvailability(null)
       setCronJobs([])
@@ -1343,7 +1475,7 @@ export function CronClient() {
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [hydrateAgentOverlays, hydrateHealth, hydrateModelInfo, hydrateUsage])
 
   useEffect(() => {
     refreshJobs()
@@ -1481,8 +1613,8 @@ export function CronClient() {
                   'disabled:opacity-50 disabled:cursor-not-allowed'
                 )}
               >
-                <RefreshCw className={cn('w-3.5 h-3.5', isLoading && 'animate-spin')} />
-                Refresh
+                <RefreshCw className={cn('w-3.5 h-3.5', (isLoading || isBackgroundLoading) && 'animate-spin')} />
+                {isLoading ? 'Refreshing...' : 'Refresh'}
               </button>
 
               <button
@@ -1507,12 +1639,15 @@ export function CronClient() {
           />
         </div>
 
-        {healthReport && (
+        {(healthReport || isHealthLoading) && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <HealthCard label="Avg success" value={`${healthReport.summary.avgSuccessRatePct.toFixed(1)}%`} />
-            <HealthCard label="Failures (7d)" value={String(healthReport.summary.totalFailures)} />
-            <HealthCard label="Jobs w/ failures" value={String(healthReport.summary.jobsWithFailures)} />
-            <HealthCard label="Flaky jobs" value={String(healthReport.summary.flakyJobs)} />
+            <HealthCard
+              label="Avg success"
+              value={healthReport ? `${healthReport.summary.avgSuccessRatePct.toFixed(1)}%` : '...'}
+            />
+            <HealthCard label="Failures (7d)" value={healthReport ? String(healthReport.summary.totalFailures) : '...'} />
+            <HealthCard label="Jobs w/ failures" value={healthReport ? String(healthReport.summary.jobsWithFailures) : '...'} />
+            <HealthCard label="Flaky jobs" value={healthReport ? String(healthReport.summary.flakyJobs) : '...'} />
           </div>
         )}
 
@@ -1529,6 +1664,13 @@ export function CronClient() {
         {error && (
           <div className="p-3 bg-status-danger/10 border border-status-danger/20 rounded-[var(--radius-md)] text-status-danger text-sm">
             {error}
+          </div>
+        )}
+
+        {isBackgroundLoading && (
+          <div className="flex items-center gap-2 text-fg-3 text-xs">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Hydrating health and cost insights in background...
           </div>
         )}
 
@@ -1680,12 +1822,12 @@ export function CronClient() {
               </div>
             ) : calendarView === 'week' ? (
               <div
-                className="rounded-[var(--radius-md)] overflow-auto border border-bd-0"
+                className="rounded-[var(--radius-md)] overflow-y-auto overflow-x-hidden border border-bd-0"
                 style={{
                   background: 'linear-gradient(180deg, rgb(28 28 28 / 0.95) 0%, rgb(12 12 12 / 0.92) 100%)',
                 }}
               >
-                <div style={{ minWidth: `${TIMELINE_WEEK_MIN_WIDTH_PX}px` }}>
+                <div style={{ minWidth: '100%' }}>
                   <div className="grid grid-cols-[60px_repeat(7,minmax(0,1fr))]">
                     <div className="h-12" />
                     {weekViewDays.map((day) => {
@@ -1762,9 +1904,7 @@ export function CronClient() {
                           )}
                           {renderData.visibleEvents.map((event) => {
                             const compact = event.heightPercent < 2.4 || event.laneCount > 2
-                            const columns = Math.min(Math.max(event.laneCount, 1), TIMELINE_WEEK_MAX_COLUMNS)
-                            const laneColumn = event.lane % columns
-                            const columnWidth = 100 / columns
+                            const placement = timelineColumnInsets(event, TIMELINE_WEEK_MAX_COLUMNS, 4)
                             return (
                               <button
                                 key={event.key}
@@ -1774,8 +1914,8 @@ export function CronClient() {
                                   ...TIMELINE_EVENT_CHROME,
                                   top: `${event.topPercent}%`,
                                   height: `${event.heightPercent}%`,
-                                  left: `calc(${laneColumn * columnWidth}% + 4px)`,
-                                  width: `calc(${columnWidth}% - 8px)`,
+                                  left: placement.left,
+                                  right: placement.right,
                                 }}
                                 title={`${event.job.name} • ${formatMinuteLabel(day, event.minuteOfDay)}`}
                               >
@@ -1818,13 +1958,13 @@ export function CronClient() {
               </div>
             ) : (
               <div
-                className="rounded-[var(--radius-md)] overflow-auto border border-bd-0"
+                className="rounded-[var(--radius-md)] overflow-y-auto overflow-x-hidden border border-bd-0"
                 style={{
                   background: 'linear-gradient(180deg, rgb(28 28 28 / 0.95) 0%, rgb(12 12 12 / 0.92) 100%)',
                 }}
               >
                 {dayViewDate && (
-                  <div className="grid grid-cols-[60px_1fr]" style={{ minWidth: `${TIMELINE_DAY_MIN_WIDTH_PX}px` }}>
+                  <div className="grid grid-cols-[60px_1fr]" style={{ minWidth: '100%' }}>
                     <div
                       className="relative border-r border-bd-0"
                       style={{
@@ -1874,9 +2014,7 @@ export function CronClient() {
                           <>
                             {renderData.visibleEvents.map((event) => {
                               const compact = event.heightPercent < 2.2 || event.laneCount > 3
-                              const columns = Math.min(Math.max(event.laneCount, 1), TIMELINE_DAY_MAX_COLUMNS)
-                              const laneColumn = event.lane % columns
-                              const columnWidth = 100 / columns
+                              const placement = timelineColumnInsets(event, TIMELINE_DAY_MAX_COLUMNS, 6)
                               return (
                                 <button
                                   key={event.key}
@@ -1886,8 +2024,8 @@ export function CronClient() {
                                     ...TIMELINE_EVENT_CHROME,
                                     top: `${event.topPercent}%`,
                                     height: `${event.heightPercent}%`,
-                                    left: `calc(${laneColumn * columnWidth}% + 6px)`,
-                                    width: `calc(${columnWidth}% - 12px)`,
+                                    left: placement.left,
+                                    right: placement.right,
                                   }}
                                   title={`${event.job.name} • ${formatMinuteLabel(dayViewDate, event.minuteOfDay)}`}
                                 >

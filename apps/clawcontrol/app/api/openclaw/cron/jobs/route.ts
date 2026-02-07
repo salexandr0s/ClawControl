@@ -7,6 +7,7 @@ import {
   getCached,
   setCache,
 } from '@/lib/openclaw/availability'
+import { withRouteTiming } from '@/lib/perf/route-timing'
 
 /**
  * Cron job schedule types.
@@ -67,7 +68,7 @@ const CACHE_KEY = 'cron.jobs'
  * Returns list of cron jobs with explicit availability semantics.
  * Always returns 200 with structured OpenClawResponse (not 500).
  */
-export async function GET(): Promise<NextResponse<OpenClawResponse<CronJobDTO[]>>> {
+const getCronJobsRoute = async (): Promise<NextResponse<OpenClawResponse<CronJobDTO[]>>> => {
   // Check cache first (15s TTL to prevent refresh cascade)
   const cached = getCached<CronJobDTO[]>(CACHE_KEY)
   if (cached) {
@@ -122,3 +123,5 @@ export async function GET(): Promise<NextResponse<OpenClawResponse<CronJobDTO[]>
     return NextResponse.json(response)
   }
 }
+
+export const GET = withRouteTiming('api.openclaw.cron.jobs.get', getCronJobsRoute)

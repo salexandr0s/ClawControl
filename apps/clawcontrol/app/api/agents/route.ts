@@ -7,8 +7,12 @@ import { syncAgentsFromOpenClaw } from '@/lib/sync-agents'
 import { getOpenClawConfig } from '@/lib/openclaw-client'
 import { extractAgentIdFromSessionKey } from '@/lib/agent-identity'
 import { syncAgentSessions } from '@/lib/openclaw/sessions'
+import { withRouteTiming } from '@/lib/perf/route-timing'
+import { getOrLoadWithCache } from '@/lib/perf/async-cache'
 
 const AUTO_SYNC_TTL_MS = 4_000
+const AGENTS_ROUTE_DEFAULT_TTL_MS = 2_500
+const AGENTS_ROUTE_LIGHT_TTL_MS = 5_000
 let lastAutoSyncAtMs = 0
 let autoSyncInFlight: Promise<{ seen: number; upserted: number }> | null = null
 
@@ -25,6 +29,21 @@ function parseCsvFilter(value: string | null): string[] {
     .split(',')
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean)
+}
+
+function parseBooleanParam(value: string | null, fallback: boolean): boolean {
+  if (value === null) return fallback
+  const normalized = value.trim().toLowerCase()
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false
+  return fallback
+}
+
+function parseCacheTtlMs(value: string | null, fallback: number): number {
+  if (!value) return fallback
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(0, Math.min(15_000, Math.floor(parsed)))
 }
 
 function normalizeSessionState(value: string): 'idle' | 'active' | 'error' | null {
@@ -151,16 +170,26 @@ async function overlaySessionStatus(agents: AgentDTO[]): Promise<AgentDTO[]> {
   })
 }
 
-/**
- * GET /api/agents
- *
- * List agents with optional filters
- */
-export async function GET(request: NextRequest) {
+export const GET = withRouteTiming('api.agents.get', async (request: NextRequest) => {
   const searchParams = request.nextUrl.searchParams
 
   const filters: AgentFilters = {}
   const requestedStatuses = new Set(parseCsvFilter(searchParams.get('status')))
+  const mode = searchParams.get('mode')?.trim().toLowerCase() ?? 'full'
+  const lightweight = mode === 'light'
+
+  const includeSessionOverlay = parseBooleanParam(
+    searchParams.get('includeSessionOverlay'),
+    !lightweight
+  )
+  const syncSessionsBeforeOverlay = parseBooleanParam(
+    searchParams.get('syncSessions'),
+    includeSessionOverlay && !lightweight
+  )
+  const includeModelOverlay = parseBooleanParam(
+    searchParams.get('includeModelOverlay'),
+    !lightweight
+  )
 
   // Station filter (can be comma-separated)
   const station = searchParams.get('station')
@@ -169,78 +198,112 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const repos = getRepos()
-    let data = await repos.agents.list(filters)
-
-    // First-run fallback: if no filters and DB is empty, attempt OpenClaw sync.
     const hasFilters = Boolean(station || requestedStatuses.size > 0)
-    if (!hasFilters && data.length === 0) {
-      const firstRun = await isFirstRun()
-      if (firstRun) {
-        try {
-          await syncAgentsFromOpenClaw({ forceRefresh: true })
-          data = await repos.agents.list(filters)
-        } catch (syncErr) {
-          console.warn(
-            '[api/agents] OpenClaw first-run sync failed:',
-            syncErr instanceof Error ? syncErr.message : String(syncErr)
-          )
-        }
-      }
-    }
+    const cacheTtlMs = parseCacheTtlMs(
+      searchParams.get('cacheTtlMs'),
+      lightweight ? AGENTS_ROUTE_LIGHT_TTL_MS : AGENTS_ROUTE_DEFAULT_TTL_MS
+    )
 
-    if (data.length > 0) {
-      try {
-        await ensureSessionsSynced()
-        data = await overlaySessionStatus(data)
-      } catch (sessionErr) {
-        console.warn(
-          '[api/agents] Session telemetry overlay failed:',
-          sessionErr instanceof Error ? sessionErr.message : String(sessionErr)
-        )
-      }
-    }
+    const cacheKey = [
+      'api.agents.get',
+      `station=${station ?? ''}`,
+      `status=${Array.from(requestedStatuses).sort().join(',')}`,
+      `sessionOverlay=${includeSessionOverlay ? '1' : '0'}`,
+      `syncSessions=${syncSessionsBeforeOverlay ? '1' : '0'}`,
+      `modelOverlay=${includeModelOverlay ? '1' : '0'}`,
+    ].join('|')
 
-    // Overlay latest model/fallback metadata from OpenClaw config without mutating DB.
-    if (!hasFilters && data.length > 0) {
-      try {
-        const config = await getOpenClawConfig()
-        if (config?.agents?.length) {
-          const byRuntimeId = new Map(
-            config.agents
-              .filter((agent) => agent.id && agent.id.trim())
-              .map((agent) => [agent.id.trim().toLowerCase(), agent] as const)
-          )
+    const { value: data, cacheHit, sharedInFlight } = await getOrLoadWithCache(
+      cacheKey,
+      cacheTtlMs,
+      async () => {
+        const repos = getRepos()
+        let nextData = await repos.agents.list(filters)
 
-          data = data.map((agent) => {
-            const runtimeAgentId =
-              agent.runtimeAgentId?.trim() ||
-              extractAgentIdFromSessionKey(agent.sessionKey) ||
-              ''
-            const discovered = runtimeAgentId ? byRuntimeId.get(runtimeAgentId.toLowerCase()) : undefined
-
-            if (!discovered) return agent
-
-            return {
-              ...agent,
-              model: discovered.model ?? agent.model,
-              fallbacks: discovered.fallbacks ?? agent.fallbacks,
+        // First-run fallback: if no filters and DB is empty, attempt OpenClaw sync.
+        if (!hasFilters && nextData.length === 0) {
+          const firstRun = await isFirstRun()
+          if (firstRun) {
+            try {
+              await syncAgentsFromOpenClaw({ forceRefresh: true })
+              nextData = await repos.agents.list(filters)
+            } catch (syncErr) {
+              console.warn(
+                '[api/agents] OpenClaw first-run sync failed:',
+                syncErr instanceof Error ? syncErr.message : String(syncErr)
+              )
             }
-          })
+          }
         }
-      } catch (overlayErr) {
-        console.warn(
-          '[api/agents] OpenClaw model overlay failed:',
-          overlayErr instanceof Error ? overlayErr.message : String(overlayErr)
-        )
+
+        if (includeSessionOverlay && nextData.length > 0) {
+          try {
+            if (syncSessionsBeforeOverlay) {
+              await ensureSessionsSynced()
+            }
+            nextData = await overlaySessionStatus(nextData)
+          } catch (sessionErr) {
+            console.warn(
+              '[api/agents] Session telemetry overlay failed:',
+              sessionErr instanceof Error ? sessionErr.message : String(sessionErr)
+            )
+          }
+        }
+
+        // Overlay latest model/fallback metadata from OpenClaw config without mutating DB.
+        if (!hasFilters && includeModelOverlay && nextData.length > 0) {
+          try {
+            const config = await getOpenClawConfig()
+            if (config?.agents?.length) {
+              const byRuntimeId = new Map(
+                config.agents
+                  .filter((agent) => agent.id && agent.id.trim())
+                  .map((agent) => [agent.id.trim().toLowerCase(), agent] as const)
+              )
+
+              nextData = nextData.map((agent) => {
+                const runtimeAgentId =
+                  agent.runtimeAgentId?.trim() ||
+                  extractAgentIdFromSessionKey(agent.sessionKey) ||
+                  ''
+                const discovered = runtimeAgentId ? byRuntimeId.get(runtimeAgentId.toLowerCase()) : undefined
+
+                if (!discovered) return agent
+
+                return {
+                  ...agent,
+                  model: discovered.model ?? agent.model,
+                  fallbacks: discovered.fallbacks ?? agent.fallbacks,
+                }
+              })
+            }
+          } catch (overlayErr) {
+            console.warn(
+              '[api/agents] OpenClaw model overlay failed:',
+              overlayErr instanceof Error ? overlayErr.message : String(overlayErr)
+            )
+          }
+        }
+
+        if (requestedStatuses.size > 0) {
+          nextData = nextData.filter((agent) => requestedStatuses.has(agent.status))
+        }
+
+        return nextData
       }
-    }
+    )
 
-    if (requestedStatuses.size > 0) {
-      data = data.filter((agent) => requestedStatuses.has(agent.status))
-    }
-
-    return NextResponse.json({ data })
+    return NextResponse.json({
+      data,
+      meta: {
+        mode: lightweight ? 'light' : 'full',
+        cache: {
+          cacheHit,
+          sharedInFlight,
+          ttlMs: cacheTtlMs,
+        },
+      },
+    })
   } catch (error) {
     console.error('[api/agents] GET error:', error)
     return NextResponse.json(
@@ -248,4 +311,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     )
   }
-}
+})

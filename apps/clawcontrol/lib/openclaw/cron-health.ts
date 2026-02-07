@@ -5,6 +5,7 @@ import { promises as fsp } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
+import { getOrLoadWithCache } from '@/lib/perf/async-cache'
 
 interface CronJobState {
   lastRunAtMs?: number
@@ -61,6 +62,9 @@ export interface CronHealthReport {
   }
   jobs: CronJobHealth[]
 }
+
+const CRON_HEALTH_CACHE_TTL_MS = 10_000
+const CRON_HEALTH_MAX_CONCURRENCY = 8
 
 function getOpenClawHome(): string {
   return process.env.OPENCLAW_HOME || join(homedir(), '.openclaw')
@@ -192,71 +196,107 @@ function computeFlakinessScore(runs: CronRunRecord[]): number {
   return Math.round(Math.min(1, score) * 100) / 100
 }
 
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return []
+
+  const safeLimit = Math.max(1, Math.min(limit, items.length))
+  const results = new Array<R>(items.length)
+  let nextIndex = 0
+
+  await Promise.all(
+    Array.from({ length: safeLimit }, async () => {
+      while (true) {
+        const current = nextIndex
+        nextIndex += 1
+        if (current >= items.length) return
+        results[current] = await mapper(items[current], current)
+      }
+    })
+  )
+
+  return results
+}
+
 export async function getCronHealth(days = 7): Promise<CronHealthReport> {
   const safeDays = Number.isFinite(days) ? Math.max(1, Math.min(30, Math.floor(days))) : 7
-  const nowMs = Date.now()
-  const fromMs = nowMs - safeDays * 86400_000
+  const { value } = await getOrLoadWithCache(
+    `cron.health:${safeDays}`,
+    CRON_HEALTH_CACHE_TTL_MS,
+    async () => {
+      const nowMs = Date.now()
+      const fromMs = nowMs - safeDays * 86400_000
 
-  const jobs = await readJobs()
-  const healthRows: CronJobHealth[] = []
+      const jobs = await readJobs()
 
-  for (const job of jobs) {
-    const runs = await readRunsForJob(job.id, fromMs)
+      const healthRows = await mapWithConcurrency(
+        jobs,
+        CRON_HEALTH_MAX_CONCURRENCY,
+        async (job): Promise<CronJobHealth> => {
+          const runs = await readRunsForJob(job.id, fromMs)
 
-    const successCount = runs.filter((r) => isSuccess(r.status)).length
-    const failureRuns = runs.filter((r) => isFailure(r.status))
-    const failureCount = failureRuns.length
-    const consideredRunCount = successCount + failureCount
+          const successCount = runs.filter((r) => isSuccess(r.status)).length
+          const failureRuns = runs.filter((r) => isFailure(r.status))
+          const failureCount = failureRuns.length
+          const consideredRunCount = successCount + failureCount
 
-    const successRatePct =
-      consideredRunCount === 0 ? 100 : Math.round((successCount / consideredRunCount) * 10_000) / 100
+          const successRatePct =
+            consideredRunCount === 0 ? 100 : Math.round((successCount / consideredRunCount) * 10_000) / 100
 
-    const lastFailure = [...failureRuns]
-      .sort((a, b) => (toDateMs(b) ?? 0) - (toDateMs(a) ?? 0))[0]
+          const lastFailure = [...failureRuns]
+            .sort((a, b) => (toDateMs(b) ?? 0) - (toDateMs(a) ?? 0))[0]
 
-    const lastFailureReason = sanitizeReason(lastFailure?.error ?? lastFailure?.summary)
-    const lastFailureAtMs = toDateMs(lastFailure ?? {})
+          const lastFailureReason = sanitizeReason(lastFailure?.error ?? lastFailure?.summary)
+          const lastFailureAtMs = toDateMs(lastFailure ?? {})
 
-    const rollingFailures = computeRollingFailures(runs, safeDays, nowMs)
-    const flakinessScore = computeFlakinessScore(runs)
+          const rollingFailures = computeRollingFailures(runs, safeDays, nowMs)
+          const flakinessScore = computeFlakinessScore(runs)
 
-    healthRows.push({
-      id: job.id,
-      name: job.name,
-      enabled: job.enabled ?? true,
-      agentId: job.agentId ?? null,
-      successRatePct,
-      failureCount,
-      successCount,
-      consideredRunCount,
-      lastFailureReason,
-      lastFailureAt: lastFailureAtMs ? new Date(lastFailureAtMs).toISOString() : null,
-      failureTrend: computeFailureTrend(rollingFailures),
-      rollingFailures,
-      flakinessScore,
-      isFlaky: consideredRunCount >= 4 && flakinessScore >= 0.6,
-      lastStatus: job.state?.lastStatus ?? null,
-    })
-  }
+          return {
+            id: job.id,
+            name: job.name,
+            enabled: job.enabled ?? true,
+            agentId: job.agentId ?? null,
+            successRatePct,
+            failureCount,
+            successCount,
+            consideredRunCount,
+            lastFailureReason,
+            lastFailureAt: lastFailureAtMs ? new Date(lastFailureAtMs).toISOString() : null,
+            failureTrend: computeFailureTrend(rollingFailures),
+            rollingFailures,
+            flakinessScore,
+            isFlaky: consideredRunCount >= 4 && flakinessScore >= 0.6,
+            lastStatus: job.state?.lastStatus ?? null,
+          }
+        }
+      )
 
-  const totalFailures = healthRows.reduce((sum, row) => sum + row.failureCount, 0)
-  const jobsWithFailures = healthRows.filter((row) => row.failureCount > 0).length
-  const flakyJobs = healthRows.filter((row) => row.isFlaky).length
-  const avgSuccessRatePct =
-    healthRows.length === 0
-      ? 100
-      : Math.round((healthRows.reduce((sum, row) => sum + row.successRatePct, 0) / healthRows.length) * 100) / 100
+      const totalFailures = healthRows.reduce((sum, row) => sum + row.failureCount, 0)
+      const jobsWithFailures = healthRows.filter((row) => row.failureCount > 0).length
+      const flakyJobs = healthRows.filter((row) => row.isFlaky).length
+      const avgSuccessRatePct =
+        healthRows.length === 0
+          ? 100
+          : Math.round((healthRows.reduce((sum, row) => sum + row.successRatePct, 0) / healthRows.length) * 100) / 100
 
-  return {
-    days: safeDays,
-    generatedAt: new Date().toISOString(),
-    summary: {
-      jobsTotal: healthRows.length,
-      jobsWithFailures,
-      flakyJobs,
-      avgSuccessRatePct,
-      totalFailures,
-    },
-    jobs: healthRows,
-  }
+      return {
+        days: safeDays,
+        generatedAt: new Date().toISOString(),
+        summary: {
+          jobsTotal: healthRows.length,
+          jobsWithFailures,
+          flakyJobs,
+          avgSuccessRatePct,
+          totalFailures,
+        },
+        jobs: healthRows,
+      }
+    }
+  )
+
+  return value
 }

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUsageSummary, type RangeType } from '@/lib/openclaw/usage-query'
+import { withRouteTiming } from '@/lib/perf/route-timing'
 
 const ALLOWED_RANGE: RangeType[] = ['daily', 'weekly', 'monthly']
 
-export async function GET(request: NextRequest) {
+const getUsageSummaryRoute = async (request: NextRequest) => {
   const { searchParams } = new URL(request.url)
   const range = (searchParams.get('range') || 'daily') as RangeType
 
@@ -20,3 +21,5 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({ data: result })
 }
+
+export const GET = withRouteTiming('api.openclaw.usage.summary.get', getUsageSummaryRoute)

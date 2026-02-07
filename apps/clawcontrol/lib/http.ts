@@ -5,6 +5,8 @@
  * All API responses follow a standard shape with proper error handling.
  */
 
+import { timedClientFetch } from './perf/client-timing'
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -93,6 +95,34 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json()
 }
 
+function inferActivePage(): string {
+  if (typeof window === 'undefined') return 'unknown'
+  const path = window.location.pathname || ''
+  const parts = path.split('/').filter(Boolean)
+  return parts[0] || 'root'
+}
+
+function toFetchName(path: string, method: string): string {
+  const baseOrigin = typeof window === 'undefined' ? 'http://localhost' : window.location.origin
+  const url = path.startsWith('http://') || path.startsWith('https://')
+    ? new URL(path)
+    : new URL(path, baseOrigin)
+
+  const targetPath = url.pathname
+  if (url.search) {
+    return `${method.toUpperCase()} ${targetPath}${url.search}`
+  }
+  return `${method.toUpperCase()} ${targetPath}`
+}
+
+async function timedRequest(path: string, init: RequestInit): Promise<Response> {
+  const method = typeof init.method === 'string' ? init.method : 'GET'
+  return timedClientFetch(path, init, {
+    page: inferActivePage(),
+    name: toFetchName(path, method),
+  })
+}
+
 // ============================================================================
 // API METHODS
 // ============================================================================
@@ -106,7 +136,7 @@ export async function apiGet<T>(
 ): Promise<T> {
   const url = buildUrl(path, params)
 
-  const response = await fetch(url, {
+  const response = await timedRequest(url, {
     method: 'GET',
     headers: {
       Accept: 'application/json',
@@ -123,7 +153,7 @@ export async function apiPost<T, B = unknown>(
   path: string,
   body?: B
 ): Promise<T> {
-  const response = await fetch(path, {
+  const response = await timedRequest(path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -142,7 +172,7 @@ export async function apiPatch<T, B = unknown>(
   path: string,
   body: B
 ): Promise<T> {
-  const response = await fetch(path, {
+  const response = await timedRequest(path, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -158,7 +188,7 @@ export async function apiPatch<T, B = unknown>(
  * DELETE request
  */
 export async function apiDelete<T = void>(path: string): Promise<T> {
-  const response = await fetch(path, {
+  const response = await timedRequest(path, {
     method: 'DELETE',
     headers: {
       Accept: 'application/json',
@@ -175,7 +205,7 @@ export async function apiDeleteJson<T, B = unknown>(
   path: string,
   body: B
 ): Promise<T> {
-  const response = await fetch(path, {
+  const response = await timedRequest(path, {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
@@ -361,6 +391,11 @@ export const agentsApi = {
   list: (filters?: {
     station?: string
     status?: string
+    mode?: 'full' | 'light'
+    includeSessionOverlay?: boolean
+    includeModelOverlay?: boolean
+    syncSessions?: boolean
+    cacheTtlMs?: number
   }) => apiGet<{ data: AgentDTO[] }>('/api/agents', filters),
 
   get: (id: string) => apiGet<{ data: AgentDTO }>(`/api/agents/${id}`),

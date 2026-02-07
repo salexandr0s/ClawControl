@@ -7,6 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { runCommand } from '@clawcontrol/adapters-openclaw'
+import { withRouteTiming } from '@/lib/perf/route-timing'
+import { getOrLoadWithCache, invalidateAsyncCache } from '@/lib/perf/async-cache'
 
 // ============================================================================
 // TYPES
@@ -92,10 +94,16 @@ interface ModelStatusResponse {
 // GET - Get model status
 // ============================================================================
 
-export async function GET() {
+const MODELS_STATUS_TTL_MS = 15_000
+const MODELS_LIST_TTL_MS = 15_000
+
+const getModels = async () => {
   try {
-    // Get model status
-    const statusResult = await runCommand('models.status.json')
+    const { value: statusResult, cacheHit, sharedInFlight } = await getOrLoadWithCache(
+      'api.models.get:models.status.json',
+      MODELS_STATUS_TTL_MS,
+      async () => runCommand('models.status.json')
+    )
 
     if (statusResult.exitCode !== 0) {
       return NextResponse.json(
@@ -109,6 +117,10 @@ export async function GET() {
     return NextResponse.json({
       data: {
         status,
+        cache: {
+          cacheHit,
+          sharedInFlight,
+        },
       },
     })
   } catch (err) {
@@ -119,28 +131,67 @@ export async function GET() {
     )
   }
 }
+export const GET = withRouteTiming('api.models.get', getModels)
 
 // ============================================================================
 // POST - Run model operations
 // ============================================================================
 
-export async function POST(request: NextRequest) {
+const postModels = async (request: NextRequest) => {
   try {
     const body = await request.json()
     const { action } = body as { action: 'list' | 'list-all' | 'status' | 'probe' }
 
     let result
+    let cacheMeta: { cacheHit: boolean; sharedInFlight: boolean } | null = null
     switch (action) {
       case 'list':
-        result = await runCommand('models.list.json')
+        {
+          const cached = await getOrLoadWithCache(
+            'api.models.post:models.list.json',
+            MODELS_LIST_TTL_MS,
+            async () => runCommand('models.list.json')
+          )
+          result = cached.value
+          cacheMeta = {
+            cacheHit: cached.cacheHit,
+            sharedInFlight: cached.sharedInFlight,
+          }
+        }
         break
       case 'list-all':
-        result = await runCommand('models.list.all.json')
+        {
+          const cached = await getOrLoadWithCache(
+            'api.models.post:models.list.all.json',
+            MODELS_LIST_TTL_MS,
+            async () => runCommand('models.list.all.json')
+          )
+          result = cached.value
+          cacheMeta = {
+            cacheHit: cached.cacheHit,
+            sharedInFlight: cached.sharedInFlight,
+          }
+        }
         break
       case 'status':
-        result = await runCommand('models.status.json')
+        {
+          const cached = await getOrLoadWithCache(
+            'api.models.post:models.status.json',
+            MODELS_STATUS_TTL_MS,
+            async () => runCommand('models.status.json')
+          )
+          result = cached.value
+          cacheMeta = {
+            cacheHit: cached.cacheHit,
+            sharedInFlight: cached.sharedInFlight,
+          }
+        }
         break
       case 'probe':
+        invalidateAsyncCache('api.models.get:models.status.json')
+        invalidateAsyncCache('api.models.post:models.status.json')
+        invalidateAsyncCache('api.models.post:models.list.json')
+        invalidateAsyncCache('api.models.post:models.list.all.json')
         result = await runCommand('models.status.probe.json')
         break
       default:
@@ -159,7 +210,16 @@ export async function POST(request: NextRequest) {
 
     const data = JSON.parse(result.stdout)
 
-    return NextResponse.json({ data })
+    return NextResponse.json({
+      data,
+      ...(cacheMeta
+        ? {
+            meta: {
+              cache: cacheMeta,
+            },
+          }
+        : {}),
+    })
   } catch (err) {
     console.error('Models API POST error:', err)
     return NextResponse.json(
@@ -168,3 +228,4 @@ export async function POST(request: NextRequest) {
     )
   }
 }
+export const POST = withRouteTiming('api.models.post', postModels)

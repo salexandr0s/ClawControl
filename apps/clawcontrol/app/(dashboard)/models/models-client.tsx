@@ -11,6 +11,7 @@ import {
   HttpError,
 } from '@/lib/http'
 import { cn } from '@/lib/utils'
+import { usePageReadyTiming } from '@/lib/perf/client-timing'
 import {
   Cpu,
   Plus,
@@ -100,6 +101,7 @@ export function ModelsClient() {
   }
 
   const { isLoading, isRefreshing, status, models, error } = state
+  usePageReadyTiming('models', !isLoading)
 
   // Group models by provider
   const modelsByProvider = models?.reduce((acc, model) => {

@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRepos } from '@/lib/repo'
 import type { WorkOrderFilters } from '@/lib/repo'
 import { normalizeOwnerRef, ownerToActor } from '@/lib/agent-identity'
+import { withRouteTiming } from '@/lib/perf/route-timing'
 
 /**
  * GET /api/work-orders
  *
  * List work orders with optional filters
  */
-export async function GET(request: NextRequest) {
+const getWorkOrdersRoute = async (request: NextRequest) => {
   const searchParams = request.nextUrl.searchParams
 
   const filters: WorkOrderFilters = {}
@@ -69,6 +70,8 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export const GET = withRouteTiming('api.work-orders.get', getWorkOrdersRoute)
+
 /**
  * POST /api/work-orders
  *
@@ -77,7 +80,7 @@ export async function GET(request: NextRequest) {
  * Security: All work order creation is logged to the activity stream
  * for audit trail purposes.
  */
-export async function POST(request: NextRequest) {
+const postWorkOrdersRoute = async (request: NextRequest) => {
   try {
     const body = await request.json()
 
@@ -141,3 +144,5 @@ export async function POST(request: NextRequest) {
     )
   }
 }
+
+export const POST = withRouteTiming('api.work-orders.post', postWorkOrdersRoute)

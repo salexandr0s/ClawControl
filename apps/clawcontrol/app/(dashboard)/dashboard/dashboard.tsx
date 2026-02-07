@@ -11,6 +11,7 @@ import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { MetricCard } from '@/components/ui/metric-card'
 import { useGatewayStatus } from '@/lib/hooks/useGatewayStatus'
 import { cn } from '@/lib/utils'
+import { timedClientFetch, usePageReadyTiming } from '@/lib/perf/client-timing'
 import {
   Activity,
   Bot,
@@ -204,6 +205,8 @@ export function Dashboard({
   stats,
   initialGateway,
 }: DashboardProps) {
+  usePageReadyTiming('dashboard', true)
+
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<string | undefined>()
   const gatewayStatus = useGatewayStatus({
     initialStatus: initialGateway.status,
@@ -242,8 +245,14 @@ export function Dashboard({
       setUsageLoading(true)
       try {
         const [summaryRes, breakdownRes] = await Promise.all([
-          fetch('/api/openclaw/usage/summary?range=daily'),
-          fetch('/api/openclaw/usage/breakdown?groupBy=model'),
+          timedClientFetch('/api/openclaw/usage/summary?range=daily', undefined, {
+            page: 'dashboard',
+            name: 'usage.summary',
+          }),
+          timedClientFetch('/api/openclaw/usage/breakdown?groupBy=model', undefined, {
+            page: 'dashboard',
+            name: 'usage.breakdown.model',
+          }),
         ])
 
         if (summaryRes.ok) {
@@ -266,10 +275,19 @@ export function Dashboard({
   useEffect(() => {
     const warmSync = async () => {
       try {
-        await fetch('/api/openclaw/usage/sync', { method: 'POST' })
+        await timedClientFetch('/api/openclaw/usage/sync', { method: 'POST' }, {
+          page: 'dashboard',
+          name: 'usage.sync',
+        })
         const [summaryRes, breakdownRes] = await Promise.all([
-          fetch('/api/openclaw/usage/summary?range=daily'),
-          fetch('/api/openclaw/usage/breakdown?groupBy=model'),
+          timedClientFetch('/api/openclaw/usage/summary?range=daily', undefined, {
+            page: 'dashboard',
+            name: 'usage.summary.warm',
+          }),
+          timedClientFetch('/api/openclaw/usage/breakdown?groupBy=model', undefined, {
+            page: 'dashboard',
+            name: 'usage.breakdown.model.warm',
+          }),
         ])
         if (summaryRes.ok) {
           const summaryJson = (await summaryRes.json()) as UsageSummaryApi
@@ -289,11 +307,20 @@ export function Dashboard({
   const handleSyncUsage = async () => {
     setUsageSyncing(true)
     try {
-      await fetch('/api/openclaw/usage/sync', { method: 'POST' })
+      await timedClientFetch('/api/openclaw/usage/sync', { method: 'POST' }, {
+        page: 'dashboard',
+        name: 'usage.sync.manual',
+      })
 
       const [summaryRes, breakdownRes] = await Promise.all([
-        fetch('/api/openclaw/usage/summary?range=daily'),
-        fetch('/api/openclaw/usage/breakdown?groupBy=model'),
+        timedClientFetch('/api/openclaw/usage/summary?range=daily', undefined, {
+          page: 'dashboard',
+          name: 'usage.summary.manual',
+        }),
+        timedClientFetch('/api/openclaw/usage/breakdown?groupBy=model', undefined, {
+          page: 'dashboard',
+          name: 'usage.breakdown.model.manual',
+        }),
       ])
 
       if (summaryRes.ok) {

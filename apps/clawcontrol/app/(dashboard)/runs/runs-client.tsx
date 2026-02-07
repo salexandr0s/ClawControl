@@ -9,6 +9,7 @@ import { StationIcon } from '@/components/station-icon'
 import { operationsApi, workOrdersApi, agentsApi } from '@/lib/http'
 import type { OperationDTO, WorkOrderDTO, AgentDTO } from '@/lib/repo'
 import type { OperationStatus } from '@clawcontrol/core'
+import { usePageReadyTiming } from '@/lib/perf/client-timing'
 import { TerminalSquare, Loader2, RefreshCw, XCircle, PlayCircle, CheckCircle2 } from 'lucide-react'
 
 // Available status transitions
@@ -30,6 +31,8 @@ export function RunsClient() {
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
 
+  usePageReadyTiming('runs', !loading)
+
   // Fetch operations
   const fetchOperations = useCallback(async () => {
     try {
@@ -47,7 +50,13 @@ export function RunsClient() {
         const [opsResult, woResult, agentsResult] = await Promise.all([
           operationsApi.list(),
           workOrdersApi.list(),
-          agentsApi.list(),
+          agentsApi.list({
+            mode: 'light',
+            includeSessionOverlay: false,
+            includeModelOverlay: false,
+            syncSessions: false,
+            cacheTtlMs: 5000,
+          }),
         ])
         setOperations(opsResult.data)
         setWorkOrders(woResult.data)

@@ -26,6 +26,7 @@ import type { AgentDTO, OperationDTO } from '@/lib/repo'
 import { slugifyDisplayName } from '@/lib/agent-identity'
 import { useStations } from '@/lib/stations-context'
 import { cn } from '@/lib/utils'
+import { usePageReadyTiming } from '@/lib/perf/client-timing'
 import { StationsTab, StationUpsertModal } from './stations-tab'
 import { HierarchyView } from './hierarchy-view'
 import {
@@ -199,6 +200,8 @@ export function AgentsClient() {
 
   // File editor modal state
   const [editingFile, setEditingFile] = useState<{ filePath: string; fileName: string } | null>(null)
+
+  usePageReadyTiming('agents', !loading)
 
   const triggerProtectedAction = useProtectedActionTrigger()
 

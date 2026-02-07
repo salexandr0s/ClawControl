@@ -13,6 +13,7 @@ import { useWorkOrderStream } from '@/lib/hooks/useWorkOrderStream'
 import type { AgentDTO, WorkOrderWithOpsDTO } from '@/lib/repo'
 import type { WorkOrderState, Priority, Owner } from '@clawcontrol/core'
 import { cn, formatRelativeTime } from '@/lib/utils'
+import { timedClientFetch, usePageReadyTiming } from '@/lib/perf/client-timing'
 import { ClipboardList, Plus, Filter, Loader2, X } from 'lucide-react'
 import { formatOwnerLabel, ownerTextTone } from '@/lib/agent-identity'
 
@@ -549,6 +550,8 @@ export function WorkOrdersClient() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  usePageReadyTiming('work-orders', !loading)
+
   // View toggle state (persisted to localStorage)
   const [view, setView] = useState<ViewMode>(() => {
     if (typeof window !== 'undefined') {
@@ -636,9 +639,12 @@ export function WorkOrdersClient() {
 
   const fetchDispatchCronStatus = useCallback(async () => {
     try {
-      const response = await fetch('/api/dispatch/cron', {
+      const response = await timedClientFetch('/api/dispatch/cron', {
         method: 'GET',
         headers: { Accept: 'application/json' },
+      }, {
+        page: 'work-orders',
+        name: 'dispatch.cron.status',
       })
 
       const json = (await response.json()) as { data?: DispatchCronStatus; error?: string }
@@ -663,7 +669,13 @@ export function WorkOrdersClient() {
     let isMounted = true
     const fetchAgents = async () => {
       try {
-        const result = await agentsApi.list()
+        const result = await agentsApi.list({
+          mode: 'light',
+          includeSessionOverlay: false,
+          includeModelOverlay: false,
+          syncSessions: false,
+          cacheTtlMs: 5000,
+        })
         if (isMounted) {
           setAgents(result.data)
         }
@@ -773,13 +785,16 @@ export function WorkOrdersClient() {
     setDispatchCronError(null)
 
     try {
-      const response = await fetch('/api/dispatch/cron', {
+      const response = await timedClientFetch('/api/dispatch/cron', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
         body: JSON.stringify({ enabled: targetEnabled }),
+      }, {
+        page: 'work-orders',
+        name: 'dispatch.cron.toggle',
       })
 
       const json = (await response.json()) as { data?: DispatchCronStatus; error?: string }

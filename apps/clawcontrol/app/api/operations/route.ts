@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRepos } from '@/lib/repo'
 import type { OperationFilters, CreateOperationInput } from '@/lib/repo'
+import { withRouteTiming } from '@/lib/perf/route-timing'
 
 /**
  * GET /api/operations
  *
  * List operations with optional filters
  */
-export async function GET(request: NextRequest) {
+const getOperationsRoute = async (request: NextRequest) => {
   const searchParams = request.nextUrl.searchParams
 
   const filters: OperationFilters = {}
@@ -51,12 +52,14 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export const GET = withRouteTiming('api.operations.get', getOperationsRoute)
+
 /**
  * POST /api/operations
  *
  * Create a new operation
  */
-export async function POST(request: NextRequest) {
+const postOperationsRoute = async (request: NextRequest) => {
   try {
     const body = await request.json()
     const { workOrderId, station, title, notes, dependsOnOperationIds, wipClass } = body
@@ -114,3 +117,5 @@ export async function POST(request: NextRequest) {
     )
   }
 }
+
+export const POST = withRouteTiming('api.operations.post', postOperationsRoute)
