@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: auto-version-${{ github.ref }}
@@ -31,7 +32,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Capture current release tag
+        id: release_tag_before
+        run: |
+          tag="$(git tag --sort=-version:refname | grep '^v' | head -n 1 || true)"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
       - name: Run semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
+
+      - name: Capture release tag after semantic-release
+        id: release_tag_after
+        run: |
+          git fetch --tags origin
+          tag="$(git tag --sort=-version:refname | grep '^v' | head -n 1 || true)"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger release artifact workflow
+        if: steps.release_tag_after.outputs.tag != '' && steps.release_tag_after.outputs.tag != steps.release_tag_before.outputs.tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release_tag_after.outputs.tag }}
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$RELEASE_TAG"
