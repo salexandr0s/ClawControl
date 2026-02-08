@@ -41,6 +41,7 @@ declare global {
   interface Window {
     clawcontrolDesktop?: {
       pickDirectory: (defaultPath?: string) => Promise<string | null>
+      restartServer?: () => Promise<{ ok: boolean; message: string }>
     }
   }
 }
@@ -62,8 +63,10 @@ export default function SettingsPage() {
   const [envError, setEnvError] = useState<string | null>(null)
   const [workspacePath, setWorkspacePath] = useState('')
   const [pickerAvailable, setPickerAvailable] = useState(false)
+  const [restartAvailable, setRestartAvailable] = useState(false)
   const [pickingWorkspace, setPickingWorkspace] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [restartingServer, setRestartingServer] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
   const [avatarError, setAvatarError] = useState<string | null>(null)
@@ -83,6 +86,7 @@ export default function SettingsPage() {
 
     if (typeof window !== 'undefined') {
       setPickerAvailable(typeof window.clawcontrolDesktop?.pickDirectory === 'function')
+      setRestartAvailable(typeof window.clawcontrolDesktop?.restartServer === 'function')
     }
   }, [])
 
@@ -134,7 +138,9 @@ export default function SettingsPage() {
   }
 
   async function handleSaveWorkspace() {
+    const workspaceChanged = Boolean(hasWorkspaceChanges)
     setSaving(true)
+    setRestartingServer(false)
     setSaveSuccess(false)
     setEnvError(null)
     try {
@@ -142,11 +148,29 @@ export default function SettingsPage() {
         OPENCLAW_WORKSPACE: workspacePath || null,
       })
       setEnvConfig(res.data)
+
+      if (workspaceChanged && typeof window !== 'undefined') {
+        const restartFn = window.clawcontrolDesktop?.restartServer
+        if (typeof restartFn === 'function') {
+          setRestartingServer(true)
+          const restartResult = await restartFn()
+          if (restartResult?.ok) {
+            await loadEnvConfig()
+          } else {
+            setEnvError(
+              restartResult?.message || 'Configuration saved, but automatic restart failed. Restart manually.'
+            )
+          }
+          setRestartingServer(false)
+        }
+      }
+
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
     } catch (err) {
       setEnvError(err instanceof Error ? err.message : 'Failed to save config')
     } finally {
+      setRestartingServer(false)
       setSaving(false)
     }
   }
@@ -361,7 +385,7 @@ export default function SettingsPage() {
                     ) : (
                       <Save className="w-4 h-4" />
                     )}
-                    {saving ? 'Saving...' : saveSuccess ? 'Saved' : 'Save'}
+                    {saving ? (restartingServer ? 'Restarting...' : 'Saving...') : saveSuccess ? 'Saved' : 'Save'}
                   </button>
                 </div>
               </div>
@@ -385,7 +409,9 @@ export default function SettingsPage() {
               {/* Help text */}
               <p className="text-xs text-fg-3 pt-2">
                 This should be the OpenClaw directory containing your agents/, skills/, memory/, and other workspace folders.
-                Changes require a server restart.
+                {restartAvailable
+                  ? ' Changes are applied with an automatic server restart.'
+                  : ' Changes require a server restart.'}
               </p>
             </>
           )}

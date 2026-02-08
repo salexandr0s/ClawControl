@@ -18,7 +18,14 @@ const SERVER_URL = `http://${SERVER_HOST}:${SERVER_PORT}`
 const SERVER_PROBE_URL = `${SERVER_URL}/api/workspace?path=/`
 const SERVER_CHECK_INTERVAL_MS = 500
 const SERVER_START_TIMEOUT_MS = 30_000
+const SERVER_STOP_TIMEOUT_MS = 10_000
 const PICK_DIRECTORY_CHANNEL = 'clawcontrol:pick-directory'
+const RESTART_SERVER_CHANNEL = 'clawcontrol:restart-server'
+
+interface ServerRestartResponse {
+  ok: boolean
+  message: string
+}
 
 function isBrokenPipeError(error: unknown): error is NodeJS.ErrnoException {
   if (!(error instanceof Error)) return false
@@ -207,6 +214,16 @@ async function waitForServer(timeoutMs: number = SERVER_START_TIMEOUT_MS): Promi
   return false
 }
 
+async function waitForServerStop(timeoutMs: number = SERVER_STOP_TIMEOUT_MS): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const { reachable } = await probeServer()
+    if (!reachable) return true
+    await sleep(SERVER_CHECK_INTERVAL_MS)
+  }
+  return false
+}
+
 function getDevClawControlDir(): string {
   const repoRoot = path.resolve(__dirname, '../../..')
   const dir = path.join(repoRoot, 'apps', 'clawcontrol')
@@ -332,6 +349,62 @@ function stopServer(): void {
   }, 5000)
 }
 
+async function restartManagedServer(): Promise<ServerRestartResponse> {
+  if (startInFlight) {
+    await startInFlight
+  }
+
+  if (!didSpawnServer || !serverProcess?.pid) {
+    return {
+      ok: false,
+      message: 'Saved configuration, but this server is externally managed. Restart it manually to apply workspace changes.',
+    }
+  }
+
+  stopServer()
+
+  const stopped = await waitForServerStop()
+  if (!stopped) {
+    return {
+      ok: false,
+      message: 'Saved configuration, but timed out while stopping the server. Restart manually.',
+    }
+  }
+
+  if (await isPortInUseByOtherService()) {
+    return {
+      ok: false,
+      message: `Saved configuration, but port ${SERVER_PORT} is now occupied by another service.`,
+    }
+  }
+
+  try {
+    serverProcess = await spawnServer()
+    didSpawnServer = true
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error
+        ? `Saved configuration, but failed to restart server: ${err.message}`
+        : 'Saved configuration, but failed to restart server.',
+    }
+  }
+
+  const ready = await waitForServer()
+  if (!ready) {
+    stopServer()
+    return {
+      ok: false,
+      message: `Saved configuration, but server did not become ready within ${Math.round(SERVER_START_TIMEOUT_MS / 1000)} seconds.`,
+    }
+  }
+
+  return {
+    ok: true,
+    message: 'Configuration saved and server restarted.',
+  }
+}
+
 async function startApp(): Promise<void> {
   if (startInFlight) return startInFlight
 
@@ -403,6 +476,19 @@ ipcMain.handle(PICK_DIRECTORY_CHANNEL, async (_event, payload?: { defaultPath?: 
   return {
     canceled: result.canceled,
     path: result.canceled ? null : (result.filePaths[0] ?? null),
+  }
+})
+
+ipcMain.handle(RESTART_SERVER_CHANNEL, async (): Promise<ServerRestartResponse> => {
+  try {
+    return await restartManagedServer()
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error
+        ? `Saved configuration, but restart failed: ${err.message}`
+        : 'Saved configuration, but restart failed.',
+    }
   }
 })
 
