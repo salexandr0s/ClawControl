@@ -1,6 +1,6 @@
 # ClawControl Agent Template Guide
 
-Last updated: 2026-02-06
+Last updated: 2026-02-09
 
 This guide defines the authoring and import contract for user-provided agent templates in ClawControl.
 Use this as the single reference for building templates that pass validation and work reliably in the current system.
@@ -14,8 +14,13 @@ This guide is based on the current implementation in:
 - `/Users/savorgserver/OpenClaw/projects/ClawControl/apps/clawcontrol/app/api/agent-templates/import/route.ts`
 - `/Users/savorgserver/OpenClaw/projects/ClawControl/apps/clawcontrol/app/api/agents/create-from-template/route.ts`
 
-Current import/export is a JSON payload representing one template package.
-"Bundle" support in practice means one exported template JSON at a time.
+Import now supports:
+
+- pasted JSON export payload (legacy, unchanged)
+- uploaded `.json` / `.template.json` files (single template)
+- uploaded `.zip` files (single template or multi-template bundle)
+
+Export remains JSON (`<id>.template.json`) for compatibility.
 
 ## 2. Required Directory Structure
 
@@ -219,7 +224,7 @@ If `render.targets` is omitted, defaults are used:
 - `SOUL.md -> workspace/agents/{{agentSlug}}/SOUL.md`
 - `overlay.md -> workspace/agents/{{agentSlug}}.md`
 
-## 9. Import/Export Format (Current)
+## 9. Import/Export Formats
 
 Export endpoint returns JSON (downloaded as `<id>.template.json`):
 
@@ -238,7 +243,7 @@ Export endpoint returns JSON (downloaded as `<id>.template.json`):
 }
 ```
 
-Import API expects wrapper body:
+JSON API import (legacy) still expects wrapper body:
 
 ```json
 {
@@ -259,7 +264,56 @@ Import API expects wrapper body:
 
 UI note:
 
-- UI import modal accepts pasted exported JSON and wraps it internally for API submission.
+- UI import supports both file upload and JSON paste mode.
+
+### 9.1 Supported Uploaded File Types
+
+- `.zip`
+- `.json`
+- `.template.json`
+
+### 9.2 Supported ZIP Layouts
+
+#### A) Single template at archive root
+
+```text
+template.json
+SOUL.md
+overlay.md
+README.md
+```
+
+#### B) Single template in one top-level folder
+
+```text
+<templateId>/template.json
+<templateId>/SOUL.md
+<templateId>/overlay.md
+```
+
+#### C) Bundle/team archive (multiple top-level template folders)
+
+```text
+alpha/template.json
+alpha/SOUL.md
+alpha/overlay.md
+beta/template.json
+beta/SOUL.md
+beta/overlay.md
+```
+
+Bundle rules:
+
+- each top-level folder must include its own `template.json`
+- duplicate template IDs across bundle entries are rejected
+- import is all-or-nothing (no partial writes)
+
+Noise entries automatically ignored:
+
+- `__MACOSX/**`
+- `.DS_Store`
+
+Unsupported or mixed layouts are rejected with a clear error.
 
 ## 10. Security and Size Limits
 
@@ -281,6 +335,17 @@ Rejected file names include:
 - hidden path segments (for example `.git`, `.secret`)
 
 All writes are constrained by workspace path policy and allowed root areas.
+
+Validation checks per template include:
+
+- `template.json` exists and parses
+- schema + semantic validation via `validateTemplateConfig`
+- folder-to-id rules for folder-based ZIP imports
+- required source files exist:
+  - if `render.targets` is provided: all `target.source` files must exist
+  - if `render.targets` is omitted: `SOUL.md` and `overlay.md` are required
+- duplicate IDs in one bundle are rejected
+- conflicts with existing `/agent-templates/<id>` are rejected
 
 ## 11. Governance and Confirmations
 
@@ -312,7 +377,7 @@ Before distributing a template:
 ## 13. Known Implementation Notes
 
 - Current create-from-template flow renders previews and registers the agent, but does not persist generated rendered files to disk yet.
-- Export currently returns JSON payload; comments mention zip support as future enhancement.
+- Export currently returns JSON payload (`.template.json`) even though import supports ZIP.
 - Treat uploaded template content as untrusted input and avoid embedding secrets.
 
 ## 14. Template README Minimum Standard
@@ -348,3 +413,14 @@ Every shared template should include:
 
 - Use a new template id/versioned id (for example `clawcontrol-build-v2`).
 
+`Unsupported ZIP layout`
+
+- Use one of the three supported ZIP layouts and ensure each bundle folder has `template.json`.
+
+`Duplicate template ID(s) in bundle`
+
+- Ensure each bundled template uses a unique `template.json.id`.
+
+`Missing required source file(s)`
+
+- Add all `render.targets[].source` files, or include default `SOUL.md` + `overlay.md` when `render.targets` is omitted.

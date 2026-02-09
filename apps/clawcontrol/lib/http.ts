@@ -1426,6 +1426,98 @@ export interface TemplateWithFiles extends TemplateSummary {
   config?: Record<string, unknown>
 }
 
+export interface TemplateImportTemplatePayload {
+  templateId: string
+  name: string
+  version: string
+  exportedAt?: string
+  files: Record<string, string>
+}
+
+export interface TemplateImportValidation {
+  templateId?: string
+  valid: boolean
+  errors: Array<{ path: string; message: string; code: string }>
+  warnings: Array<{ path: string; message: string; code: string }>
+}
+
+export interface TemplateImportResult {
+  data: TemplateSummary
+  importedTemplates: Array<{
+    id: string
+    name: string
+    version: string
+    isValid: boolean
+    fileCount: number
+  }>
+  importSummary: {
+    templateCount: number
+    templateIds: string[]
+    source: 'json-body' | 'json-file' | 'zip-file'
+    layout: 'single' | 'bundle'
+  }
+  validation: TemplateImportValidation
+  validations: TemplateImportValidation[]
+  receiptId: string
+}
+
+function parseTemplateImportResponse(res: Response): Promise<TemplateImportResult> {
+  return res.json() as Promise<TemplateImportResult>
+}
+
+async function throwTemplateImportError(res: Response): Promise<never> {
+  const errorData = await res.json()
+  throw new HttpError(
+    errorData.error,
+    res.status,
+    errorData.error,
+    {
+      policy: errorData.policy,
+      validationErrors: errorData.validationErrors,
+      existingTemplateIds: errorData.existingTemplateIds,
+    }
+  )
+}
+
+const importJsonTemplate = (data: {
+  template: TemplateImportTemplatePayload
+  typedConfirmText: string
+}) => fetch('/api/agent-templates/import', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  },
+  body: JSON.stringify(data),
+}).then(async (res) => {
+  if (!res.ok) {
+    return throwTemplateImportError(res)
+  }
+  return parseTemplateImportResponse(res)
+})
+
+const importFileTemplate = (data: {
+  file: File
+  typedConfirmText: string
+}) => {
+  const formData = new FormData()
+  formData.set('file', data.file)
+  formData.set('typedConfirmText', data.typedConfirmText)
+
+  return fetch('/api/agent-templates/import', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+    },
+    body: formData,
+  }).then(async (res) => {
+    if (!res.ok) {
+      return throwTemplateImportError(res)
+    }
+    return parseTemplateImportResponse(res)
+  })
+}
+
 export const templatesApi = {
   list: (filters?: {
     role?: string
@@ -1490,38 +1582,12 @@ export const templatesApi = {
       return res.blob()
     }),
 
-  import: (data: {
-    template: {
-      templateId: string
-      name: string
-      version: string
-      exportedAt: string
-      files: Record<string, string>
-    }
-    typedConfirmText: string
-  }) => fetch('/api/agent-templates/import', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(data),
-  }).then(async (res) => {
-    if (!res.ok) {
-      const errorData = await res.json()
-      throw new HttpError(
-        errorData.error,
-        res.status,
-        errorData.error,
-        { policy: errorData.policy, validationErrors: errorData.validationErrors }
-      )
-    }
-    return res.json() as Promise<{
-      data: TemplateSummary
-      validation: { valid: boolean; errors: unknown[]; warnings: unknown[] }
-      receiptId: string
-    }>
-  }),
+  importJson: importJsonTemplate,
+
+  importFile: importFileTemplate,
+
+  // Backward-compatible alias for existing callers.
+  import: importJsonTemplate,
 }
 
 // ============================================================================

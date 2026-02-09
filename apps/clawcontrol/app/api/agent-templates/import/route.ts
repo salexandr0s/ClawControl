@@ -4,99 +4,88 @@ import { dirname } from 'node:path'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import { getRepos } from '@/lib/repo'
 import { validateWorkspacePath } from '@/lib/fs/path-policy'
+import { scanTemplates } from '@/lib/templates'
 import {
-  getTemplateById,
-  validateTemplateConfig,
-  scanTemplates,
-} from '@/lib/templates'
-import { validateZipEntryName, MAX_FILE_SIZE, MAX_TOTAL_SIZE, MAX_FILES } from '@/lib/fs/zip-safety'
+  TemplateImportError,
+  prepareTemplateImportBundleFromFormData,
+  prepareTemplateImportBundleFromJsonBody,
+} from '@/lib/template-import'
 
-interface ImportTemplatePayload {
+interface ImportValidationResult {
   templateId: string
-  name: string
-  version: string
-  exportedAt: string
-  files: Record<string, string>
+  valid: boolean
+  errors: Array<{ path: string; message: string; code: string }>
+  warnings: Array<{ path: string; message: string; code: string }>
+}
+
+function toErrorPayload(err: unknown): { status: number; body: Record<string, unknown> } {
+  if (err instanceof TemplateImportError) {
+    const body: Record<string, unknown> = { error: err.message }
+    if (err.details) {
+      Object.assign(body, err.details)
+    }
+    return { status: err.status, body }
+  }
+
+  const message = err instanceof Error ? err.message : 'Failed to import template'
+  return { status: 500, body: { error: message } }
+}
+
+function templateWorkspacePath(templateId: string): string {
+  return `/agent-templates/${templateId}`
+}
+
+async function templateExists(templateId: string): Promise<boolean> {
+  const templatePath = templateWorkspacePath(templateId)
+  const dirRes = validateWorkspacePath(templatePath)
+  if (!dirRes.valid || !dirRes.resolvedPath) {
+    throw new Error(dirRes.error || `Invalid template path: ${templatePath}`)
+  }
+
+  try {
+    await fsp.access(dirRes.resolvedPath)
+    return true
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false
+    }
+    throw err
+  }
 }
 
 /**
  * POST /api/agent-templates/import
- * Import a template from a zip/JSON export
- *
- * Body (JSON):
- * - template: ImportTemplatePayload - The exported template data
- * - typedConfirmText: string - Confirmation text
+ * Import one template from JSON or one/many templates from ZIP bundle.
  */
 export async function POST(request: NextRequest) {
-  let body: { template: ImportTemplatePayload; typedConfirmText?: string }
+  const contentType = (request.headers.get('content-type') || '').toLowerCase()
+
+  let parsed: Awaited<ReturnType<typeof prepareTemplateImportBundleFromFormData>> | ReturnType<typeof prepareTemplateImportBundleFromJsonBody>
 
   try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
-  }
-
-  const { template: importData, typedConfirmText } = body
-
-  // Validate required fields
-  if (!importData || !importData.templateId || !importData.files) {
-    return NextResponse.json(
-      { error: 'Invalid template data: missing templateId or files' },
-      { status: 400 }
-    )
-  }
-
-  // Check if template.json is included
-  if (!importData.files['template.json']) {
-    return NextResponse.json(
-      { error: 'Invalid template: missing template.json file' },
-      { status: 400 }
-    )
-  }
-
-  // Validate file count limit
-  const fileNames = Object.keys(importData.files)
-  if (fileNames.length > MAX_FILES) {
-    return NextResponse.json(
-      { error: `Too many files: ${fileNames.length} (max ${MAX_FILES})` },
-      { status: 400 }
-    )
-  }
-
-  // Validate total size limit
-  let totalSize = 0
-  for (const fileName of fileNames) {
-    const content = importData.files[fileName]
-    const fileSize = content.length
-
-    // Validate individual file size
-    if (fileSize > MAX_FILE_SIZE) {
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await request.formData()
+      parsed = await prepareTemplateImportBundleFromFormData(formData)
+    } else if (contentType.includes('application/json') || contentType === '') {
+      let body: unknown
+      try {
+        body = await request.json()
+      } catch {
+        return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+      }
+      parsed = prepareTemplateImportBundleFromJsonBody(body)
+    } else {
       return NextResponse.json(
-        { error: `File too large: ${fileName} (${fileSize} bytes, max ${MAX_FILE_SIZE})` },
-        { status: 400 }
+        { error: 'Unsupported content type. Use application/json or multipart/form-data.' },
+        { status: 415 }
       )
     }
-
-    totalSize += fileSize
+  } catch (err) {
+    const { status, body } = toErrorPayload(err)
+    return NextResponse.json(body, { status })
   }
 
-  if (totalSize > MAX_TOTAL_SIZE) {
-    return NextResponse.json(
-      { error: `Import too large: ${totalSize} bytes (max ${MAX_TOTAL_SIZE})` },
-      { status: 400 }
-    )
-  }
-
-  // Validate file names (zip slip prevention)
-  for (const fileName of fileNames) {
-    const validation = validateZipEntryName(fileName)
-    if (!validation.valid) {
-      return NextResponse.json(
-        { error: `Invalid file name: ${validation.error}` },
-        { status: 400 }
-      )
-    }
-  }
+  const { bundle, typedConfirmText } = parsed
 
   // Enforce Governor - template.import
   const result = await enforceTypedConfirm({
@@ -114,34 +103,19 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // Validate template.json content
-  let templateConfig: unknown
-  try {
-    templateConfig = JSON.parse(importData.files['template.json'])
-  } catch {
-    return NextResponse.json(
-      { error: 'Invalid template.json: failed to parse JSON' },
-      { status: 400 }
+  // Detect template conflicts before writing to enforce all-or-nothing semantics.
+  const existingTemplateIds = (
+    await Promise.all(
+      bundle.templateIds.map(async (templateId) => (await templateExists(templateId)) ? templateId : null)
     )
-  }
+  ).filter((value): value is string => Boolean(value))
 
-  const validation = validateTemplateConfig(templateConfig, { expectedId: importData.templateId })
-  if (!validation.valid) {
+  if (existingTemplateIds.length > 0) {
     return NextResponse.json(
       {
-        error: 'Template validation failed',
-        validationErrors: validation.errors,
-        validationWarnings: validation.warnings,
+        error: `Template conflict: already exists (${existingTemplateIds.join(', ')})`,
+        existingTemplateIds,
       },
-      { status: 400 }
-    )
-  }
-
-  // Check if template already exists
-  const existingTemplate = await getTemplateById(importData.templateId)
-  if (existingTemplate) {
-    return NextResponse.json(
-      { error: `Template "${importData.templateId}" already exists` },
       { status: 409 }
     )
   }
@@ -153,110 +127,176 @@ export async function POST(request: NextRequest) {
     workOrderId: 'system',
     kind: 'manual',
     commandName: 'template.import',
-    commandArgs: { templateId: importData.templateId, templateName: importData.name },
+    commandArgs: {
+      templateCount: bundle.templateCount,
+      templateIds: bundle.templateIds,
+      source: bundle.source,
+      layout: bundle.layout,
+      fileName: bundle.fileName ?? null,
+    },
   })
 
+  const createdTemplateDirs: string[] = []
+
   try {
-    const templateId = importData.templateId
-    const templatePath = `/agent-templates/${templateId}`
-
     await repos.receipts.append(receipt.id, {
       stream: 'stdout',
-      chunk: `Importing template ${importData.name}...\n`,
+      chunk: `Importing ${bundle.templateCount} template(s): ${bundle.templateIds.join(', ')}\n`,
     })
 
-    const dirRes = validateWorkspacePath(templatePath)
-    if (!dirRes.valid || !dirRes.resolvedPath) {
-      throw new Error(dirRes.error || `Invalid template path: ${templatePath}`)
+    const templatesBaseRes = validateWorkspacePath('/agent-templates')
+    if (!templatesBaseRes.valid || !templatesBaseRes.resolvedPath) {
+      throw new Error(templatesBaseRes.error || 'Invalid templates base path')
     }
+    await fsp.mkdir(templatesBaseRes.resolvedPath, { recursive: true })
 
-    try {
-      await fsp.access(dirRes.resolvedPath)
-      throw new Error(`Template "${templateId}" already exists`)
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-    }
-
-    await fsp.mkdir(dirRes.resolvedPath, { recursive: false })
-
-    await repos.receipts.append(receipt.id, {
-      stream: 'stdout',
-      chunk: `  Created folder: ${templatePath}\n`,
-    })
-
-    for (const fileName of fileNames) {
-      const parts = fileName.split('/')
-      if (parts.some((p) => p === '' || p === '.' || p === '..')) {
-        throw new Error(`Invalid file name: ${fileName}`)
-      }
-      if (parts.some((p) => p.startsWith('.'))) {
-        throw new Error(`Invalid file name (hidden path segment): ${fileName}`)
+    for (const template of bundle.templates) {
+      const templatePath = templateWorkspacePath(template.templateId)
+      const dirRes = validateWorkspacePath(templatePath)
+      if (!dirRes.valid || !dirRes.resolvedPath) {
+        throw new Error(dirRes.error || `Invalid template path: ${templatePath}`)
       }
 
-      const content = importData.files[fileName]
-      const filePath = `${templatePath}/${fileName}`
-      const fileRes = validateWorkspacePath(filePath)
-      if (!fileRes.valid || !fileRes.resolvedPath) {
-        throw new Error(fileRes.error || `Invalid file path: ${filePath}`)
+      // Re-check at write-time to avoid races.
+      try {
+        await fsp.access(dirRes.resolvedPath)
+        throw new Error(`Template "${template.templateId}" already exists`)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw err
+        }
       }
 
-      await fsp.mkdir(dirname(fileRes.resolvedPath), { recursive: true })
-      await fsp.writeFile(fileRes.resolvedPath, content, 'utf8')
+      await fsp.mkdir(dirRes.resolvedPath, { recursive: false })
+      createdTemplateDirs.push(dirRes.resolvedPath)
 
       await repos.receipts.append(receipt.id, {
         stream: 'stdout',
-        chunk: `  Created file: ${fileName} (${content.length} bytes)\n`,
+        chunk: `  Created folder: ${templatePath}\n`,
+      })
+
+      const fileNames = Object.keys(template.files).sort((left, right) => left.localeCompare(right))
+      for (const fileName of fileNames) {
+        const parts = fileName.split('/')
+        if (parts.some((part) => part === '' || part === '.' || part === '..')) {
+          throw new Error(`Invalid file name: ${fileName}`)
+        }
+        if (parts.some((part) => part.startsWith('.'))) {
+          throw new Error(`Invalid file name (hidden path segment): ${fileName}`)
+        }
+
+        const content = template.files[fileName]
+        const filePath = `${templatePath}/${fileName}`
+        const fileRes = validateWorkspacePath(filePath)
+        if (!fileRes.valid || !fileRes.resolvedPath) {
+          throw new Error(fileRes.error || `Invalid file path: ${filePath}`)
+        }
+
+        await fsp.mkdir(dirname(fileRes.resolvedPath), { recursive: true })
+        await fsp.writeFile(fileRes.resolvedPath, content, 'utf8')
+
+        await repos.receipts.append(receipt.id, {
+          stream: 'stdout',
+          chunk: `  Created file: ${template.templateId}/${fileName} (${Buffer.byteLength(content, 'utf8')} bytes)\n`,
+        })
+      }
+    }
+
+    // Rescan templates to pick up all imports
+    const updatedTemplates = await scanTemplates()
+
+    const importedTemplates = bundle.templates.map((template) => {
+      const scanned = updatedTemplates.find((item) => item.id === template.templateId)
+      if (scanned) {
+        return {
+          id: scanned.id,
+          name: scanned.name,
+          version: scanned.version,
+          isValid: scanned.isValid,
+          fileCount: Object.keys(template.files).length,
+        }
+      }
+
+      return {
+        id: template.templateId,
+        name: template.name,
+        version: template.version,
+        isValid: true,
+        fileCount: Object.keys(template.files).length,
+      }
+    })
+
+    const validationResults: ImportValidationResult[] = bundle.templates.map((template) => ({
+      templateId: template.templateId,
+      valid: template.validation.valid,
+      errors: template.validation.errors,
+      warnings: template.validation.warnings,
+    }))
+
+    for (const template of bundle.templates) {
+      await repos.activities.create({
+        type: 'template.imported',
+        actor: 'user',
+        entityType: 'template',
+        entityId: template.templateId,
+        summary: `Imported template ${template.name}`,
+        payloadJson: {
+          templateId: template.templateId,
+          templateName: template.name,
+          fileCount: Object.keys(template.files).length,
+          exportedAt: template.exportedAt ?? null,
+          source: bundle.source,
+          layout: bundle.layout,
+          bundleTemplateCount: bundle.templateCount,
+          bundleTemplateIds: bundle.templateIds,
+        },
       })
     }
 
-    // Rescan templates to pick up the new one
-    const updatedTemplates = await scanTemplates()
-    const newTemplate = updatedTemplates.find((t) => t.id === templateId)
-
-    // Log activity
-    await repos.activities.create({
-      type: 'template.imported',
-      actor: 'user',
-      entityType: 'template',
-      entityId: templateId,
-      summary: `Imported template ${importData.name}`,
-      payloadJson: {
-        templateId,
-        templateName: importData.name,
-        fileCount: fileNames.length,
-        exportedAt: importData.exportedAt,
-      },
-    })
-
-    // Finalize receipt
     await repos.receipts.finalize(receipt.id, {
       exitCode: 0,
       durationMs: 0,
       parsedJson: {
-        templateId,
-        templateName: importData.name,
-        fileCount: fileNames.length,
-        isValid: newTemplate?.isValid ?? false,
+        templateCount: bundle.templateCount,
+        templateIds: bundle.templateIds,
+        importedTemplates,
+        source: bundle.source,
+        layout: bundle.layout,
       },
     })
 
     return NextResponse.json({
-      data: newTemplate || {
-        id: templateId,
-        name: importData.name,
-        version: importData.version,
-        isValid: true,
-        fileCount: fileNames.length,
+      data: importedTemplates[0],
+      importedTemplates,
+      importSummary: {
+        templateCount: bundle.templateCount,
+        templateIds: bundle.templateIds,
+        source: bundle.source,
+        layout: bundle.layout,
       },
-      validation: {
-        valid: validation.valid,
-        errors: validation.errors,
-        warnings: validation.warnings,
-      },
+      validation: validationResults[0],
+      validations: validationResults,
       receiptId: receipt.id,
     })
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Failed to import template'
+
+    if (createdTemplateDirs.length > 0) {
+      for (const absDir of [...createdTemplateDirs].reverse()) {
+        try {
+          await fsp.rm(absDir, { recursive: true, force: true })
+          await repos.receipts.append(receipt.id, {
+            stream: 'stdout',
+            chunk: `Rolled back folder: ${absDir}\n`,
+          })
+        } catch (rollbackErr) {
+          await repos.receipts.append(receipt.id, {
+            stream: 'stderr',
+            chunk: `Rollback failed for ${absDir}: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}\n`,
+          })
+        }
+      }
+    }
 
     await repos.receipts.append(receipt.id, {
       stream: 'stderr',
@@ -269,9 +309,11 @@ export async function POST(request: NextRequest) {
       parsedJson: { error: errorMessage },
     })
 
+    const status = errorMessage.includes('already exists') ? 409 : 500
+
     return NextResponse.json(
       { error: errorMessage, receiptId: receipt.id },
-      { status: 500 }
+      { status }
     )
   }
 }

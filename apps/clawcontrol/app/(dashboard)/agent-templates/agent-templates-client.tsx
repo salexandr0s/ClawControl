@@ -1,13 +1,18 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, type ChangeEvent, type DragEvent } from 'react'
 import { PageHeader, EmptyState, TypedConfirmModal } from '@clawcontrol/ui'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { StatusPill } from '@/components/ui/status-pill'
 import { RightDrawer } from '@/components/shell/right-drawer'
 import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
 import { useSettings } from '@/lib/settings-context'
-import { templatesApi, type TemplateWithFiles, type TemplateFile } from '@/lib/http'
+import {
+  templatesApi,
+  type TemplateWithFiles,
+  type TemplateFile,
+  type TemplateImportTemplatePayload,
+} from '@/lib/http'
 import type { AgentTemplate } from '@clawcontrol/core'
 import { cn } from '@/lib/utils'
 import {
@@ -58,6 +63,228 @@ const AGENT_ROLES = [
   'UPDATE',
   'CUSTOM',
 ] as const
+
+type ImportMode = 'file' | 'json'
+
+interface ImportPreviewSummary {
+  templateCount: number
+  templateIds: string[]
+  sourceType: 'json' | 'zip'
+  fileName?: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeTemplatePayload(raw: unknown): TemplateImportTemplatePayload {
+  if (!isRecord(raw)) {
+    throw new Error('Invalid template JSON: expected an object payload')
+  }
+
+  const templateRaw = isRecord(raw.template) ? raw.template : raw
+  if (!isRecord(templateRaw)) {
+    throw new Error('Invalid template JSON: missing template object')
+  }
+
+  if (typeof templateRaw.templateId !== 'string' || templateRaw.templateId.trim() === '') {
+    throw new Error('Invalid template JSON: templateId is required')
+  }
+
+  if (!isRecord(templateRaw.files)) {
+    throw new Error('Invalid template JSON: files must be an object')
+  }
+
+  const files: Record<string, string> = {}
+  for (const [fileName, value] of Object.entries(templateRaw.files)) {
+    files[fileName] = typeof value === 'string'
+      ? value
+      : value === undefined || value === null
+        ? ''
+        : String(value)
+  }
+
+  return {
+    templateId: templateRaw.templateId.trim(),
+    name: typeof templateRaw.name === 'string' && templateRaw.name.trim()
+      ? templateRaw.name.trim()
+      : templateRaw.templateId.trim(),
+    version: typeof templateRaw.version === 'string' && templateRaw.version.trim()
+      ? templateRaw.version.trim()
+      : '1.0.0',
+    exportedAt: typeof templateRaw.exportedAt === 'string'
+      ? templateRaw.exportedAt
+      : undefined,
+    files,
+  }
+}
+
+function previewFromTemplatePayload(
+  payload: TemplateImportTemplatePayload,
+  sourceType: 'json' | 'zip',
+  fileName?: string
+): ImportPreviewSummary {
+  return {
+    templateCount: 1,
+    templateIds: [payload.templateId],
+    sourceType,
+    fileName,
+  }
+}
+
+function isIgnoredZipNoise(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/')
+  if (normalized.startsWith('__MACOSX/')) return true
+  const parts = normalized.split('/')
+  return parts[parts.length - 1] === '.DS_Store'
+}
+
+function isSupportedImportFileName(name: string): boolean {
+  const lowerName = name.toLowerCase()
+  return lowerName.endsWith('.zip') || lowerName.endsWith('.json')
+}
+
+async function readTemplateIdFromZipEntry(entry: {
+  name: string
+  async: (type: 'string') => Promise<string>
+}): Promise<string> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await entry.async('string'))
+  } catch {
+    throw new Error(`Invalid template.json in ${entry.name}: failed to parse JSON`)
+  }
+
+  if (!isRecord(parsed) || typeof parsed.id !== 'string' || parsed.id.trim() === '') {
+    throw new Error(`Invalid template.json in ${entry.name}: missing "id"`)
+  }
+
+  return parsed.id.trim()
+}
+
+async function summarizeZipImport(file: File): Promise<ImportPreviewSummary> {
+  const JSZip = (await import('jszip')).default
+  const zip = await JSZip.loadAsync(await file.arrayBuffer())
+
+  const entries = Object.values(zip.files)
+    .filter((entry) => !entry.dir)
+    .filter((entry) => !isIgnoredZipNoise(entry.name))
+    .sort((left, right) => left.name.localeCompare(right.name))
+
+  if (entries.length === 0) {
+    throw new Error('ZIP archive is empty or contains only ignored files')
+  }
+
+  for (const entry of entries) {
+    const unsafeOriginalName = (entry as unknown as { unsafeOriginalName?: string }).unsafeOriginalName
+    const rawName = unsafeOriginalName ?? entry.name
+
+    if (rawName.includes('..') || rawName.startsWith('/') || rawName.includes('\\')) {
+      throw new Error(`Invalid ZIP entry path: ${rawName}`)
+    }
+  }
+
+  const rootTemplate = entries.find((entry) => entry.name === 'template.json')
+  const rootFiles = entries.filter((entry) => !entry.name.includes('/'))
+
+  const topLevelFolders = new Set<string>()
+  for (const entry of entries) {
+    const slash = entry.name.indexOf('/')
+    if (slash > 0) {
+      topLevelFolders.add(entry.name.slice(0, slash))
+    }
+  }
+
+  const sortedFolders = [...topLevelFolders].sort((left, right) => left.localeCompare(right))
+  const folderTemplateMap = new Map<string, typeof entries[number]>()
+
+  for (const folder of sortedFolders) {
+    const templateEntry = entries.find((entry) => entry.name === `${folder}/template.json`)
+    if (templateEntry) {
+      folderTemplateMap.set(folder, templateEntry)
+    }
+  }
+
+  if (rootTemplate) {
+    if (folderTemplateMap.size > 0) {
+      throw new Error('Unsupported ZIP layout: mixed root and folder template.json files')
+    }
+
+    const templateId = await readTemplateIdFromZipEntry(rootTemplate)
+    return {
+      templateCount: 1,
+      templateIds: [templateId],
+      sourceType: 'zip',
+      fileName: file.name,
+    }
+  }
+
+  if (rootFiles.length > 0) {
+    throw new Error('Unsupported ZIP layout: missing root template.json while root files exist')
+  }
+
+  if (sortedFolders.length === 0) {
+    throw new Error('Unsupported ZIP layout: no template folders found')
+  }
+
+  if (sortedFolders.length === 1) {
+    const folder = sortedFolders[0]
+    const templateEntry = folderTemplateMap.get(folder)
+    if (!templateEntry) {
+      throw new Error(`Unsupported ZIP layout: missing ${folder}/template.json`)
+    }
+
+    const templateId = await readTemplateIdFromZipEntry(templateEntry)
+    return {
+      templateCount: 1,
+      templateIds: [templateId],
+      sourceType: 'zip',
+      fileName: file.name,
+    }
+  }
+
+  const missingFolders = sortedFolders.filter((folder) => !folderTemplateMap.has(folder))
+  if (missingFolders.length > 0) {
+    throw new Error(
+      `Unsupported ZIP bundle layout: missing template.json in folder(s): ${missingFolders.join(', ')}`
+    )
+  }
+
+  const templateIds: string[] = []
+  for (const folder of sortedFolders) {
+    const entry = folderTemplateMap.get(folder)
+    if (!entry) continue
+    const templateId = await readTemplateIdFromZipEntry(entry)
+    templateIds.push(templateId)
+  }
+
+  return {
+    templateCount: templateIds.length,
+    templateIds,
+    sourceType: 'zip',
+    fileName: file.name,
+  }
+}
+
+async function summarizeImportFile(file: File): Promise<ImportPreviewSummary> {
+  if (!isSupportedImportFileName(file.name)) {
+    throw new Error('Unsupported file type. Upload .zip, .json, or .template.json')
+  }
+
+  const lowerName = file.name.toLowerCase()
+  if (lowerName.endsWith('.zip')) {
+    return summarizeZipImport(file)
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await file.text())
+  } catch {
+    throw new Error('Invalid JSON file')
+  }
+
+  return previewFromTemplatePayload(normalizeTemplatePayload(parsed), 'json', file.name)
+}
 
 // ============================================================================
 // COMPONENTS
@@ -149,7 +376,13 @@ export function AgentTemplatesClient({ templates: initialTemplates }: Props) {
 
   // Import modal state
   const [showImportModal, setShowImportModal] = useState(false)
+  const [importMode, setImportMode] = useState<ImportMode>('file')
+  const [importFile, setImportFile] = useState<File | null>(null)
   const [importData, setImportData] = useState<string>('')
+  const [importPayload, setImportPayload] = useState<TemplateImportTemplatePayload | null>(null)
+  const [importSummary, setImportSummary] = useState<ImportPreviewSummary | null>(null)
+  const [isImportDragOver, setIsImportDragOver] = useState(false)
+  const [isAnalyzingImport, setIsAnalyzingImport] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
 
@@ -311,57 +544,168 @@ export function AgentTemplatesClient({ templates: initialTemplates }: Props) {
     }
   }, [selectedTemplate])
 
-  // Import template
-  const handleImport = useCallback(() => {
-    if (!importData.trim()) {
-      setImportError('Please paste template JSON data')
+  const resetImportState = useCallback(() => {
+    setImportMode('file')
+    setImportFile(null)
+    setImportData('')
+    setImportPayload(null)
+    setImportSummary(null)
+    setIsImportDragOver(false)
+    setIsAnalyzingImport(false)
+    setIsImporting(false)
+    setImportError(null)
+  }, [])
+
+  const openImportModal = useCallback(() => {
+    resetImportState()
+    setShowImportModal(true)
+  }, [resetImportState])
+
+  const closeImportModal = useCallback(() => {
+    setShowImportModal(false)
+    resetImportState()
+  }, [resetImportState])
+
+  const analyzeImportFile = useCallback(async (file: File) => {
+    setImportFile(file)
+    setImportPayload(null)
+    setImportSummary(null)
+    setImportError(null)
+
+    if (!isSupportedImportFileName(file.name)) {
+      setImportError('Unsupported file type. Upload .zip, .json, or .template.json')
       return
     }
 
-    let parsed: unknown
+    setIsAnalyzingImport(true)
     try {
-      parsed = JSON.parse(importData)
-    } catch {
-      setImportError('Invalid JSON format')
+      const summary = await summarizeImportFile(file)
+      setImportSummary(summary)
+    } catch (err) {
+      setImportSummary(null)
+      setImportError(err instanceof Error ? err.message : 'Failed to analyze import file')
+    } finally {
+      setIsAnalyzingImport(false)
+    }
+  }, [])
+
+  const handleImportFileChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    void analyzeImportFile(file)
+    event.target.value = ''
+  }, [analyzeImportFile])
+
+  const handleImportDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setIsImportDragOver(false)
+
+    const file = event.dataTransfer.files?.[0]
+    if (!file) return
+
+    void analyzeImportFile(file)
+  }, [analyzeImportFile])
+
+  const handleImportDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setIsImportDragOver(true)
+  }, [])
+
+  const handleImportDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setIsImportDragOver(false)
+  }, [])
+
+  const handleImportDataChange = useCallback((value: string) => {
+    setImportData(value)
+    setImportPayload(null)
+    setImportSummary(null)
+    setImportError(null)
+
+    if (!value.trim()) {
       return
     }
 
-    // Validate structure
-    const data = parsed as Record<string, unknown>
-    if (!data.templateId || !data.files) {
-      setImportError('Invalid template format: missing templateId or files')
+    try {
+      const payload = normalizeTemplatePayload(JSON.parse(value))
+      setImportPayload(payload)
+      setImportSummary(previewFromTemplatePayload(payload, 'json'))
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Invalid template JSON')
+    }
+  }, [])
+
+  // Import template (JSON or file upload)
+  const handleImport = useCallback(() => {
+    if (importMode === 'json') {
+      if (!importPayload) {
+        setImportError('Paste a valid template JSON export before importing')
+        return
+      }
+
+      setImportError(null)
+
+      protectedAction.trigger({
+        actionKind: 'template.import',
+        actionTitle: 'Import Template',
+        actionDescription: `Import template "${importPayload.name || importPayload.templateId}" from JSON`,
+        onConfirm: async (typedConfirmText) => {
+          setIsImporting(true)
+          try {
+            await templatesApi.importJson({
+              template: importPayload,
+              typedConfirmText,
+            })
+
+            const refreshed = await templatesApi.list({ rescan: true })
+            setTemplates(refreshed.data as unknown as AgentTemplate[])
+            closeImportModal()
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Failed to import template'
+            setImportError(message)
+          } finally {
+            setIsImporting(false)
+          }
+        },
+        onError: (err) => {
+          console.error('Failed to import template:', err)
+          setImportError(err.message)
+          setIsImporting(false)
+        },
+      })
+
+      return
+    }
+
+    if (!importFile) {
+      setImportError('Choose a .zip, .json, or .template.json file to import')
       return
     }
 
     setImportError(null)
 
+    const summaryLabel = importSummary
+      ? `${importSummary.templateCount} template(s): ${importSummary.templateIds.join(', ')}`
+      : importFile.name
+
     protectedAction.trigger({
       actionKind: 'template.import',
-      actionTitle: 'Import Template',
-      actionDescription: `Import template "${data.name || data.templateId}"`,
+      actionTitle: 'Import Template Bundle',
+      actionDescription: `Import ${summaryLabel}`,
       onConfirm: async (typedConfirmText) => {
         setIsImporting(true)
         try {
-          await templatesApi.import({
-            template: data as {
-              templateId: string
-              name: string
-              version: string
-              exportedAt: string
-              files: Record<string, string>
-            },
+          await templatesApi.importFile({
+            file: importFile,
             typedConfirmText,
           })
 
-          // Refresh templates list
           const refreshed = await templatesApi.list({ rescan: true })
           setTemplates(refreshed.data as unknown as AgentTemplate[])
-
-          // Close modal and reset
-          setShowImportModal(false)
-          setImportData('')
+          closeImportModal()
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'Failed to import template'
+          const message = err instanceof Error ? err.message : 'Failed to import template bundle'
           setImportError(message)
         } finally {
           setIsImporting(false)
@@ -373,7 +717,7 @@ export function AgentTemplatesClient({ templates: initialTemplates }: Props) {
         setIsImporting(false)
       },
     })
-  }, [importData, protectedAction])
+  }, [importMode, importPayload, importFile, importSummary, protectedAction, closeImportModal])
 
   return (
     <>
@@ -389,7 +733,7 @@ export function AgentTemplatesClient({ templates: initialTemplates }: Props) {
             <div className="flex gap-2">
               <button
                 className="btn-secondary flex items-center gap-1.5"
-                onClick={() => setShowImportModal(true)}
+                onClick={openImportModal}
               >
                 <Upload className="w-3.5 h-3.5" />
                 Import
@@ -559,16 +903,57 @@ export function AgentTemplatesClient({ templates: initialTemplates }: Props) {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/50"
-            onClick={() => setShowImportModal(false)}
+            onClick={closeImportModal}
           />
-          <div className="relative bg-bg-1 border border-bd-0 rounded-lg shadow-xl w-full max-w-lg p-6">
+          <div className="relative bg-bg-1 border border-bd-0 rounded-lg shadow-xl w-full max-w-2xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-fg-0">Import Template</h2>
               <button
-                onClick={() => setShowImportModal(false)}
+                onClick={closeImportModal}
                 className="text-fg-2 hover:text-fg-0"
               >
                 <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 mb-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setImportMode('file')
+                  setImportError(null)
+                  setImportSummary(null)
+                  if (importFile) {
+                    void analyzeImportFile(importFile)
+                  }
+                }}
+                className={cn(
+                  'px-3 py-1.5 text-xs rounded-md border transition-colors',
+                  importMode === 'file'
+                    ? 'bg-accent-primary/10 border-accent-primary text-accent-primary'
+                    : 'border-bd-0 text-fg-2 hover:text-fg-1 hover:border-bd-1'
+                )}
+              >
+                Upload File
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setImportMode('json')
+                  setImportError(null)
+                  setImportSummary(null)
+                  if (importData.trim()) {
+                    handleImportDataChange(importData)
+                  }
+                }}
+                className={cn(
+                  'px-3 py-1.5 text-xs rounded-md border transition-colors',
+                  importMode === 'json'
+                    ? 'bg-accent-primary/10 border-accent-primary text-accent-primary'
+                    : 'border-bd-0 text-fg-2 hover:text-fg-1 hover:border-bd-1'
+                )}
+              >
+                Paste JSON
               </button>
             </div>
 
@@ -579,33 +964,104 @@ export function AgentTemplatesClient({ templates: initialTemplates }: Props) {
             )}
 
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-fg-1 mb-2">
-                  Template JSON
-                </label>
-                <p className="text-xs text-fg-2 mb-2">
-                  Paste the exported template JSON data below
-                </p>
-                <textarea
-                  value={importData}
-                  onChange={(e) => setImportData(e.target.value)}
-                  placeholder='{"templateId": "...", "files": {...}}'
-                  rows={10}
-                  className="w-full px-3 py-2 bg-bg-2 border border-bd-0 rounded-md font-mono text-xs text-fg-0 placeholder:text-fg-3 focus:outline-none focus:ring-2 focus:ring-accent-primary/50 resize-none"
-                />
-              </div>
+              {importMode === 'file' ? (
+                <div className="space-y-3">
+                  <div
+                    onDrop={handleImportDrop}
+                    onDragOver={handleImportDragOver}
+                    onDragLeave={handleImportDragLeave}
+                    className={cn(
+                      'border-2 border-dashed rounded-md p-6 text-center transition-colors',
+                      isImportDragOver
+                        ? 'border-accent-primary bg-accent-primary/5'
+                        : 'border-bd-0 bg-bg-2'
+                    )}
+                  >
+                    <p className="text-sm text-fg-1 mb-2">
+                      Drag and drop a template import file here
+                    </p>
+                    <p className="text-xs text-fg-2 mb-3">
+                      Supported: .zip, .json, .template.json
+                    </p>
+                    <label className="btn-secondary inline-flex items-center gap-1.5 cursor-pointer">
+                      <Upload className="w-3.5 h-3.5" />
+                      Choose File
+                      <input
+                        type="file"
+                        accept=".zip,.json,.template.json,application/zip,application/json"
+                        className="hidden"
+                        onChange={handleImportFileChange}
+                      />
+                    </label>
+                  </div>
+
+                  {isAnalyzingImport && (
+                    <div className="flex items-center gap-2 text-xs text-fg-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Analyzing import file...
+                    </div>
+                  )}
+
+                  {importFile && (
+                    <div className="p-3 bg-bg-2 border border-bd-0 rounded-md">
+                      <p className="text-xs text-fg-2 mb-1">Selected file</p>
+                      <p className="text-sm font-mono text-fg-0">{importFile.name}</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-fg-1 mb-2">
+                    Template JSON
+                  </label>
+                  <p className="text-xs text-fg-2 mb-2">
+                    Paste exported template JSON (single template export payload)
+                  </p>
+                  <textarea
+                    value={importData}
+                    onChange={(e) => handleImportDataChange(e.target.value)}
+                    placeholder='{"templateId":"...","files":{...}}'
+                    rows={10}
+                    className="w-full px-3 py-2 bg-bg-2 border border-bd-0 rounded-md font-mono text-xs text-fg-0 placeholder:text-fg-3 focus:outline-none focus:ring-2 focus:ring-accent-primary/50 resize-none"
+                  />
+                </div>
+              )}
+
+              {importSummary && (
+                <div className="p-3 bg-bg-2 border border-bd-0 rounded-md">
+                  <p className="text-xs text-fg-2 mb-2">Pre-import summary</p>
+                  <p className="text-sm text-fg-1">
+                    Detected {importSummary.templateCount} template{importSummary.templateCount === 1 ? '' : 's'}
+                    {importSummary.fileName ? ` from ${importSummary.fileName}` : ''}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {importSummary.templateIds.map((templateId) => (
+                      <span
+                        key={templateId}
+                        className="px-2 py-1 text-xs font-mono bg-accent-primary/10 text-accent-primary rounded-md border border-accent-primary/20"
+                      >
+                        {templateId}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 mt-6">
               <button
-                onClick={() => setShowImportModal(false)}
+                onClick={closeImportModal}
                 className="btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handleImport}
-                disabled={isImporting || !importData.trim()}
+                disabled={
+                  isImporting
+                  || isAnalyzingImport
+                  || (importMode === 'file' ? !importFile || !importSummary : !importPayload || !importSummary)
+                }
                 className="btn-primary flex items-center gap-1.5"
               >
                 {isImporting ? (
@@ -613,7 +1069,7 @@ export function AgentTemplatesClient({ templates: initialTemplates }: Props) {
                 ) : (
                   <Upload className="w-3.5 h-3.5" />
                 )}
-                Import Template
+                {importMode === 'file' ? 'Import File' : 'Import JSON'}
               </button>
             </div>
           </div>
