@@ -17,6 +17,7 @@
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "templates:migrate-manager-role": "node scripts/migrate-manager-template-role.mjs",
+    "stations:migrate-canonical": "cross-env DATABASE_URL=file:../data/clawcontrol.db node scripts/migrate-agent-stations-to-canonical.mjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {

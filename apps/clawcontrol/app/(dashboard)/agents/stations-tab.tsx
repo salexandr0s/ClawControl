@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react'
 
 export function StationsTab() {
+  const stationMutationsEnabled = process.env.NEXT_PUBLIC_ENABLE_STATION_MUTATIONS === '1'
   const { stations, refreshStations, loading, error } = useStations()
   const triggerProtectedAction = useProtectedActionTrigger()
 
@@ -67,46 +68,50 @@ export function StationsTab() {
       width: '120px',
       align: 'right',
       render: (row) => (
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => setEditing(row)}
-            className="p-1.5 rounded border border-bd-0 bg-bg-3 hover:bg-bg-2 text-fg-2 hover:text-fg-0 transition-colors"
-            title="Edit station"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              triggerProtectedAction({
-                actionKind: 'station.delete',
-                actionTitle: 'Delete Station',
-                actionDescription: `Delete station "${row.name}". This cannot be undone.`,
-                entityName: row.name,
-                onConfirm: async (typedConfirmText) => {
-                  try {
-                    await stationsApi.delete(row.id, { typedConfirmText })
-                    await refreshStations()
-                    setResult({ ok: true, message: `Deleted station "${row.name}"` })
-                  } catch (err) {
-                    if (err instanceof HttpError && err.message === 'STATION_IN_USE') {
-                      setResult({ ok: false, message: `Station is in use by ${err.details?.agentCount ?? 'some'} agent(s)` })
-                    } else {
-                      setResult({ ok: false, message: err instanceof Error ? err.message : 'Failed to delete station' })
+        stationMutationsEnabled ? (
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setEditing(row)}
+              className="p-1.5 rounded border border-bd-0 bg-bg-3 hover:bg-bg-2 text-fg-2 hover:text-fg-0 transition-colors"
+              title="Edit station"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                triggerProtectedAction({
+                  actionKind: 'station.delete',
+                  actionTitle: 'Delete Station',
+                  actionDescription: `Delete station "${row.name}". This cannot be undone.`,
+                  entityName: row.name,
+                  onConfirm: async (typedConfirmText) => {
+                    try {
+                      await stationsApi.delete(row.id, { typedConfirmText })
+                      await refreshStations()
+                      setResult({ ok: true, message: `Deleted station "${row.name}"` })
+                    } catch (err) {
+                      if (err instanceof HttpError && err.message === 'STATION_IN_USE') {
+                        setResult({ ok: false, message: `Station is in use by ${err.details?.agentCount ?? 'some'} agent(s)` })
+                      } else {
+                        setResult({ ok: false, message: err instanceof Error ? err.message : 'Failed to delete station' })
+                      }
+                      throw err
                     }
-                    throw err
-                  }
-                },
-                onError: (err) => setResult({ ok: false, message: err.message }),
-              })
-            }}
-            className="p-1.5 rounded border border-bd-0 bg-bg-3 hover:bg-bg-2 text-fg-2 hover:text-fg-0 transition-colors"
-            title="Delete station"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+                  },
+                  onError: (err) => setResult({ ok: false, message: err.message }),
+                })
+              }}
+              className="p-1.5 rounded border border-bd-0 bg-bg-3 hover:bg-bg-2 text-fg-2 hover:text-fg-0 transition-colors"
+              title="Delete station"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <span className="text-[11px] text-fg-3">Locked</span>
+        )
       ),
     },
   ]
@@ -134,17 +139,21 @@ export function StationsTab() {
 
       <PageSection
         title="Stations"
-        description="Categories for agents (icons, ordering, display names)"
-        actions={
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-progress text-white hover:bg-status-progress/90 transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Create Station
-          </button>
-        }
+        description={stationMutationsEnabled
+          ? 'Categories for agents (icons, ordering, display names)'
+          : 'Canonical station set is locked for v1 defaults (read-only).'}
+        actions={stationMutationsEnabled
+          ? (
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-progress text-white hover:bg-status-progress/90 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Create Station
+            </button>
+          )
+          : undefined}
       >
         {loading ? (
           <div className="text-xs text-fg-3">Loading…</div>
@@ -164,26 +173,30 @@ export function StationsTab() {
         )}
       </PageSection>
 
-      <StationUpsertModal
-        open={creating}
-        mode="create"
-        onClose={() => setCreating(false)}
-        onSuccess={() => {
-          setCreating(false)
-          setResult({ ok: true, message: 'Created station' })
-        }}
-      />
+      {stationMutationsEnabled && (
+        <StationUpsertModal
+          open={creating}
+          mode="create"
+          onClose={() => setCreating(false)}
+          onSuccess={() => {
+            setCreating(false)
+            setResult({ ok: true, message: 'Created station' })
+          }}
+        />
+      )}
 
-      <StationUpsertModal
-        open={!!editing}
-        mode="edit"
-        station={editing ?? undefined}
-        onClose={() => setEditing(null)}
-        onSuccess={(s) => {
-          setEditing(null)
-          setResult({ ok: true, message: `Updated station "${s.name}"` })
-        }}
-      />
+      {stationMutationsEnabled && (
+        <StationUpsertModal
+          open={!!editing}
+          mode="edit"
+          station={editing ?? undefined}
+          onClose={() => setEditing(null)}
+          onSuccess={(s) => {
+            setEditing(null)
+            setResult({ ok: true, message: `Updated station "${s.name}"` })
+          }}
+        />
+      )}
     </div>
   )
 }

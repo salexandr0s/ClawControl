@@ -7,6 +7,8 @@ export const STATION_MUTATIONS_DISABLED_MESSAGE =
  * Set CLAWCONTROL_ENABLE_STATION_MUTATIONS=1 to enable mutations temporarily.
  */
 export function areStationMutationsEnabled(): boolean {
-  return process.env.CLAWCONTROL_ENABLE_STATION_MUTATIONS === '1'
+  return (
+    process.env.CLAWCONTROL_ENABLE_STATION_MUTATIONS === '1'
+    || process.env.NEXT_PUBLIC_ENABLE_STATION_MUTATIONS === '1'
+  )
 }
-
