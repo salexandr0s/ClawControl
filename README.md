@@ -14,6 +14,8 @@ ClawControl is a dashboard + orchestration layer for running governed multi-agen
 - Streams real-time system and run activity.
 - Manages agents, templates, skills, plugins, and workspace files from one UI.
 
+https://github.com/user-attachments/assets/36603984-969c-4942-9201-5afbcf792e2b
+
 ## Architecture Snapshot
 
 - **apps/clawcontrol**: Next.js app (UI + API)
