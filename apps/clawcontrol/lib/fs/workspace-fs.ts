@@ -90,14 +90,22 @@ export async function listWorkspace(path = '/', options?: { sort?: WorkspaceSort
     }
 
     const abs = join(absDir, ent.name)
-    const st = await fsp.stat(abs)
+    let st: Awaited<ReturnType<typeof fsp.stat>>
+    try {
+      // Follow symlinks so directory symlinks render as folders.
+      // If an entry is stale/broken (ENOENT, ELOOP, etc), skip it instead of failing the whole listing.
+      st = await fsp.stat(abs)
+    } catch {
+      continue
+    }
+    const isDir = st.isDirectory()
 
     out.push({
       id: encodeWorkspaceId(path === '/' ? `/${ent.name}` : `${path}/${ent.name}`),
       name: ent.name,
-      type: ent.isDirectory() ? 'folder' : 'file',
+      type: isDir ? 'folder' : 'file',
       path,
-      size: ent.isDirectory() ? undefined : st.size,
+      size: isDir ? undefined : st.size,
       modifiedAt: st.mtime,
       createdAt: reliableCreatedAtFromStat(st),
       lastEditedAt: st.mtime,

@@ -1,9 +1,8 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, Menu, dialog, ipcMain, nativeImage } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { ensurePackagedDatabaseSchema } from './schema-bootstrap'
 import { getAssetPath, isDev } from './utils'
 
@@ -25,6 +24,14 @@ const GET_SETTINGS_CHANNEL = 'clawcontrol:get-settings'
 const SAVE_SETTINGS_CHANNEL = 'clawcontrol:save-settings'
 const GET_INIT_STATUS_CHANNEL = 'clawcontrol:get-init-status'
 const TEST_GATEWAY_CHANNEL = 'clawcontrol:test-gateway'
+// Add a custom startup logo under apps/clawcontrol-desktop/assets using one of these names.
+const LOADING_LOGO_FILES = [
+  'loading-logo.gif',
+  'loading-logo.webp',
+  'loading-logo.apng',
+  'loading-logo.png',
+  'icon.png',
+] as const
 
 interface ServerRestartResponse {
   ok: boolean
@@ -128,8 +135,58 @@ function createMainWindow(): BrowserWindow {
   return win
 }
 
+function getImageMimeType(assetPath: string): string | null {
+  const extension = path.extname(assetPath).toLowerCase()
+  if (extension === '.gif') return 'image/gif'
+  if (extension === '.webp') return 'image/webp'
+  if (extension === '.apng') return 'image/apng'
+  if (extension === '.png') return 'image/png'
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg'
+  if (extension === '.svg') return 'image/svg+xml'
+  return null
+}
+
+function getFallbackLoadingLogoDataUrl(): string {
+  const fallback = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
+      <defs>
+        <linearGradient id="g" x1="16" y1="14" x2="80" y2="84" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#5AA2FF" />
+          <stop offset="1" stop-color="#1D4ED8" />
+        </linearGradient>
+      </defs>
+      <rect x="8" y="8" width="80" height="80" rx="24" fill="#0B111B" stroke="#1F2937" />
+      <path d="M29 29H57V39H39V57H29V29Z" fill="url(#g)" />
+      <circle cx="61" cy="61" r="10" fill="url(#g)" />
+    </svg>
+  `
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(fallback)}`
+}
+
+function getLoadingLogoDataUrl(): string {
+  for (const fileName of LOADING_LOGO_FILES) {
+    const assetPath = getAssetPath(fileName)
+    if (!fs.existsSync(assetPath)) continue
+
+    if (fileName === 'icon.png') {
+      const icon = nativeImage.createFromPath(assetPath)
+      if (!icon.isEmpty()) {
+        return icon.resize({ width: 96, height: 96, quality: 'best' }).toDataURL()
+      }
+      continue
+    }
+
+    const mimeType = getImageMimeType(assetPath)
+    if (!mimeType) continue
+    const content = fs.readFileSync(assetPath)
+    return `data:${mimeType};base64,${content.toString('base64')}`
+  }
+
+  return getFallbackLoadingLogoDataUrl()
+}
+
 function createLoadingWindow(): BrowserWindow {
-  const iconUrl = pathToFileURL(getAssetPath('icon.png')).toString()
+  const logoUrl = getLoadingLogoDataUrl()
 
   const win = new BrowserWindow({
     width: 420,
@@ -149,7 +206,7 @@ function createLoadingWindow(): BrowserWindow {
     <html>
       <head>
         <meta charset="utf-8" />
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline';" />
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline';" />
         <style>
           body {
             margin: 0;
@@ -164,6 +221,11 @@ function createLoadingWindow(): BrowserWindow {
             gap: 16px;
             user-select: none;
           }
+          .logo {
+            width: 96px;
+            height: 96px;
+            object-fit: contain;
+          }
           .spinner {
             width: 40px;
             height: 40px;
@@ -177,7 +239,7 @@ function createLoadingWindow(): BrowserWindow {
         </style>
       </head>
       <body>
-        <img src="${iconUrl}" width="64" height="64" />
+        <img class="logo" src="${logoUrl}" alt="ClawControl logo" />
         <div class="spinner"></div>
         <div class="text">Starting ClawControl…</div>
       </body>

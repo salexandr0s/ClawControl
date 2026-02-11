@@ -47,4 +47,23 @@ describe('workspace timestamps', () => {
     const invalid = reliableCreatedAtFromStat({ birthtime: new Date('3000-01-01T00:00:00.000Z') })
     expect(invalid).toBeNull()
   })
+
+  it('skips broken entries while listing a directory', async () => {
+    const skillsDir = join(workspaceRoot, 'skills')
+    await fsp.mkdir(join(skillsDir, 'valid-skill'), { recursive: true })
+    await fsp.writeFile(join(skillsDir, 'valid-skill', 'SKILL.md'), '# Valid\n', 'utf8')
+
+    // Broken symlink previously caused listWorkspace() to throw and upstream skills list to appear empty.
+    try {
+      await fsp.symlink(join(skillsDir, 'missing-target'), join(skillsDir, 'broken-link'))
+    } catch {
+      // Ignore environments where creating symlinks is restricted.
+    }
+
+    const { listWorkspace } = await import('@/lib/fs/workspace-fs')
+    const rows = await listWorkspace('/skills')
+    const names = rows.map((row) => row.name)
+
+    expect(names).toContain('valid-skill')
+  })
 })
