@@ -67,12 +67,15 @@ docs/audit/
 # Internal work order artifacts
 artifacts/
 
-# Private config (not for public repo)
+# Private/local runtime state (not for public repo)
 openclaw/
 /agents/
 AGENTS.md
 SOUL.md
-docs/
+HEARTBEAT.md
+main.js
+main.js.map
+CODEX_TASK.md
 
 # Keep clawcontrol OpenClaw app/runtime code tracked
 !apps/clawcontrol/lib/openclaw/
@@ -86,8 +89,9 @@ docs/
 !scripts/init-agents.sh
 !scripts/init-agents.js
 !agents-manifest.example.yaml
-!docs/
-docs/**
+
+# Keep only public docs tracked under /docs (local planning docs stay ignored)
+docs/*
 !docs/agent-templates.md
 !docs/AGENT_STARTER_TEMPLATE.md
 !docs/local-only-admin.md
