@@ -81,6 +81,13 @@ Canonical station names for workflows/agents: [docs/STATIONS.md](docs/STATIONS.m
 
 ---
 
+## Workflow Example
+
+https://github.com/user-attachments/assets/d489ee35-f4a6-4008-b2bb-be171fcde541
+
+---
+
+
 ## OpenClaw Connection
 
 ClawControl is designed to show **only real data**.
