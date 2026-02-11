@@ -235,7 +235,13 @@ function firstExistingPath(candidates: string[]): string | null {
   return null
 }
 
-function isMissingFileError(message: string): boolean {
+function isMissingFileError(error: unknown): boolean {
+  if (error && typeof error === 'object') {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return true
+  }
+
+  const message = error instanceof Error ? error.message : String(error ?? '')
   const lowered = message.toLowerCase()
   return lowered.includes('enoent') || lowered.includes('no such file or directory')
 }
@@ -997,8 +1003,8 @@ export async function getAgentHierarchyData(): Promise<AgentHierarchyData> {
     sourceStatus.yaml.available = true
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    sourceStatus.yaml.error = message
-    if (!isMissingFileError(message)) {
+    if (!isMissingFileError(error)) {
+      sourceStatus.yaml.error = message
       initialWarnings.push({
         code: 'source_unavailable',
         source: 'clawcontrol_config_yaml',
@@ -1012,7 +1018,9 @@ export async function getAgentHierarchyData(): Promise<AgentHierarchyData> {
   const runtimeMissingCli = runtimeRes.error ? isRuntimeCliUnavailableError(runtimeRes.error) : false
 
   if (runtimeRes.error) {
-    sourceStatus.runtime.error = runtimeRes.error
+    if (!runtimeMissingCli) {
+      sourceStatus.runtime.error = runtimeRes.error
+    }
     if (!runtimeMissingCli) {
       initialWarnings.push({
         code: 'source_unavailable',
@@ -1043,8 +1051,8 @@ export async function getAgentHierarchyData(): Promise<AgentHierarchyData> {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      sourceStatus.fallback.error = message
-      if (!isMissingFileError(message)) {
+      if (!isMissingFileError(error)) {
+        sourceStatus.fallback.error = message
         initialWarnings.push({
           code: 'source_unavailable',
           source: 'openclaw_template_policy',

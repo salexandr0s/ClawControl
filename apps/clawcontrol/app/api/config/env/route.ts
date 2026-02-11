@@ -9,6 +9,8 @@ import { NextResponse } from 'next/server'
 import { getOpenClawConfig } from '@/lib/openclaw-client'
 import { readSettings, writeSettings } from '@/lib/settings/store'
 import { invalidateWorkspaceRootCache } from '@/lib/fs/path-policy'
+import { invalidateTemplatesCache } from '@/lib/templates'
+import { ensureWorkspaceScaffold } from '@/lib/workspace/bootstrap'
 
 interface EnvConfig {
   OPENCLAW_WORKSPACE: string | null
@@ -25,6 +27,7 @@ function applyRuntimeWorkspacePath(workspacePath: string | null): void {
     delete process.env.CLAWCONTROL_WORKSPACE_ROOT
   }
   invalidateWorkspaceRootCache()
+  invalidateTemplatesCache()
 }
 
 export async function GET() {
@@ -83,6 +86,7 @@ export async function PUT(request: Request) {
         workspacePath: (workspace || null) as unknown as string | undefined,
       })
       applyRuntimeWorkspacePath(saved.settings.workspacePath ?? null)
+      await ensureWorkspaceScaffold(saved.settings.workspacePath ?? null)
     }
 
     const [settingsResult, resolved] = await Promise.all([

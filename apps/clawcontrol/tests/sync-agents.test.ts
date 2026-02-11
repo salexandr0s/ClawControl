@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const runCommandMock = vi.fn()
+const runCommandJsonMock = vi.fn()
 const getOpenClawConfigMock = vi.fn()
 
 const createdAgents: Array<Record<string, unknown>> = []
@@ -13,7 +13,7 @@ const existingBySessionKey = new Map<string, {
 }>()
 
 vi.mock('@clawcontrol/adapters-openclaw', () => ({
-  runCommand: (...args: unknown[]) => runCommandMock(...args),
+  runCommandJson: (...args: unknown[]) => runCommandJsonMock(...args),
 }))
 
 vi.mock('@/lib/openclaw-client', () => ({
@@ -91,7 +91,7 @@ vi.mock('@/lib/repo', () => ({
 
 describe('syncAgentsFromOpenClaw', () => {
   beforeEach(() => {
-    runCommandMock.mockReset()
+    runCommandJsonMock.mockReset()
     getOpenClawConfigMock.mockReset()
     createdAgents.length = 0
     updatedAgents.length = 0
@@ -105,12 +105,11 @@ describe('syncAgentsFromOpenClaw', () => {
   })
 
   it('uses CLI-first discovery and marks missing agents as stale instead of pruning', async () => {
-    runCommandMock.mockResolvedValue({
+    runCommandJsonMock.mockResolvedValue({
       exitCode: 0,
-      stdout: JSON.stringify([
+      data: [
         { id: 'seen-agent', name: 'Seen Agent' },
-      ]),
-      stderr: '',
+      ],
     })
 
     getOpenClawConfigMock.mockResolvedValue(null)

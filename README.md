@@ -92,8 +92,27 @@ https://github.com/user-attachments/assets/d489ee35-f4a6-4008-b2bb-be171fcde541
 
 ClawControl is designed to show **only real data**.
 
-- If OpenClaw is available on PATH, ClawControl can query gateway status, cron jobs, plugins, sessions, and other OpenClaw-backed features.
-- If OpenClaw is not available, ClawControl renders empty states and OpenClaw-backed features report **Unavailable** until OpenClaw is installed and configured.
+There are two dependency layers:
+
+1. **Gateway reachability (HTTP/WebSocket)** — used for gateway health/status.
+2. **OpenClaw CLI availability** — required for CLI-backed features.
+
+This means gateway can be reachable while CLI-backed screens are unavailable. Settings now shows both statuses separately (`Gateway` and `CLI`).
+
+CLI-backed features in this release:
+
+- Maintenance actions (`/maintenance`)
+- Models (`/models`)
+- Plugins (`/plugins`)
+- Cron control (`/cron`)
+- Runtime capability probing (`/api/openclaw/capabilities`)
+
+When CLI-dependent APIs fail, responses include machine-readable error metadata:
+
+- `code`: `CLI_UNAVAILABLE`, `CLI_JSON_PARSE_FAILED`, or `OPENCLAW_COMMAND_FAILED`
+- `fixHint`: operator guidance when available
+
+First launch/workspace changes now auto-bootstrap required workspace structure (`agents/`, `skills/`, `agent-templates/`, `memory/`, `docs/`, `playbooks/`, plus `AGENTS.md`).
 
 ---
 

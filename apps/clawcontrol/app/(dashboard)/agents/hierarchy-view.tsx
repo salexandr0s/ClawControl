@@ -371,6 +371,15 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
     return { inbound, outbound }
   }, [selectedNode, visibleGraph.edges])
 
+  const visibleWarnings = useMemo(() => {
+    if (!data) return []
+    return data.meta.warnings.filter((warning) => {
+      if (warning.code !== 'source_unavailable') return true
+      const message = warning.message.toLowerCase()
+      return !(message.includes('enoent') || message.includes('no such file or directory'))
+    })
+  }, [data])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -406,17 +415,17 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
 
   return (
     <div className="space-y-4">
-      {data.meta.warnings.length > 0 && (
+      {visibleWarnings.length > 0 && (
         <div className="p-3 rounded-[var(--radius-md)] border border-status-warning/30 bg-status-warning/10">
-          <p className="text-xs font-medium text-status-warning">Hierarchy warnings</p>
+          <p className="text-xs font-medium text-status-warning">Hierarchy notices</p>
           <div className="mt-2 space-y-1">
-            {data.meta.warnings.slice(0, 6).map((warning) => (
+            {visibleWarnings.slice(0, 6).map((warning) => (
               <p key={`${warning.code}-${warning.message}`} className="text-xs text-fg-1">
                 {warning.message}
               </p>
             ))}
-            {data.meta.warnings.length > 6 && (
-              <p className="text-xs text-fg-2">+{data.meta.warnings.length - 6} more warnings</p>
+            {visibleWarnings.length > 6 && (
+              <p className="text-xs text-fg-2">+{visibleWarnings.length - 6} more notices</p>
             )}
           </div>
         </div>
@@ -712,11 +721,11 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
             <div className="space-y-2 text-xs text-fg-1">
               <p>
                 <span className="text-fg-2">YAML:</span>{' '}
-                {data.meta.sources.yaml.available ? 'available' : 'unavailable'}
+                {data.meta.sources.yaml.available ? 'available' : 'not found (optional)'}
               </p>
               <p>
                 <span className="text-fg-2">Runtime:</span>{' '}
-                {data.meta.sources.runtime.available ? 'available' : 'unavailable'}
+                {data.meta.sources.runtime.available ? 'available' : 'not available (optional)'}
               </p>
               <p>
                 <span className="text-fg-2">Fallback:</span>{' '}
@@ -724,7 +733,7 @@ export function HierarchyView({ data, loading, error, onRetry }: HierarchyViewPr
                   ? 'used'
                   : data.meta.sources.fallback.available
                     ? 'available (not used)'
-                    : 'unavailable'}
+                    : 'not found (optional)'}
               </p>
               <p>
                 <span className="text-fg-2">DB agents:</span> {data.meta.sources.db.count}

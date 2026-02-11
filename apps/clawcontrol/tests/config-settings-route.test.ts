@@ -5,8 +5,11 @@ const mocks = vi.hoisted(() => ({
   readSettings: vi.fn(),
   writeSettings: vi.fn(),
   getOpenClawConfig: vi.fn(),
+  getOpenClawRuntimeDependencyStatus: vi.fn(),
   validateWorkspaceStructure: vi.fn(),
   invalidateWorkspaceRootCache: vi.fn(),
+  invalidateTemplatesCache: vi.fn(),
+  ensureWorkspaceScaffold: vi.fn(),
 }))
 
 vi.mock('@/lib/settings/store', () => ({
@@ -18,12 +21,24 @@ vi.mock('@/lib/openclaw-client', () => ({
   getOpenClawConfig: mocks.getOpenClawConfig,
 }))
 
+vi.mock('@/lib/openclaw/runtime-deps', () => ({
+  getOpenClawRuntimeDependencyStatus: mocks.getOpenClawRuntimeDependencyStatus,
+}))
+
 vi.mock('@/lib/workspace/validate', () => ({
   validateWorkspaceStructure: mocks.validateWorkspaceStructure,
 }))
 
 vi.mock('@/lib/fs/path-policy', () => ({
   invalidateWorkspaceRootCache: mocks.invalidateWorkspaceRootCache,
+}))
+
+vi.mock('@/lib/templates', () => ({
+  invalidateTemplatesCache: mocks.invalidateTemplatesCache,
+}))
+
+vi.mock('@/lib/workspace/bootstrap', () => ({
+  ensureWorkspaceScaffold: mocks.ensureWorkspaceScaffold,
 }))
 
 function baseSettings(overrides: Record<string, unknown> = {}) {
@@ -44,17 +59,33 @@ beforeEach(() => {
   mocks.readSettings.mockReset()
   mocks.writeSettings.mockReset()
   mocks.getOpenClawConfig.mockReset()
+  mocks.getOpenClawRuntimeDependencyStatus.mockReset()
   mocks.validateWorkspaceStructure.mockReset()
   mocks.invalidateWorkspaceRootCache.mockReset()
+  mocks.invalidateTemplatesCache.mockReset()
+  mocks.ensureWorkspaceScaffold.mockReset()
 
   mocks.readSettings.mockResolvedValue(baseSettings())
   mocks.writeSettings.mockResolvedValue(baseSettings())
   mocks.getOpenClawConfig.mockResolvedValue(null)
+  mocks.getOpenClawRuntimeDependencyStatus.mockResolvedValue({
+    cliAvailable: true,
+    cliVersion: '1.0.0',
+    resolvedCliBin: '/usr/local/bin/openclaw',
+    checkedAt: '2026-02-10T00:00:00.000Z',
+    cacheTtlMs: 30_000,
+  })
   mocks.validateWorkspaceStructure.mockResolvedValue({
     ok: true,
     path: '/tmp/workspace',
     exists: true,
     issues: [],
+  })
+  mocks.ensureWorkspaceScaffold.mockResolvedValue({
+    path: '/tmp/workspace',
+    ensured: true,
+    createdDirectories: [],
+    createdFiles: [],
   })
 })
 
@@ -118,5 +149,30 @@ describe('config settings route', () => {
     })
     expect(payload.data.settings.remoteAccessMode).toBe('tailscale_tunnel')
     expect(payload.data.settings.gatewayHttpUrl).toBe('http://127.0.0.1:18789')
+  })
+
+  it('invalidates workspace-derived caches when workspacePath changes', async () => {
+    const updated = baseSettings({
+      workspacePath: '/tmp/workspace-next',
+    })
+
+    mocks.writeSettings.mockResolvedValue(updated)
+    mocks.readSettings.mockResolvedValue(updated)
+
+    const route = await import('@/app/api/config/settings/route')
+
+    const request = new NextRequest('http://localhost/api/config/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspacePath: '/tmp/workspace-next',
+      }),
+    })
+
+    const response = await route.PUT(request)
+    expect(response.status).toBe(200)
+    expect(mocks.invalidateWorkspaceRootCache).toHaveBeenCalledTimes(1)
+    expect(mocks.invalidateTemplatesCache).toHaveBeenCalledTimes(1)
+    expect(mocks.ensureWorkspaceScaffold).toHaveBeenCalledWith('/tmp/workspace-next')
   })
 })

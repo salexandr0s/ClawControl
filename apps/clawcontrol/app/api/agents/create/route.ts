@@ -9,7 +9,7 @@ import {
 } from '@/lib/workspace'
 import { upsertAgentToOpenClaw, removeAgentFromOpenClaw } from '@/lib/services/openclaw-config'
 import { buildUniqueSlug, slugifyDisplayName } from '@/lib/agent-identity'
-import type { StationId } from '@clawcontrol/core'
+import { isCanonicalStationId, normalizeStationId, type StationId } from '@clawcontrol/core'
 
 /**
  * POST /api/agents/create
@@ -78,7 +78,14 @@ export async function POST(request: NextRequest) {
 
   // Determine station from role
   const roleMapping = AGENT_ROLE_MAP[role.toLowerCase()]
-  const station: StationId = roleMapping?.station || 'build'
+  const station = normalizeStationId(roleMapping?.station || 'build')
+  if (!isCanonicalStationId(station)) {
+    return NextResponse.json(
+      { error: 'INVALID_STATION', message: `Resolved station "${station}" is not canonical` },
+      { status: 400 }
+    )
+  }
+  const stationId: StationId = station
 
   // Generate session key
   const sessionKey = generateSessionKey(slug)
@@ -89,14 +96,14 @@ export async function POST(request: NextRequest) {
     capabilitiesObj[cap] = true
   }
   // Add default capability based on station
-  capabilitiesObj[station] = true
+  capabilitiesObj[stationId] = true
 
   // Create receipt for the operation
   const receipt = await repos.receipts.create({
     workOrderId: 'system',
     kind: 'manual',
     commandName: 'agent.create',
-    commandArgs: { displayName: resolvedDisplayName, slug, role, station, purpose },
+    commandArgs: { displayName: resolvedDisplayName, slug, role, station: stationId, purpose },
   })
 
   let createdAgentId: string | null = null
@@ -116,7 +123,7 @@ export async function POST(request: NextRequest) {
       role,
       purpose,
       capabilities,
-      station,
+      station: stationId,
     })
 
     if (!filesResult.success) {
@@ -195,7 +202,7 @@ export async function POST(request: NextRequest) {
       runtimeAgentId: openClawAgentId,
       nameSource: displayName || customName ? 'user' : 'system',
       role,
-      station,
+      station: stationId,
       sessionKey,
       capabilities: capabilitiesObj,
       wipLimit: 2,
@@ -220,7 +227,7 @@ export async function POST(request: NextRequest) {
         displayName: resolvedDisplayName,
         slug,
         role,
-        station,
+        station: stationId,
         sessionKey,
         openClawAgentId,
         openClawSynced: true,
@@ -239,7 +246,7 @@ export async function POST(request: NextRequest) {
         displayName: resolvedDisplayName,
         slug,
         role,
-        station,
+        station: stationId,
         purpose,
         capabilities,
         openClawAgentId,

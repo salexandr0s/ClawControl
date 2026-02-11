@@ -9,7 +9,7 @@ import {
 import { upsertAgentToOpenClaw, removeAgentFromOpenClaw } from '@/lib/services/openclaw-config'
 import { generateAgentName, generateSessionKey, AGENT_ROLE_MAP } from '@/lib/workspace'
 import { buildUniqueSlug, slugifyDisplayName } from '@/lib/agent-identity'
-import type { StationId } from '@clawcontrol/core'
+import { isCanonicalStationId, normalizeStationId, type StationId } from '@clawcontrol/core'
 
 interface CreateFromTemplateInput {
   templateId: string
@@ -118,7 +118,14 @@ export async function POST(request: NextRequest) {
 
   // Determine station from role
   const roleMapping = AGENT_ROLE_MAP[role.toLowerCase()]
-  const station: StationId = roleMapping?.station || 'build'
+  const station = normalizeStationId(roleMapping?.station || 'build')
+  if (!isCanonicalStationId(station)) {
+    return NextResponse.json(
+      { error: 'INVALID_STATION', message: `Resolved station "${station}" is not canonical` },
+      { status: 400 }
+    )
+  }
+  const stationId: StationId = station
 
   // Merge defaults with provided params
   const mergedParams = {
@@ -194,7 +201,7 @@ export async function POST(request: NextRequest) {
       runtimeAgentId: openClawAgentId,
       nameSource: input.displayName ? 'user' : 'system',
       role,
-      station,
+      station: stationId,
       sessionKey,
       capabilities: capabilitiesObj,
       wipLimit: 2,
@@ -227,6 +234,7 @@ export async function POST(request: NextRequest) {
         agentDisplayName,
         agentSlug,
         role,
+        station: stationId,
         filesGenerated: renderedFiles.length,
         openClawAgentId,
       },
@@ -241,6 +249,7 @@ export async function POST(request: NextRequest) {
         agentDisplayName,
         agentSlug,
         templateId,
+        station: stationId,
         filesGenerated: renderedFiles.length,
         openClawAgentId,
         openClawSynced: true,

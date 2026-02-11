@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  checkOpenClaw: vi.fn(),
+  getOpenClawRuntimeDependencyStatus: vi.fn(),
   getRepos: vi.fn(),
   getOpenClawConfig: vi.fn(),
   getOpenClawConfigSync: vi.fn(),
 }))
 
 vi.mock('@clawcontrol/adapters-openclaw', () => ({
-  checkOpenClaw: mocks.checkOpenClaw,
   OPENCLAW_BIN: 'openclaw',
   MIN_OPENCLAW_VERSION: '0.1.0',
+}))
+
+vi.mock('@/lib/openclaw/runtime-deps', () => ({
+  getOpenClawRuntimeDependencyStatus: mocks.getOpenClawRuntimeDependencyStatus,
 }))
 
 vi.mock('@/lib/repo', () => ({
@@ -24,7 +27,7 @@ vi.mock('@/lib/openclaw-client', () => ({
 
 beforeEach(() => {
   vi.resetModules()
-  mocks.checkOpenClaw.mockReset()
+  mocks.getOpenClawRuntimeDependencyStatus.mockReset()
   mocks.getRepos.mockReset()
   mocks.getOpenClawConfig.mockReset()
   mocks.getOpenClawConfigSync.mockReset()
@@ -32,11 +35,14 @@ beforeEach(() => {
 
 describe('maintenance route', () => {
   it('reports gateway healthy even when CLI is unavailable', async () => {
-    mocks.checkOpenClaw.mockResolvedValue({
-      available: false,
-      version: null,
+    mocks.getOpenClawRuntimeDependencyStatus.mockResolvedValue({
+      cliAvailable: false,
+      cliVersion: null,
       belowMinVersion: false,
-      error: 'OpenClaw CLI not found',
+      cliError: 'OpenClaw CLI not found',
+      resolvedCliBin: '/usr/local/bin/openclaw',
+      checkedAt: '2026-02-10T00:00:00.000Z',
+      cacheTtlMs: 30_000,
     })
 
     mocks.getRepos.mockReturnValue({

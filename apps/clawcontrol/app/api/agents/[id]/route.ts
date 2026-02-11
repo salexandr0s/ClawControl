@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRepos } from '@/lib/repo'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import { upsertAgentToOpenClaw } from '@/lib/services/openclaw-config'
-import type { ActionKind } from '@clawcontrol/core'
+import { isCanonicalStationId, normalizeStationId, type ActionKind } from '@clawcontrol/core'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -55,7 +55,7 @@ export async function PATCH(
   const { id } = await context.params
 
   try {
-    const body = await request.json()
+	    const body = await request.json()
     const {
       status,
       currentWorkOrderId,
@@ -69,10 +69,27 @@ export async function PATCH(
       displayName,
       slug,
       runtimeAgentId,
-      typedConfirmText,
-    } = body
+	      typedConfirmText,
+	    } = body
 
-	    const repos = getRepos()
+		    const repos = getRepos()
+
+    let normalizedStation: string | undefined
+    if (station !== undefined) {
+      if (typeof station !== 'string') {
+        return NextResponse.json(
+          { error: 'INVALID_STATION', message: 'Station must be a string' },
+          { status: 400 }
+        )
+      }
+      normalizedStation = normalizeStationId(station)
+      if (!isCanonicalStationId(normalizedStation)) {
+        return NextResponse.json(
+          { error: 'INVALID_STATION', message: `Station "${station}" is not canonical` },
+          { status: 400 }
+        )
+      }
+    }
 
 	    if (slug !== undefined || runtimeAgentId !== undefined) {
 	      return NextResponse.json(
@@ -142,13 +159,13 @@ export async function PATCH(
         entityType: 'agent',
         entityId: id,
         summary: `Agent ${currentAgent.name} updated (${protectedAction})`,
-        payloadJson: {
-          actionKind: protectedAction,
-          previous: currentAgent,
-          next: { status, role, station, wipLimit, sessionKey, displayName },
-        },
-      })
-    }
+	        payloadJson: {
+	          actionKind: protectedAction,
+	          previous: currentAgent,
+	          next: { status, role, station: normalizedStation ?? station, wipLimit, sessionKey, displayName },
+	        },
+	      })
+	    }
 
     // Normalize fallbacks to JSON string for DB storage
     const fallbacksForDb = fallbacks !== undefined
@@ -160,13 +177,13 @@ export async function PATCH(
       ? (typeof fallbacks === 'string' ? JSON.parse(fallbacks) : fallbacks)
       : undefined
 
-    const data = await repos.agents.update(id, {
-      status,
-      currentWorkOrderId,
-      role,
-      station,
-      capabilities,
-      wipLimit,
+	    const data = await repos.agents.update(id, {
+	      status,
+	      currentWorkOrderId,
+	      role,
+	      station: normalizedStation,
+	      capabilities,
+	      wipLimit,
       sessionKey,
       displayName,
       ...(displayName !== undefined ? { nameSource: 'user' as const } : {}),

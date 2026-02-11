@@ -81,4 +81,37 @@ describe('agent hierarchy source warnings', () => {
       await rm(tempRoot, { recursive: true, force: true })
     }
   })
+
+  it('does not emit source_unavailable warnings for missing optional YAML/fallback files on fresh installs', async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'hierarchy-source-missing-'))
+
+    try {
+      const workspaceRoot = join(tempRoot, 'OpenClaw')
+      await mkdir(workspaceRoot, { recursive: true })
+
+      process.env.OPENCLAW_WORKSPACE = workspaceRoot
+      delete process.env.CLAWCONTROL_WORKSPACE_ROOT
+      delete process.env.WORKSPACE_ROOT
+
+      mocks.getRepos.mockReturnValue({
+        agents: {
+          list: vi.fn().mockResolvedValue([]),
+        },
+      })
+      mocks.runCommandJson.mockResolvedValue({
+        error: 'OpenClaw CLI not available: OpenClaw CLI not found',
+        exitCode: 127,
+      })
+
+      const { getAgentHierarchyData } = await import('@/lib/services/agent-hierarchy')
+      const data = await getAgentHierarchyData()
+
+      expect(data.meta.sources.runtime.available).toBe(false)
+      expect(data.meta.sources.db.available).toBe(true)
+      expect(data.meta.warnings.some((warning) => warning.code === 'source_unavailable')).toBe(false)
+      expect(data.meta.warnings.some((warning) => warning.code === 'runtime_unavailable_fallback_used')).toBe(false)
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true })
+    }
+  })
 })

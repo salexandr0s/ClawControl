@@ -11,7 +11,7 @@ Purpose: setup/read runtime config and determine readiness state for dashboard e
 
 ## `GET /api/config/settings`
 
-Returns persisted settings, resolved OpenClaw config, settings file path, and workspace validation.
+Returns persisted settings, resolved OpenClaw config, settings file path, workspace validation, runtime CLI status, and workspace bootstrap details.
 
 ```bash
 curl -sS "http://127.0.0.1:3000/api/config/settings"
@@ -31,6 +31,18 @@ Example response shape:
     "workspaceValidation": {
       "ok": true,
       "issues": []
+    },
+    "runtime": {
+      "cli": {
+        "cliAvailable": true,
+        "cliVersion": "1.0.0",
+        "resolvedCliBin": "/usr/local/bin/openclaw"
+      }
+    },
+    "workspaceBootstrap": {
+      "ensured": true,
+      "createdDirectories": [],
+      "createdFiles": []
     }
   }
 }
@@ -71,10 +83,11 @@ Key fields:
 - `setupCompleted`
 - `access.mode` (`local_only` or `tailscale_tunnel`)
 - check states/messages for `database`, `openclaw`, `gateway`, `workspace`
+- `checks.workspace.bootstrap` provides scaffold counts created during init
 
 ## Last updated
 
-2026-02-09
+2026-02-11
 
 ## Related pages
 

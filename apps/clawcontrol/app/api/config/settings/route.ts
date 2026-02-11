@@ -6,6 +6,7 @@ import { invalidateWorkspaceRootCache } from '@/lib/fs/path-policy'
 import { validateWorkspaceStructure } from '@/lib/workspace/validate'
 import { getOpenClawRuntimeDependencyStatus } from '@/lib/openclaw/runtime-deps'
 import { invalidateTemplatesCache } from '@/lib/templates'
+import { ensureWorkspaceScaffold } from '@/lib/workspace/bootstrap'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 
@@ -72,6 +73,7 @@ async function buildResponseData() {
 
   const settings = settingsResult.settings
   const workspacePath = resolved?.workspacePath ?? settings.workspacePath ?? null
+  const workspaceBootstrap = await ensureWorkspaceScaffold(workspacePath)
   const workspaceValidation = await validateWorkspaceStructure(workspacePath)
 
   return {
@@ -102,6 +104,7 @@ async function buildResponseData() {
     legacyEnvPath: settingsResult.legacyEnvPath,
     migratedFromEnv: settingsResult.migratedFromEnv,
     workspaceValidation,
+    workspaceBootstrap,
     runtime: {
       cli: runtimeCli,
     },

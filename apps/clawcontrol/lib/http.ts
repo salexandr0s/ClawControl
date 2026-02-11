@@ -1672,6 +1672,12 @@ export interface SettingsConfigResponse {
     exists: boolean
     issues: WorkspaceValidationIssue[]
   }
+  workspaceBootstrap?: {
+    path: string | null
+    ensured: boolean
+    createdDirectories: string[]
+    createdFiles: string[]
+  }
   runtime: {
     cli: {
       cliAvailable: boolean
@@ -1736,6 +1742,11 @@ export interface InitStatusResponse {
       path: string | null
       message: string
       issues: WorkspaceValidationIssue[]
+      bootstrap?: {
+        ensured: boolean
+        createdDirectories: number
+        createdFiles: number
+      }
     }
   }
   timestamp: string

@@ -8,6 +8,23 @@ This page documents how ClawControl integrates with OpenClaw in the current impl
 - Minimum version expectation in code/docs: `0.1.0`
 - CLI resolution supports explicit `OPENCLAW_BIN` override and common install paths
 
+## Dependency Layers (Important)
+
+ClawControl separates dependency health into two layers:
+
+1. **Gateway reachability** (HTTP/WS probe).
+2. **OpenClaw CLI availability** (binary + command execution).
+
+These are intentionally independent. A reachable gateway does **not** guarantee CLI-backed features are available.
+
+CLI-backed surfaces in this release include:
+
+- maintenance actions and recovery
+- models
+- plugins
+- cron
+- capability probing
+
 ## Discovery and Resolution Behavior
 
 Config resolution combines (in priority order):
@@ -36,9 +53,14 @@ When OpenClaw is unavailable:
 - UI renders empty or unavailable states using real data contracts.
 - No fake/demo fallback data is generated.
 
+CLI-dependent API failures include additive metadata:
+
+- `code`: `CLI_UNAVAILABLE`, `CLI_JSON_PARSE_FAILED`, `OPENCLAW_COMMAND_FAILED`
+- `fixHint`: actionable remediation text when available
+
 ## Last updated
 
-2026-02-09
+2026-02-11
 
 ## Related pages
 

@@ -5,6 +5,7 @@ import { getOpenClawConfig, waitForGatewayAvailability } from '@/lib/openclaw-cl
 import { readSettings } from '@/lib/settings/store'
 import type { RemoteAccessMode } from '@/lib/settings/types'
 import { validateWorkspaceStructure } from '@/lib/workspace/validate'
+import { ensureWorkspaceScaffold } from '@/lib/workspace/bootstrap'
 
 export interface InitStatus {
   ready: boolean
@@ -41,6 +42,11 @@ export interface InitStatus {
       path: string | null
       message: string
       issues: ReturnType<typeof summarizeIssues>
+      bootstrap?: {
+        ensured: boolean
+        createdDirectories: number
+        createdFiles: number
+      }
     }
   }
   timestamp: string
@@ -66,6 +72,7 @@ export async function GET() {
     const dbStatus = getDatabaseInitStatus().initialized ? getDatabaseInitStatus() : dbInitStatus
 
     const workspacePath = resolvedConfig?.workspacePath ?? settingsResult.settings.workspacePath ?? null
+    const workspaceBootstrap = await ensureWorkspaceScaffold(workspacePath)
     const workspaceValidation = await validateWorkspaceStructure(workspacePath)
 
     const gatewayUrl = resolvedConfig?.gatewayUrl ?? 'http://127.0.0.1:18789'
@@ -138,6 +145,11 @@ export async function GET() {
           path: workspaceValidation.path,
           message: workspaceMessage,
           issues: summarizeIssues(workspaceValidation.issues),
+          bootstrap: {
+            ensured: workspaceBootstrap.ensured,
+            createdDirectories: workspaceBootstrap.createdDirectories.length,
+            createdFiles: workspaceBootstrap.createdFiles.length,
+          },
         },
       },
       timestamp: new Date().toISOString(),

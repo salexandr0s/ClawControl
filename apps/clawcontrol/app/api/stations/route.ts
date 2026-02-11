@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRepos } from '@/lib/repo'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import { STATION_ICON_SET } from '@/lib/stations/icon-map'
+import {
+  areStationMutationsEnabled,
+  STATION_MUTATIONS_DISABLED_ERROR,
+  STATION_MUTATIONS_DISABLED_MESSAGE,
+} from '@/lib/stations/policy'
 
 function normalizeName(name: unknown): string | null {
   if (typeof name !== 'string') return null
@@ -73,6 +78,13 @@ export async function GET() {
  * Create a station (slug id, typed confirm, receipt + activity)
  */
 export async function POST(request: NextRequest) {
+  if (!areStationMutationsEnabled()) {
+    return NextResponse.json(
+      { error: STATION_MUTATIONS_DISABLED_ERROR, message: STATION_MUTATIONS_DISABLED_MESSAGE },
+      { status: 403 }
+    )
+  }
+
   const body = await request.json().catch(() => ({}))
   const typedConfirmText = typeof body?.typedConfirmText === 'string' ? body.typedConfirmText : undefined
 
@@ -171,4 +183,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'CREATE_FAILED', message, receiptId: receipt.id }, { status: 500 })
   }
 }
-

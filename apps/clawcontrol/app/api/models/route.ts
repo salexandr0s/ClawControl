@@ -98,11 +98,8 @@ interface ModelStatusResponse {
 const MODELS_STATUS_TTL_MS = 15_000
 const MODELS_LIST_TTL_MS = 15_000
 
-function failureResponse(error: string, options: { parseFailed?: boolean } = {}) {
-  return {
-    ...classifyOpenClawError(error, options),
-    error,
-  }
+function failureDetails(error: string, options: { parseFailed?: boolean } = {}) {
+  return classifyOpenClawError(error, options)
 }
 
 const getModels = async () => {
@@ -114,12 +111,17 @@ const getModels = async () => {
     )
 
     if (statusResult.error || !statusResult.data) {
-      const details = failureResponse(
+      const details = failureDetails(
         statusResult.error ?? 'Failed to parse model status JSON',
         { parseFailed: !statusResult.error && !statusResult.data }
       )
       return NextResponse.json(
-        { error: 'Failed to get model status', details: statusResult.error ?? null, ...details },
+        {
+          error: 'Failed to get model status',
+          details: statusResult.error ?? null,
+          code: details.code,
+          ...(details.fixHint ? { fixHint: details.fixHint } : {}),
+        },
         { status: 500 }
       )
     }
@@ -212,17 +214,25 @@ const postModels = async (request: NextRequest) => {
     }
 
     if (result.error) {
-      const details = failureResponse(result.error)
+      const details = failureDetails(result.error)
       return NextResponse.json(
-        { error: `Command failed: ${result.error}`, ...details },
+        {
+          error: `Command failed: ${result.error}`,
+          code: details.code,
+          ...(details.fixHint ? { fixHint: details.fixHint } : {}),
+        },
         { status: 500 }
       )
     }
 
     if (result.data === undefined) {
-      const details = failureResponse('Failed to parse JSON output', { parseFailed: true })
+      const details = failureDetails('Failed to parse JSON output', { parseFailed: true })
       return NextResponse.json(
-        { error: 'Failed to parse JSON output', ...details },
+        {
+          error: 'Failed to parse JSON output',
+          code: details.code,
+          ...(details.fixHint ? { fixHint: details.fixHint } : {}),
+        },
         { status: 500 }
       )
     }

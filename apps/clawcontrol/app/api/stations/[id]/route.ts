@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRepos } from '@/lib/repo'
 import { enforceTypedConfirm } from '@/lib/with-governor'
 import { STATION_ICON_SET } from '@/lib/stations/icon-map'
+import {
+  areStationMutationsEnabled,
+  STATION_MUTATIONS_DISABLED_ERROR,
+  STATION_MUTATIONS_DISABLED_MESSAGE,
+} from '@/lib/stations/policy'
 
 function normalizeOptionalString(value: unknown): string | null | undefined {
   if (value === undefined) return undefined
@@ -31,6 +36,13 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  if (!areStationMutationsEnabled()) {
+    return NextResponse.json(
+      { error: STATION_MUTATIONS_DISABLED_ERROR, message: STATION_MUTATIONS_DISABLED_MESSAGE },
+      { status: 403 }
+    )
+  }
+
   const { id } = await context.params
   const body = await request.json().catch(() => ({}))
   const typedConfirmText = typeof body?.typedConfirmText === 'string' ? body.typedConfirmText : undefined
@@ -140,6 +152,13 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  if (!areStationMutationsEnabled()) {
+    return NextResponse.json(
+      { error: STATION_MUTATIONS_DISABLED_ERROR, message: STATION_MUTATIONS_DISABLED_MESSAGE },
+      { status: 403 }
+    )
+  }
+
   const { id } = await context.params
   const body = await request.json().catch(() => ({}))
   const typedConfirmText = typeof body?.typedConfirmText === 'string' ? body.typedConfirmText : undefined

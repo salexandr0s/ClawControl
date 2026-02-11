@@ -70,11 +70,12 @@ curl -sS "http://127.0.0.1:3000/api/openclaw/usage/summary?range=daily"
 - `503 GATEWAY_UNAVAILABLE`
 - `404 SESSION_NOT_FOUND` in console routes
 - `400` for invalid text/body constraints
-- cron/action endpoints may return `502` when underlying OpenClaw command fails
+- cron endpoints return structured unavailable responses when CLI/runtime commands fail
+- CLI failures may include `code` + `fixHint` metadata
 
 ## Last updated
 
-2026-02-09
+2026-02-11
 
 ## Related pages
 

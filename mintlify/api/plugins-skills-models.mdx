@@ -46,10 +46,13 @@ curl -sS "http://127.0.0.1:3000/api/models"
 - capability-based unsupported operations may fail with endpoint-specific errors
 - governor-protected mutations require typed confirmations (`428`/`403` on failure)
 - OpenClaw unavailability yields unavailable/error responses, not demo data
+- CLI-dependent failures may include:
+  - `code`: `CLI_UNAVAILABLE`, `CLI_JSON_PARSE_FAILED`, `OPENCLAW_COMMAND_FAILED`
+  - `fixHint`: actionable remediation guidance
 
 ## Last updated
 
-2026-02-09
+2026-02-11
 
 ## Related pages
 

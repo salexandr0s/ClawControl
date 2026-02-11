@@ -39,9 +39,12 @@ export interface WorkOrder {
 
 // Operation types
 export type OperationStation =
+  | 'strategic'
+  | 'orchestration'
   | 'spec'
   | 'build'
   | 'qa'
+  | 'security'
   | 'ops'
   | 'update'
   | 'ship'
@@ -50,7 +53,33 @@ export type OperationStation =
 // Backward-compat alias used throughout routing/workflow code.
 export type Station = OperationStation
 
-// Station identifiers for agent categorization are user-defined.
+// Canonical station identifiers for v1 agent categorization.
+export const CANONICAL_STATION_IDS = [
+  'strategic',
+  'orchestration',
+  'spec',
+  'build',
+  'qa',
+  'security',
+  'ops',
+  'ship',
+  'compound',
+  'update',
+] as const
+
+export type CanonicalStationId = (typeof CANONICAL_STATION_IDS)[number]
+
+const CANONICAL_STATION_ID_SET = new Set<string>(CANONICAL_STATION_IDS)
+
+export function normalizeStationId(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase()
+}
+
+export function isCanonicalStationId(value: string | null | undefined): value is CanonicalStationId {
+  return CANONICAL_STATION_ID_SET.has(normalizeStationId(value))
+}
+
+// Station identifiers stored on agents can still be dynamic in legacy data.
 export type StationId = string
 
 export type OperationStatus =
