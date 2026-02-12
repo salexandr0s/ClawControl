@@ -2,6 +2,7 @@
 
 import { cn } from '@/lib/utils'
 import { getModelById, getModelShortName } from '@/lib/models'
+import { ProviderLogo } from '@/components/provider-logo'
 import { Cpu } from 'lucide-react'
 
 interface ModelBadgeProps {
@@ -18,6 +19,11 @@ const COLOR_CLASSES = {
   default: "bg-bg-3 text-fg-2 border-bd-0",
 } as const
 
+function providerFromModelId(modelId: string | null): string {
+  if (!modelId) return 'unknown'
+  return modelId.split('/')[0] || 'unknown'
+}
+
 export function ModelBadge({
   modelId,
   size = 'sm',
@@ -27,6 +33,7 @@ export function ModelBadge({
   const model = getModelById(modelId)
   const shortName = getModelShortName(modelId)
   const colorClass = model ? COLOR_CLASSES[model.color] : 'bg-bg-3 text-fg-2 border-bd-0'
+  const provider = providerFromModelId(modelId)
 
   return (
     <span
@@ -38,6 +45,13 @@ export function ModelBadge({
         className
       )}
     >
+      {modelId && (
+        <ProviderLogo
+          provider={provider}
+          size="sm"
+          className={cn(size === 'sm' ? 'w-3.5 h-3.5 rounded-[4px]' : 'w-4 h-4 rounded-[4px]')}
+        />
+      )}
       {showIcon && <Cpu className={cn(size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5')} />}
       {shortName}
     </span>

@@ -1,15 +1,23 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { EmptyState, TypedConfirmModal, Button } from '@clawcontrol/ui'
+import { EmptyState, TypedConfirmModal, Button, SelectDropdown } from '@clawcontrol/ui'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { RightDrawer } from '@/components/shell/right-drawer'
 import { Modal } from '@/components/ui/modal'
 import { ImportPackageModal } from '@/components/packages/import-package-modal'
-import { agentTeamsApi, packagesApi, type AgentTeamSummary } from '@/lib/http'
+import {
+  agentTeamsApi,
+  packagesApi,
+  templatesApi,
+  workflowsApi,
+  type AgentTeamSummary,
+  type TemplateSummary,
+  type WorkflowListItem,
+} from '@/lib/http'
 import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
 import { useSettings } from '@/lib/settings-context'
-import { Download, Plus, Trash2, Upload } from 'lucide-react'
+import { Download, Info, Plus, Trash2, Upload, X } from 'lucide-react'
 
 const teamColumns: Column<AgentTeamSummary>[] = [
   {
@@ -59,15 +67,8 @@ interface TeamEditorDraft {
   id?: string
   name: string
   description: string
-  workflowIdsText: string
-  templateIdsText: string
-}
-
-function parseCommaSeparated(value: string): string[] {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
+  workflowIds: string[]
+  templateIds: string[]
 }
 
 function toDraft(team: AgentTeamSummary | null): TeamEditorDraft {
@@ -75,8 +76,8 @@ function toDraft(team: AgentTeamSummary | null): TeamEditorDraft {
     return {
       name: '',
       description: '',
-      workflowIdsText: '',
-      templateIdsText: '',
+      workflowIds: [],
+      templateIds: [],
     }
   }
 
@@ -84,8 +85,8 @@ function toDraft(team: AgentTeamSummary | null): TeamEditorDraft {
     id: team.id,
     name: team.name,
     description: team.description ?? '',
-    workflowIdsText: team.workflowIds.join(', '),
-    templateIdsText: team.templateIds.join(', '),
+    workflowIds: [...team.workflowIds],
+    templateIds: [...team.templateIds],
   }
 }
 
@@ -93,22 +94,92 @@ interface TeamEditorModalProps {
   open: boolean
   mode: 'create' | 'edit'
   draft: TeamEditorDraft
+  workflows: WorkflowListItem[]
+  templates: TemplateSummary[]
+  optionsLoading: boolean
+  optionsError: string | null
   onClose: () => void
   onChange: (next: TeamEditorDraft) => void
   onSubmit: () => Promise<void>
   isSubmitting: boolean
 }
 
+function FieldInfoTooltip({ copy }: { copy: string }) {
+  return (
+    <span className="relative inline-flex group">
+      <button
+        type="button"
+        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-bd-0 bg-bg-2 text-fg-3 hover:text-fg-1"
+        aria-label="Field help"
+      >
+        <Info className="h-3 w-3" />
+      </button>
+      <span className="pointer-events-none absolute left-0 top-[calc(100%+6px)] z-20 hidden w-64 rounded-[var(--radius-sm)] border border-bd-0 bg-bg-2 p-2 text-[11px] text-fg-1 shadow-lg group-hover:block group-focus-within:block">
+        {copy}
+      </span>
+    </span>
+  )
+}
+
+function SelectionChip({
+  id,
+  sublabel,
+  onRemove,
+}: {
+  id: string
+  sublabel?: string
+  onRemove: () => void
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-bd-0 bg-bg-3 px-2 py-1">
+      <span className="min-w-0">
+        <span className="block font-mono text-xs text-fg-0 truncate max-w-[220px]">{id}</span>
+        {sublabel && <span className="block text-[10px] text-fg-3 truncate max-w-[220px]">{sublabel}</span>}
+      </span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="rounded-[var(--radius-xs)] p-0.5 text-fg-3 hover:text-fg-1 hover:bg-bg-2"
+        aria-label={`Remove ${id}`}
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  )
+}
+
 function TeamEditorModal({
   open,
   mode,
   draft,
+  workflows,
+  templates,
+  optionsLoading,
+  optionsError,
   onClose,
   onChange,
   onSubmit,
   isSubmitting,
 }: TeamEditorModalProps) {
   const canSubmit = draft.name.trim().length > 0 && !isSubmitting
+  const workflowById = new Map(workflows.map((workflow) => [workflow.id, workflow] as const))
+  const templateById = new Map(templates.map((template) => [template.id, template] as const))
+  const workflowOptions = workflows
+    .filter((workflow) => !draft.workflowIds.includes(workflow.id))
+    .map((workflow) => ({
+      value: workflow.id,
+      label: workflow.id,
+      description: workflow.description || 'No description',
+      textValue: `${workflow.id} ${workflow.description}`,
+    }))
+  const templateOptions = templates
+    .filter((template) => !draft.templateIds.includes(template.id))
+    .map((template) => ({
+      value: template.id,
+      label: template.id,
+      description: template.name,
+      textValue: `${template.id} ${template.name} ${template.description}`,
+    }))
 
   return (
     <Modal
@@ -116,7 +187,7 @@ function TeamEditorModal({
       onClose={onClose}
       width="lg"
       title={mode === 'create' ? 'New Team' : 'Edit Team'}
-      description="Team metadata and linked workflow/template ids"
+      description="Team metadata and linked workflows/templates"
     >
       <div className="space-y-3">
         <label className="space-y-1 text-sm block">
@@ -138,23 +209,81 @@ function TeamEditorModal({
           />
         </label>
 
-        <label className="space-y-1 text-sm block">
-          <span className="text-fg-2">Workflow IDs (comma-separated)</span>
-          <input
-            value={draft.workflowIdsText}
-            onChange={(event) => onChange({ ...draft, workflowIdsText: event.target.value })}
-            className="w-full px-3 py-2 bg-bg-2 border border-bd-0 rounded-[var(--radius-sm)] text-sm text-fg-0"
+        <div className="space-y-1 text-sm">
+          <div className="flex items-center gap-1.5">
+            <span className="text-fg-2">Workflows</span>
+            <FieldInfoTooltip copy="Workflow IDs identify orchestration pipelines this team is linked to." />
+          </div>
+          <SelectDropdown
+            value={null}
+            onChange={(workflowId) => onChange({ ...draft, workflowIds: [...draft.workflowIds, workflowId] })}
+            ariaLabel="Add workflow"
+            tone="field"
+            size="md"
+            placeholder={optionsLoading ? 'Loading workflows…' : 'Select workflow...'}
+            options={workflowOptions}
+            disabled={optionsLoading || workflowOptions.length === 0}
+            search="auto"
+            emptyMessage="No more workflows available"
           />
-        </label>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {draft.workflowIds.length === 0 && (
+              <span className="text-xs text-fg-3">No workflows linked.</span>
+            )}
+            {draft.workflowIds.map((workflowId) => {
+              const workflow = workflowById.get(workflowId)
+              return (
+                <SelectionChip
+                  key={workflowId}
+                  id={workflowId}
+                  sublabel={workflow?.description}
+                  onRemove={() => onChange({ ...draft, workflowIds: draft.workflowIds.filter((id) => id !== workflowId) })}
+                />
+              )
+            })}
+          </div>
+        </div>
 
-        <label className="space-y-1 text-sm block">
-          <span className="text-fg-2">Template IDs (comma-separated)</span>
-          <input
-            value={draft.templateIdsText}
-            onChange={(event) => onChange({ ...draft, templateIdsText: event.target.value })}
-            className="w-full px-3 py-2 bg-bg-2 border border-bd-0 rounded-[var(--radius-sm)] text-sm text-fg-0"
+        <div className="space-y-1 text-sm">
+          <div className="flex items-center gap-1.5">
+            <span className="text-fg-2">Templates</span>
+            <FieldInfoTooltip copy="Template IDs reference agent blueprints this team typically uses." />
+          </div>
+          <SelectDropdown
+            value={null}
+            onChange={(templateId) => onChange({ ...draft, templateIds: [...draft.templateIds, templateId] })}
+            ariaLabel="Add template"
+            tone="field"
+            size="md"
+            placeholder={optionsLoading ? 'Loading templates…' : 'Select template...'}
+            options={templateOptions}
+            disabled={optionsLoading || templateOptions.length === 0}
+            search="auto"
+            emptyMessage="No more templates available"
           />
-        </label>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {draft.templateIds.length === 0 && (
+              <span className="text-xs text-fg-3">No templates linked.</span>
+            )}
+            {draft.templateIds.map((templateId) => {
+              const template = templateById.get(templateId)
+              return (
+                <SelectionChip
+                  key={templateId}
+                  id={templateId}
+                  sublabel={template?.name}
+                  onRemove={() => onChange({ ...draft, templateIds: draft.templateIds.filter((id) => id !== templateId) })}
+                />
+              )
+            })}
+          </div>
+        </div>
+
+        {optionsError && (
+          <div className="rounded-[var(--radius-sm)] border border-status-warning/40 bg-status-warning/10 p-2 text-xs text-status-warning">
+            {optionsError}
+          </div>
+        )}
 
         <div className="flex justify-end gap-2 pt-1">
           <Button onClick={onClose} variant="secondary" size="sm" type="button">Cancel</Button>
@@ -189,6 +318,10 @@ export function TeamsTab() {
   const [editorMode, setEditorMode] = useState<'create' | 'edit'>('create')
   const [draft, setDraft] = useState<TeamEditorDraft>(toDraft(null))
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [workflowOptions, setWorkflowOptions] = useState<WorkflowListItem[]>([])
+  const [templateOptions, setTemplateOptions] = useState<TemplateSummary[]>([])
+  const [editorOptionsLoading, setEditorOptionsLoading] = useState(false)
+  const [editorOptionsError, setEditorOptionsError] = useState<string | null>(null)
 
   const [showPackageImport, setShowPackageImport] = useState(false)
 
@@ -210,6 +343,28 @@ export function TeamsTab() {
     void fetchTeams()
   }, [fetchTeams])
 
+  const loadEditorOptions = useCallback(async () => {
+    setEditorOptionsLoading(true)
+    setEditorOptionsError(null)
+    try {
+      const [workflowsResult, templatesResult] = await Promise.all([
+        workflowsApi.list(),
+        templatesApi.list(),
+      ])
+      setWorkflowOptions(workflowsResult.data)
+      setTemplateOptions(templatesResult.data.filter((template) => template.isValid))
+    } catch (err) {
+      setEditorOptionsError(err instanceof Error ? err.message : 'Failed to load workflows/templates')
+    } finally {
+      setEditorOptionsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!showEditor) return
+    void loadEditorOptions()
+  }, [showEditor, loadEditorOptions])
+
   const openCreate = () => {
     setEditorMode('create')
     setDraft(toDraft(null))
@@ -230,8 +385,8 @@ export function TeamsTab() {
     const payload = {
       name: draft.name.trim(),
       description: draft.description.trim() || null,
-      workflowIds: parseCommaSeparated(draft.workflowIdsText),
-      templateIds: parseCommaSeparated(draft.templateIdsText),
+      workflowIds: [...draft.workflowIds],
+      templateIds: [...draft.templateIds],
     }
 
     try {
@@ -428,6 +583,11 @@ export function TeamsTab() {
             </div>
 
             <div className="space-y-1">
+              <div className="text-xs text-fg-2">Template IDs</div>
+              <div className="text-xs text-fg-1 font-mono">{selected.templateIds.join(', ') || 'none'}</div>
+            </div>
+
+            <div className="space-y-1">
               <div className="text-xs text-fg-2">Members</div>
               <div className="space-y-1">
                 {selected.members.map((member) => (
@@ -464,6 +624,10 @@ export function TeamsTab() {
         open={showEditor}
         mode={editorMode}
         draft={draft}
+        workflows={workflowOptions}
+        templates={templateOptions}
+        optionsLoading={editorOptionsLoading}
+        optionsError={editorOptionsError}
         onClose={() => setShowEditor(false)}
         onChange={setDraft}
         onSubmit={saveTeam}

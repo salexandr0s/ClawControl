@@ -5,6 +5,7 @@ import { PageHeader, PageSection, EmptyState, Button, SegmentedToggle } from '@c
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { StatusPill } from '@/components/ui/status-pill'
 import { InlineLoading, LoadingSpinner } from '@/components/ui/loading-state'
+import { ActionConfirmModal } from '@/components/ui/action-confirm-modal'
 import { RightDrawer } from '@/components/shell/right-drawer'
 import { AvailabilityBadge } from '@/components/availability-badge'
 import { getModelShortName } from '@/lib/models'
@@ -2122,7 +2123,7 @@ function CronDetail({
 }) {
   const [actionInProgress, setActionInProgress] = useState<'run' | 'toggle' | 'delete' | 'save' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [editMode, setEditMode] = useState<EditMode>('every')
   const [everyValue, setEveryValue] = useState('20m')
   const [cronValue, setCronValue] = useState('* * * * *')
@@ -2139,6 +2140,7 @@ function CronDetail({
 
   useEffect(() => {
     const schedule = job.raw.schedule
+    setDeleteConfirmOpen(false)
 
     if (schedule.kind === 'every') {
       setEditMode('every')
@@ -2201,12 +2203,12 @@ function CronDetail({
     }
   }
 
-  async function handleDelete() {
-    if (!confirmDelete) {
-      setConfirmDelete(true)
-      return
-    }
+  function requestDeleteConfirmation() {
+    if (actionInProgress) return
+    setDeleteConfirmOpen(true)
+  }
 
+  async function handleDelete() {
     setActionInProgress('delete')
     setError(null)
 
@@ -2216,14 +2218,15 @@ function CronDetail({
 
       if (data.status === 'unavailable') {
         setError(data.error ?? 'Failed to delete job')
-        setConfirmDelete(false)
+        setDeleteConfirmOpen(false)
       } else {
         await onUpdated()
+        setDeleteConfirmOpen(false)
         onDeleted?.()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete job')
-      setConfirmDelete(false)
+      setDeleteConfirmOpen(false)
     } finally {
       setActionInProgress(null)
     }
@@ -2274,7 +2277,8 @@ function CronDetail({
   const isLoading = actionInProgress !== null
 
   return (
-    <div className="space-y-6">
+    <>
+      <div className="space-y-6">
       {/* Status */}
       <div className="flex items-center gap-3">
         <span className={cn(
@@ -2483,25 +2487,19 @@ function CronDetail({
             {job.enabled ? 'Disable' : 'Enable'}
           </Button>
           <Button
-            onClick={handleDelete}
+            onClick={requestDeleteConfirmation}
             disabled={isLoading}
             variant="danger"
             size="md"
-            className={cn(confirmDelete && 'bg-status-danger text-white border-status-danger hover:bg-status-danger/90')}
           >
             {actionInProgress === 'delete' ? (
               <LoadingSpinner size="sm" />
             ) : (
               <Trash2 className="w-3.5 h-3.5" />
             )}
-            {confirmDelete ? 'Confirm Delete' : 'Delete'}
+            Delete
           </Button>
         </div>
-        {confirmDelete && (
-          <p className="mt-2 text-xs text-status-danger">
-            Click again to permanently delete this job
-          </p>
-        )}
       </PageSection>
 
       {/* Stats */}
@@ -2541,7 +2539,23 @@ function CronDetail({
           </dd>
         </dl>
       </PageSection>
-    </div>
+      </div>
+
+      <ActionConfirmModal
+        open={deleteConfirmOpen}
+        onClose={() => {
+          if (actionInProgress === 'delete') return
+          setDeleteConfirmOpen(false)
+        }}
+        onConfirm={handleDelete}
+        title="Delete Cron Job"
+        description={`Remove "${job.name}" permanently?`}
+        notice="This will permanently delete the cron job and cannot be undone."
+        confirmLabel={actionInProgress === 'delete' ? 'Deleting...' : 'Delete Job'}
+        isLoading={actionInProgress === 'delete'}
+        intent="danger"
+      />
+    </>
   )
 }
 

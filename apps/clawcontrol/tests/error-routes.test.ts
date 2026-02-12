@@ -174,6 +174,29 @@ describe('error routes', () => {
     expect(payload.data.totals.windowUniqueSignatures).toBe(1)
   })
 
+  it('returns safe summary payload when analytics schema is outdated', async () => {
+    mocks.withIngestionLease.mockRejectedValueOnce(
+      new Error('SQLITE_ERROR: no such table: error_signature_daily_aggregates')
+    )
+
+    const route = await import('@/app/api/openclaw/errors/summary/route')
+    const response = await route.GET(
+      new Request('http://localhost/api/openclaw/errors/summary?days=14') as unknown as import('next/server').NextRequest
+    )
+    const payload = (await response.json()) as {
+      warning?: string
+      code?: string
+      data: { topSignatures: unknown[]; trend: unknown[] }
+    }
+
+    expect(response.status).toBe(200)
+    expect(payload.code).toBe('ERROR_ANALYTICS_SCHEMA_OUTDATED')
+    expect(payload.warning).toContain('db:migrate')
+    expect(payload.data.topSignatures).toEqual([])
+    expect(payload.data.trend).toHaveLength(14)
+    expect(mocks.getErrorSummary).not.toHaveBeenCalled()
+  })
+
   it('enforces auth for raw toggle on signatures route while allowing sanitized default', async () => {
     const route = await import('@/app/api/openclaw/errors/signatures/route')
 
@@ -197,6 +220,55 @@ describe('error routes', () => {
     )
 
     expect(sanitizedResponse.status).toBe(200)
+  })
+
+  it('returns safe signatures payload when analytics schema is outdated', async () => {
+    mocks.listErrorSignatures.mockRejectedValueOnce(
+      new Error('P2021: table ErrorSignatureDailyAggregate not found')
+    )
+
+    const route = await import('@/app/api/openclaw/errors/signatures/route')
+    const response = await route.GET(
+      new Request('http://localhost/api/openclaw/errors/signatures?days=14&limit=20') as unknown as import('next/server').NextRequest
+    )
+    const payload = (await response.json()) as {
+      warning?: string
+      code?: string
+      data: {
+        signatures: unknown[]
+        meta: { limit: number; includeRaw: boolean; windowUniqueSignatures: number }
+      }
+    }
+
+    expect(response.status).toBe(200)
+    expect(payload.code).toBe('ERROR_ANALYTICS_SCHEMA_OUTDATED')
+    expect(payload.warning).toContain('db:migrate')
+    expect(payload.data.signatures).toEqual([])
+    expect(payload.data.meta.limit).toBe(20)
+    expect(payload.data.meta.includeRaw).toBe(false)
+    expect(payload.data.meta.windowUniqueSignatures).toBe(0)
+  })
+
+  it('returns sanitized signatures when insights fail due schema drift', async () => {
+    mocks.autoGenerateErrorInsights.mockRejectedValueOnce(
+      new Error('SQLITE_ERROR: no such table: error_signature_insights')
+    )
+
+    const route = await import('@/app/api/openclaw/errors/signatures/route')
+    const response = await route.GET(
+      new Request('http://localhost/api/openclaw/errors/signatures?days=14&limit=20') as unknown as import('next/server').NextRequest
+    )
+    const payload = (await response.json()) as {
+      warning?: string
+      code?: string
+      data: { signatures: Array<{ signatureHash: string; insight: unknown }> }
+    }
+
+    expect(response.status).toBe(200)
+    expect(payload.code).toBe('ERROR_ANALYTICS_SCHEMA_OUTDATED')
+    expect(payload.warning).toContain('db:migrate')
+    expect(payload.data.signatures).toHaveLength(1)
+    expect(payload.data.signatures[0]?.signatureHash).toBe('a'.repeat(40))
   })
 
   it('supports remediation create-only and create+start flows', async () => {

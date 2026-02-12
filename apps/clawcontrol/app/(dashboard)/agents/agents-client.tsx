@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { PageHeader, PageSection, EmptyState, Button, SegmentedToggle, SelectDropdown } from '@clawcontrol/ui'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { StatusPill } from '@/components/ui/status-pill'
@@ -15,9 +15,11 @@ import { FileEditorModal } from '@/components/file-editor-modal'
 import { SkillSelector } from '@/components/skill-selector'
 import {
   agentsApi,
+  modelsApi,
   templatesApi,
   skillsApi,
   type AgentHierarchyData,
+  type ModelListItem,
   type TemplateSummary,
   type SkillSummary,
 } from '@/lib/http'
@@ -31,7 +33,9 @@ import { AGENTS_TAB_STALE_TIME_MS, revalidateAgentsTabCache, useAgentsTabStore }
 import { StationsTab, StationUpsertModal } from './stations-tab'
 import { HierarchyView } from './hierarchy-view'
 import { TeamsTab } from './teams-tab'
+import { ProviderLogo } from '@/components/provider-logo'
 import {
+  AlertTriangle,
   Bot,
   Plus,
   X,
@@ -77,6 +81,82 @@ const CAPABILITY_OPTIONS = [
   'database',
   'api',
 ]
+
+interface AgentModelCatalogEntry {
+  id: string
+  name: string
+  description: string
+  provider: string
+}
+
+interface AgentKnownModelStatus {
+  available: boolean
+  missing: boolean
+}
+
+interface AgentModelCatalog {
+  entries: AgentModelCatalogEntry[]
+  statusById: Record<string, AgentKnownModelStatus>
+}
+
+const DEFAULT_AGENT_MODEL_CATALOG: AgentModelCatalog = {
+  entries: AVAILABLE_MODELS.map((model) => ({
+    id: model.id,
+    name: model.name,
+    description: model.description,
+    provider: model.id.split('/')[0] || 'unknown',
+  })),
+  statusById: {},
+}
+
+function buildAgentModelCatalog(listedModels: ModelListItem[]): AgentModelCatalog {
+  const entriesById = new Map<string, AgentModelCatalogEntry>(
+    DEFAULT_AGENT_MODEL_CATALOG.entries.map((entry) => [entry.id, entry] as const)
+  )
+  const statusById: Record<string, AgentKnownModelStatus> = {}
+
+  for (const listed of listedModels) {
+    statusById[listed.key] = {
+      available: listed.available,
+      missing: listed.missing,
+    }
+
+    const existing = entriesById.get(listed.key)
+    const provider = listed.key.split('/')[0] || 'unknown'
+    const description = listed.missing || !listed.available
+      ? 'Configured but unavailable for this provider'
+      : existing?.description ?? listed.input ?? 'Configured model'
+
+    if (existing) {
+      entriesById.set(listed.key, {
+        ...existing,
+        description,
+      })
+      continue
+    }
+
+    entriesById.set(listed.key, {
+      id: listed.key,
+      name: listed.name || listed.key,
+      description,
+      provider,
+    })
+  }
+
+  const curatedOrder = new Map<string, number>(
+    AVAILABLE_MODELS.map((model, index) => [model.id, index] as const)
+  )
+  const entries = Array.from(entriesById.values()).sort((a, b) => {
+    const aOrder = curatedOrder.get(a.id)
+    const bOrder = curatedOrder.get(b.id)
+    if (aOrder !== undefined && bOrder !== undefined) return aOrder - bOrder
+    if (aOrder !== undefined) return -1
+    if (bOrder !== undefined) return 1
+    return a.name.localeCompare(b.name)
+  })
+
+  return { entries, statusById }
+}
 
 function buildAutoAgentName(role: string): string {
   const normalized = role
@@ -194,6 +274,9 @@ export function AgentsClient() {
   // Create agent modal state
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createResult, setCreateResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [modelCatalog, setModelCatalog] = useState<AgentModelCatalog>(DEFAULT_AGENT_MODEL_CATALOG)
+  const [modelCatalogLoading, setModelCatalogLoading] = useState(false)
+  const [modelCatalogError, setModelCatalogError] = useState<string | null>(null)
 
   // Create from template wizard state
   const [showTemplateWizard, setShowTemplateWizard] = useState(false)
@@ -205,6 +288,21 @@ export function AgentsClient() {
 
   const triggerProtectedAction = useProtectedActionTrigger()
 
+  const fetchModelCatalog = useCallback(async () => {
+    setModelCatalogLoading(true)
+    setModelCatalogError(null)
+    try {
+      const response = await modelsApi.runAction('list')
+      const listed = response.data as { count: number; models: ModelListItem[] }
+      const models = Array.isArray(listed.models) ? listed.models : []
+      setModelCatalog(buildAgentModelCatalog(models))
+    } catch (err) {
+      setModelCatalogError(err instanceof Error ? err.message : 'Failed to load model availability')
+    } finally {
+      setModelCatalogLoading(false)
+    }
+  }, [])
+
   // Fetch agents and operations on mount
   useEffect(() => {
     const snapshot = useAgentsTabStore.getState()
@@ -212,6 +310,7 @@ export function AgentsClient() {
     const cacheAgeMs = hasCache ? Date.now() - Number(snapshot.fetchedAt) : Number.POSITIVE_INFINITY
     const forceRefresh = !hasCache || cacheAgeMs >= AGENTS_TAB_STALE_TIME_MS
     void fetchData({ force: forceRefresh, blocking: !hasCache })
+    void fetchModelCatalog()
   }, [])
 
   useEffect(() => {
@@ -323,7 +422,7 @@ export function AgentsClient() {
           ...patch,
           typedConfirmText,
         })
-        await fetchData()
+        await Promise.all([fetchData(), fetchModelCatalog()])
         setCreateResult({ success: true, message: `Updated ${agent.displayName}` })
       },
       onError: (err) => {
@@ -619,6 +718,16 @@ export function AgentsClient() {
           </div>
         )}
 
+        {activeTab === 'agents' && modelCatalogError && (
+          <div className="flex items-start gap-2 rounded-[var(--radius-md)] border border-status-warning/40 bg-status-warning/10 p-3 text-status-warning">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="text-sm">
+              <p>Model availability could not be refreshed.</p>
+              <p className="text-xs text-status-warning/90">Editing still works, but unavailable-model checks may be stale.</p>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'stations' ? (
           <StationsTab />
         ) : activeTab === 'teams' ? (
@@ -718,6 +827,7 @@ export function AgentsClient() {
               onClose={() => setSelectedId(undefined)}
               title={selectedAgent?.displayName}
               description={selectedAgent?.role}
+              width="full"
             >
               {selectedAgent && (
                 <AgentDetail
@@ -730,6 +840,9 @@ export function AgentsClient() {
                   onAvatarReset={() => handleAvatarReset(selectedAgent)}
                   onDuplicateSkills={(skillIds) => handleDuplicateSkills(selectedAgent, skillIds)}
                   onEditFile={(filePath, fileName) => handleFileEdit(filePath, fileName)}
+                  modelCatalog={modelCatalog.entries}
+                  modelStatusById={modelCatalog.statusById}
+                  modelCatalogLoading={modelCatalogLoading}
                 />
               )}
             </RightDrawer>
@@ -1313,6 +1426,9 @@ function AgentDetail({
   onAvatarReset,
   onDuplicateSkills,
   onEditFile,
+  modelCatalog,
+  modelStatusById,
+  modelCatalogLoading,
 }: {
   agent: AgentDTO
   assignedOps: OperationDTO[]
@@ -1332,6 +1448,9 @@ function AgentDetail({
   onAvatarReset: () => void
   onDuplicateSkills: (skillIds: string[]) => void
   onEditFile: (filePath: string, fileName?: string) => void
+  modelCatalog: AgentModelCatalogEntry[]
+  modelStatusById: Record<string, AgentKnownModelStatus>
+  modelCatalogLoading: boolean
 }) {
   const toneMap: Record<string, StatusTone> = {
     active: 'success',
@@ -1350,6 +1469,7 @@ function AgentDetail({
   const [editCaps, setEditCaps] = useState<Record<string, boolean>>(agent.capabilities)
   const [editModel, setEditModel] = useState(agent.model || DEFAULT_MODEL)
   const [editFallbacks, setEditFallbacks] = useState<string[]>(agent.fallbacks ?? [])
+  const [detailTab, setDetailTab] = useState<'overview' | 'configuration' | 'assets'>('overview')
   const [showCreateStation, setShowCreateStation] = useState(false)
 
   // Skills state
@@ -1369,6 +1489,7 @@ function AgentDetail({
     setEditCaps(agent.capabilities)
     setEditModel(agent.model || DEFAULT_MODEL)
     setEditFallbacks((agent.fallbacks ?? []).filter((m) => m !== (agent.model || DEFAULT_MODEL)))
+    setDetailTab('overview')
     loadAgentSkills()
   }, [agent.id])
 
@@ -1404,22 +1525,39 @@ function AgentDetail({
   ]
   const agentStationLabel = stationsById[agent.station]?.name ?? agent.station
   const sortedStations = [...stations].sort((a, b) => (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name))
-  const modelOptions = AVAILABLE_MODELS.map((model) => ({
+  const modelEntries = modelCatalog.length > 0 ? modelCatalog : DEFAULT_AGENT_MODEL_CATALOG.entries
+
+  const isKnownUnavailableModel = (modelId: string): boolean => {
+    const status = modelStatusById[modelId]
+    if (!status) return false
+    return status.missing || !status.available
+  }
+
+  const primaryModelUnavailable = isKnownUnavailableModel(editModel)
+  const unavailableFallbackIds = editFallbacks.filter((modelId) => isKnownUnavailableModel(modelId))
+  const suggestedPrimaryModel = modelEntries.find(
+    (model) => model.id !== editModel && !isKnownUnavailableModel(model.id)
+  )?.id
+  const canSaveConfiguration = !primaryModelUnavailable && unavailableFallbackIds.length === 0
+
+  const modelOptions = modelEntries.map((model) => ({
     value: model.id,
     label: model.name,
-    description: model.description,
-    icon: <ModelBadge modelId={model.id} size="sm" />,
-    textValue: `${model.id} ${model.name} ${model.description}`,
+    description: isKnownUnavailableModel(model.id) ? 'Unavailable for this provider' : model.description,
+    icon: <ProviderLogo provider={model.provider} size="sm" className="h-4 w-4 rounded-sm" />,
+    textValue: `${model.id} ${model.name} ${model.description} ${model.provider}`,
+    disabled: isKnownUnavailableModel(model.id) && model.id !== editModel,
   }))
-  const availableFallbackModels = AVAILABLE_MODELS
+  const availableFallbackModels = modelEntries
     .filter((model) => model.id !== editModel)
     .filter((model) => !editFallbacks.includes(model.id))
+    .filter((model) => !isKnownUnavailableModel(model.id))
   const fallbackModelOptions = availableFallbackModels.map((model) => ({
     value: model.id,
     label: model.name,
     description: model.description,
-    icon: <ModelBadge modelId={model.id} size="sm" />,
-    textValue: `${model.id} ${model.name} ${model.description}`,
+    icon: <ProviderLogo provider={model.provider} size="sm" className="h-4 w-4 rounded-sm" />,
+    textValue: `${model.id} ${model.name} ${model.description} ${model.provider}`,
   }))
   const stationOptions = sortedStations.map((station) => ({
     value: station.id,
@@ -1430,116 +1568,460 @@ function AgentDetail({
   }))
 
   return (
-    <div className="space-y-6">
-      {/* Avatar Section */}
-      <div className="flex items-center gap-4">
-        <AgentAvatar agentId={agent.id} name={agent.displayName} size="xl" />
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-1 hover:bg-bg-3/80 transition-colors"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              Upload
-            </button>
-            <button
-              onClick={onAvatarReset}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-2 hover:text-fg-1 transition-colors"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Reset
-            </button>
-          </div>
-          <p className="text-xs text-fg-3">PNG, JPG, or WebP. Max 2MB.</p>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <SegmentedToggle
+        value={detailTab}
+        onChange={(next) => setDetailTab(next as 'overview' | 'configuration' | 'assets')}
+        tone="neutral"
+        ariaLabel="Agent detail section"
+        items={[
+          { value: 'overview', label: 'Overview' },
+          { value: 'configuration', label: 'Configuration' },
+          { value: 'assets', label: 'Files & Skills' },
+        ]}
+      />
 
-      {/* Status */}
-      <div className="flex items-center gap-3">
-        <StatusPill tone={toneMap[agent.status]} label={agent.status} />
-        <span className="px-2 py-0.5 text-xs bg-bg-3 rounded text-fg-1 inline-flex items-center gap-1.5">
-          <StationIcon stationId={agent.station} />
-          {agentStationLabel}
-        </span>
-        <ModelBadge modelId={agent.model} size="sm" showIcon />
-      </div>
-
-      {/* Actions */}
-      <PageSection title="Actions">
-        <div className="flex gap-2">
-          <button
-            onClick={onProvision}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-warning/10 text-status-warning border border-status-warning/30 hover:bg-status-warning/20 transition-colors"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            Provision
-          </button>
-          <button
-            onClick={onTest}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-progress/10 text-status-progress border border-status-progress/30 hover:bg-status-progress/20 transition-colors"
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-            Test
-          </button>
-        </div>
-      </PageSection>
-
-      {/* Files */}
-      <PageSection title="Agent Files">
-        <div className="flex flex-wrap gap-2">
-          {agentFiles.map((fileName) => (
-            <button
-              key={fileName.path}
-              onClick={() => onEditFile(fileName.path, fileName.label)}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-1 hover:bg-bg-3/80 border border-bd-0 transition-colors"
-            >
-              <FileText className="w-3.5 h-3.5 text-fg-2" />
-              {fileName.label}
-            </button>
-          ))}
-        </div>
-      </PageSection>
-
-      {/* Skills */}
-      <PageSection title="Skills" description={`${agentSkills.length} agent-scoped skills`}>
-        <div className="space-y-2">
-          {loadingSkills ? (
-            <div className="flex items-center justify-center py-4">
-              <LoadingSpinner size="md" className="text-fg-2" />
-            </div>
-          ) : agentSkills.length === 0 ? (
-            <p className="text-xs text-fg-3">No skills assigned to this agent</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {agentSkills.map((skill) => (
-                <span
-                  key={skill.id}
-                  className="px-2 py-1 text-xs bg-status-progress/10 text-status-progress rounded border border-status-progress/20"
+      {detailTab === 'overview' && (
+        <>
+          <div className="flex flex-wrap items-center gap-4">
+            <AgentAvatar agentId={agent.id} name={agent.displayName} size="xl" />
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-1 hover:bg-bg-3/80 transition-colors"
                 >
-                  {skill.name}
-                </span>
+                  <Upload className="w-3.5 h-3.5" />
+                  Upload
+                </button>
+                <button
+                  onClick={onAvatarReset}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-2 hover:text-fg-1 transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Reset
+                </button>
+              </div>
+              <p className="text-xs text-fg-3">PNG, JPG, or WebP. Max 2MB.</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <StatusPill tone={toneMap[agent.status]} label={agent.status} />
+            <span className="px-2 py-0.5 text-xs bg-bg-3 rounded text-fg-1 inline-flex items-center gap-1.5">
+              <StationIcon stationId={agent.station} />
+              {agentStationLabel}
+            </span>
+            <ModelBadge modelId={agent.model} size="sm" showIcon />
+          </div>
+
+          <PageSection title="Actions">
+            <div className="flex gap-2">
+              <button
+                onClick={onProvision}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-warning/10 text-status-warning border border-status-warning/30 hover:bg-status-warning/20 transition-colors"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                Provision
+              </button>
+              <button
+                onClick={onTest}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-progress/10 text-status-progress border border-status-progress/30 hover:bg-status-progress/20 transition-colors"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                Test
+              </button>
+            </div>
+          </PageSection>
+
+          <PageSection
+            title="Current Work"
+            description={`${assignedOps.filter((op) => op.status === 'in_progress').length} in progress`}
+          >
+            <div className="space-y-2">
+              {assignedOps.map((op) => (
+                <div
+                  key={op.id}
+                  className="flex items-center justify-between p-3 bg-bg-3 rounded-[var(--radius-md)] border border-bd-0"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm text-fg-0 truncate">{op.title}</p>
+                    <p className="text-xs text-fg-2">{op.station}</p>
+                  </div>
+                  <span className={cn(
+                    'text-xs font-medium px-2 py-0.5 rounded',
+                    op.status === 'done' && 'bg-status-success/10 text-status-success',
+                    op.status === 'in_progress' && 'bg-status-progress/10 text-status-progress',
+                    op.status === 'blocked' && 'bg-status-danger/10 text-status-danger'
+                  )}>
+                    {op.status.replace('_', ' ')}
+                  </span>
+                </div>
+              ))}
+              {assignedOps.length === 0 && (
+                <p className="text-sm text-fg-2">No assigned operations</p>
+              )}
+            </div>
+          </PageSection>
+
+          <PageSection title="Details">
+            <dl className="grid grid-cols-2 gap-2 text-sm">
+              <dt className="text-fg-2">Display Name</dt>
+              <dd className="text-fg-1">{agent.displayName}</dd>
+              <dt className="text-fg-2">Slug (immutable)</dt>
+              <dd className="text-fg-1 font-mono text-xs truncate">{agent.slug}</dd>
+              <dt className="text-fg-2">Runtime ID (immutable)</dt>
+              <dd className="text-fg-1 font-mono text-xs truncate">{agent.runtimeAgentId}</dd>
+              <dt className="text-fg-2">Name Source</dt>
+              <dd className="text-fg-1 text-xs uppercase">{agent.nameSource}</dd>
+              <dt className="text-fg-2">WIP Limit</dt>
+              <dd className="text-fg-1 font-mono">{agent.wipLimit}</dd>
+              <dt className="text-fg-2">Session Key</dt>
+              <dd className="text-fg-1 font-mono text-xs truncate">{agent.sessionKey}</dd>
+              <dt className="text-fg-2">Last Heartbeat</dt>
+              <dd className="text-fg-1 font-mono text-xs">
+                {agent.lastHeartbeatAt ? formatRelativeTime(agent.lastHeartbeatAt) : 'Never'}
+              </dd>
+              <dt className="text-fg-2">Registered</dt>
+              <dd className="text-fg-1 font-mono text-xs">{new Date(agent.createdAt).toLocaleDateString()}</dd>
+            </dl>
+          </PageSection>
+        </>
+      )}
+
+      {detailTab === 'assets' && (
+        <>
+          <PageSection title="Agent Files">
+            <div className="flex flex-wrap gap-2">
+              {agentFiles.map((fileName) => (
+                <button
+                  key={fileName.path}
+                  onClick={() => onEditFile(fileName.path, fileName.label)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-1 hover:bg-bg-3/80 border border-bd-0 transition-colors"
+                >
+                  <FileText className="w-3.5 h-3.5 text-fg-2" />
+                  {fileName.label}
+                </button>
               ))}
             </div>
-          )}
-          <button
-            onClick={() => setShowSkillSelector(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-1 hover:bg-bg-3/80 transition-colors"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            Add Skills from Global
-          </button>
-        </div>
-      </PageSection>
+          </PageSection>
 
-      {/* Skill Selector Modal */}
+          <PageSection title="Skills" description={`${agentSkills.length} agent-scoped skills`}>
+            <div className="space-y-2">
+              {loadingSkills ? (
+                <div className="flex items-center justify-center py-4">
+                  <LoadingSpinner size="md" className="text-fg-2" />
+                </div>
+              ) : agentSkills.length === 0 ? (
+                <p className="text-xs text-fg-3">No skills assigned to this agent</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {agentSkills.map((skill) => (
+                    <span
+                      key={skill.id}
+                      className="px-2 py-1 text-xs bg-status-progress/10 text-status-progress rounded border border-status-progress/20"
+                    >
+                      {skill.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => setShowSkillSelector(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-bg-3 text-fg-1 hover:bg-bg-3/80 transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Add Skills from Global
+              </button>
+            </div>
+          </PageSection>
+        </>
+      )}
+
+      {detailTab === 'configuration' && (
+        <>
+          <PageSection title="Capabilities">
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(agent.capabilities)
+                .filter(([_, enabled]) => enabled)
+                .map(([cap]) => (
+                  <span
+                    key={cap}
+                    className="px-2 py-1 text-xs bg-bg-3 rounded text-fg-1 border border-bd-0"
+                  >
+                    {cap}
+                  </span>
+                ))}
+            </div>
+          </PageSection>
+
+          <PageSection title="Edit Configuration" description="Requires typed confirmation">
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs text-fg-2">Display Name</label>
+                <input
+                  value={editDisplayName}
+                  onChange={(e) => setEditDisplayName(e.target.value)}
+                  className="w-full px-2 py-1.5 bg-bg-2 border border-bd-0 rounded-[var(--radius-md)] text-sm text-fg-0"
+                />
+                <p className="text-[11px] text-fg-3">Rename is safe. Slug/runtime identity remain unchanged.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs text-fg-2">AI Model</label>
+                <SelectDropdown
+                  value={editModel}
+                  onChange={(nextValue) => {
+                    setEditModel(nextValue)
+                    setEditFallbacks((prev) => prev.filter((modelId) => modelId !== nextValue))
+                  }}
+                  ariaLabel="AI model"
+                  tone="field"
+                  size="md"
+                  options={modelOptions}
+                  search="auto"
+                />
+                {modelCatalogLoading && (
+                  <p className="text-[11px] text-fg-3">Refreshing model availability…</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs text-fg-2">Fallbacks</label>
+
+                <div className="flex flex-wrap gap-2">
+                  {editFallbacks.length === 0 ? (
+                    <span className="text-xs text-fg-3">None</span>
+                  ) : (
+                    editFallbacks.map((fb, idx) => {
+                      const isUnavailable = isKnownUnavailableModel(fb)
+                      return (
+                        <span
+                          key={`${fb}-${idx}`}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 px-2 py-1 rounded-[var(--radius-md)] border',
+                            isUnavailable
+                              ? 'bg-status-danger/10 border-status-danger/40'
+                              : 'bg-bg-3 border-bd-0'
+                          )}
+                        >
+                          <ModelBadge modelId={fb} size="sm" />
+                          {isUnavailable && (
+                            <span className="text-[10px] uppercase tracking-wide text-status-danger">Unavailable</span>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (idx === 0) return
+                              setEditFallbacks((prev) => {
+                                const next = [...prev]
+                                const tmp = next[idx - 1]
+                                next[idx - 1] = next[idx]
+                                next[idx] = tmp
+                                return next
+                              })
+                            }}
+                            className={cn(
+                              'px-1 py-0.5 text-xs rounded bg-bg-2 border border-bd-0 hover:border-bd-1',
+                              idx === 0 && 'opacity-40 pointer-events-none'
+                            )}
+                            title="Move up"
+                          >
+                            ↑
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (idx === editFallbacks.length - 1) return
+                              setEditFallbacks((prev) => {
+                                const next = [...prev]
+                                const tmp = next[idx + 1]
+                                next[idx + 1] = next[idx]
+                                next[idx] = tmp
+                                return next
+                              })
+                            }}
+                            className={cn(
+                              'px-1 py-0.5 text-xs rounded bg-bg-2 border border-bd-0 hover:border-bd-1',
+                              idx === editFallbacks.length - 1 && 'opacity-40 pointer-events-none'
+                            )}
+                            title="Move down"
+                          >
+                            ↓
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setEditFallbacks((prev) => prev.filter((_, i) => i !== idx))}
+                            className="px-1 py-0.5 text-xs rounded bg-bg-2 border border-bd-0 hover:border-bd-1"
+                            title="Remove"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      )
+                    })
+                  )}
+                </div>
+
+                <SelectDropdown
+                  value={null}
+                  onChange={(nextValue) => setEditFallbacks((prev) => [...prev, nextValue])}
+                  ariaLabel="Add fallback model"
+                  tone="field"
+                  size="md"
+                  placeholder="Add fallback..."
+                  options={fallbackModelOptions}
+                  disabled={fallbackModelOptions.length === 0}
+                  search="auto"
+                  emptyMessage="No more models available"
+                />
+
+                <p className="text-[11px] text-fg-3">Tried in order if primary fails. Stored as a JSON array of model IDs.</p>
+              </div>
+
+              {(primaryModelUnavailable || unavailableFallbackIds.length > 0) && (
+                <div className="rounded-[var(--radius-md)] border border-status-warning/40 bg-status-warning/10 p-3">
+                  <p className="text-xs text-status-warning">
+                    One or more selected models are unavailable for the configured provider.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {suggestedPrimaryModel && primaryModelUnavailable && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditModel(suggestedPrimaryModel)
+                          setEditFallbacks((prev) => prev.filter((modelId) => modelId !== suggestedPrimaryModel))
+                        }}
+                        className="px-2 py-1 text-xs rounded-[var(--radius-sm)] border border-status-warning/40 text-status-warning hover:bg-status-warning/15"
+                      >
+                        Use suggested primary
+                      </button>
+                    )}
+                    {unavailableFallbackIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setEditFallbacks((prev) => prev.filter((modelId) => !isKnownUnavailableModel(modelId)))}
+                        className="px-2 py-1 text-xs rounded-[var(--radius-sm)] border border-status-warning/40 text-status-warning hover:bg-status-warning/15"
+                      >
+                        Remove unavailable fallbacks
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs text-fg-2">Role</label>
+                  <input
+                    value={editRole}
+                    onChange={(e) => setEditRole(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-bg-2 border border-bd-0 rounded-[var(--radius-md)] text-sm text-fg-0"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-fg-2">Station</label>
+                  <SelectDropdown
+                    value={editStation}
+                    onChange={setEditStation}
+                    ariaLabel="Agent station"
+                    tone="field"
+                    size="md"
+                    options={stationOptions}
+                    search="auto"
+                    footerAction={{
+                      label: '+ Create new...',
+                      onClick: () => setShowCreateStation(true),
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs text-fg-2">WIP Limit</label>
+                  <input
+                    type="number"
+                    value={editWipLimit}
+                    onChange={(e) => setEditWipLimit(parseInt(e.target.value || '0', 10))}
+                    className="w-full px-2 py-1.5 bg-bg-2 border border-bd-0 rounded-[var(--radius-md)] text-sm text-fg-0"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-fg-2">Session Key</label>
+                  <input
+                    value={editSessionKey}
+                    onChange={(e) => setEditSessionKey(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-bg-2 border border-bd-0 rounded-[var(--radius-md)] text-sm text-fg-0 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs text-fg-2">Capabilities</label>
+                <div className="flex flex-wrap gap-2">
+                  {CAPABILITY_OPTIONS.map((cap) => (
+                    <button
+                      key={cap}
+                      type="button"
+                      onClick={() => setEditCaps((prev) => ({ ...prev, [cap]: !prev[cap] }))}
+                      className={cn(
+                        'px-2 py-1 text-xs rounded border transition-colors',
+                        editCaps[cap]
+                          ? 'bg-status-progress/10 text-status-progress border-status-progress/30'
+                          : 'bg-bg-3 text-fg-2 border-bd-0 hover:border-bd-1'
+                      )}
+                    >
+                      {cap}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {!canSaveConfiguration && (
+                <p className="text-xs text-status-warning">
+                  Fix unavailable primary/fallback models before saving this agent.
+                </p>
+              )}
+
+              <div className="pt-2">
+                <button
+                  disabled={!canSaveConfiguration}
+                  onClick={() => onEdit({
+                    displayName: editDisplayName.trim(),
+                    role: editRole,
+                    station: editStation,
+                    wipLimit: editWipLimit,
+                    sessionKey: editSessionKey,
+                    capabilities: editCaps,
+                    model: editModel,
+                    fallbacks: editFallbacks,
+                  })}
+                  className={cn(
+                    'px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] border transition-colors',
+                    canSaveConfiguration
+                      ? 'bg-status-warning/10 text-status-warning border-status-warning/30 hover:bg-status-warning/20'
+                      : 'bg-bg-3 text-fg-3 border-bd-0 cursor-not-allowed'
+                  )}
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </PageSection>
+        </>
+      )}
+
       <SkillSelector
         isOpen={showSkillSelector}
         onClose={() => setShowSkillSelector(false)}
@@ -1550,281 +2032,6 @@ function AgentDetail({
           onDuplicateSkills(skillIds)
         }}
       />
-
-      {/* Current Work */}
-      <PageSection
-        title="Current Work"
-        description={`${assignedOps.filter((op) => op.status === 'in_progress').length} in progress`}
-      >
-        <div className="space-y-2">
-          {assignedOps.map((op) => (
-            <div
-              key={op.id}
-              className="flex items-center justify-between p-3 bg-bg-3 rounded-[var(--radius-md)] border border-bd-0"
-            >
-              <div className="min-w-0">
-                <p className="text-sm text-fg-0 truncate">{op.title}</p>
-                <p className="text-xs text-fg-2">{op.station}</p>
-              </div>
-              <span className={cn(
-                'text-xs font-medium px-2 py-0.5 rounded',
-                op.status === 'done' && 'bg-status-success/10 text-status-success',
-                op.status === 'in_progress' && 'bg-status-progress/10 text-status-progress',
-                op.status === 'blocked' && 'bg-status-danger/10 text-status-danger'
-              )}>
-                {op.status.replace('_', ' ')}
-              </span>
-            </div>
-          ))}
-          {assignedOps.length === 0 && (
-            <p className="text-sm text-fg-2">No assigned operations</p>
-          )}
-        </div>
-      </PageSection>
-
-      {/* Capabilities */}
-      <PageSection title="Capabilities">
-        <div className="flex flex-wrap gap-2">
-          {Object.entries(agent.capabilities)
-            .filter(([_, enabled]) => enabled)
-            .map(([cap]) => (
-              <span
-                key={cap}
-                className="px-2 py-1 text-xs bg-bg-3 rounded text-fg-1 border border-bd-0"
-              >
-                {cap}
-              </span>
-            ))}
-        </div>
-      </PageSection>
-
-      {/* Metadata */}
-      <PageSection title="Details">
-        <dl className="grid grid-cols-2 gap-2 text-sm">
-          <dt className="text-fg-2">Display Name</dt>
-          <dd className="text-fg-1">{agent.displayName}</dd>
-          <dt className="text-fg-2">Slug (immutable)</dt>
-          <dd className="text-fg-1 font-mono text-xs truncate">{agent.slug}</dd>
-          <dt className="text-fg-2">Runtime ID (immutable)</dt>
-          <dd className="text-fg-1 font-mono text-xs truncate">{agent.runtimeAgentId}</dd>
-          <dt className="text-fg-2">Name Source</dt>
-          <dd className="text-fg-1 text-xs uppercase">{agent.nameSource}</dd>
-          <dt className="text-fg-2">WIP Limit</dt>
-          <dd className="text-fg-1 font-mono">{agent.wipLimit}</dd>
-          <dt className="text-fg-2">Session Key</dt>
-          <dd className="text-fg-1 font-mono text-xs truncate">{agent.sessionKey}</dd>
-          <dt className="text-fg-2">Last Heartbeat</dt>
-          <dd className="text-fg-1 font-mono text-xs">
-            {agent.lastHeartbeatAt ? formatRelativeTime(agent.lastHeartbeatAt) : 'Never'}
-          </dd>
-          <dt className="text-fg-2">Registered</dt>
-          <dd className="text-fg-1 font-mono text-xs">{new Date(agent.createdAt).toLocaleDateString()}</dd>
-        </dl>
-      </PageSection>
-
-      {/* Edit */}
-      <PageSection title="Edit Configuration" description="Requires typed confirmation">
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <label className="text-xs text-fg-2">Display Name</label>
-            <input
-              value={editDisplayName}
-              onChange={(e) => setEditDisplayName(e.target.value)}
-              className="w-full px-2 py-1.5 bg-bg-2 border border-bd-0 rounded-[var(--radius-md)] text-sm text-fg-0"
-            />
-            <p className="text-[11px] text-fg-3">Rename is safe. Slug/runtime identity remain unchanged.</p>
-          </div>
-
-          {/* Model Selection */}
-          <div className="space-y-2">
-            <label className="text-xs text-fg-2">AI Model</label>
-            <SelectDropdown
-              value={editModel}
-              onChange={(nextValue) => {
-                setEditModel(nextValue)
-                setEditFallbacks((prev) => prev.filter((modelId) => modelId !== nextValue))
-              }}
-              ariaLabel="AI model"
-              tone="field"
-              size="md"
-              options={modelOptions}
-              search="auto"
-            />
-          </div>
-
-          {/* Fallbacks */}
-          <div className="space-y-2">
-            <label className="text-xs text-fg-2">Fallbacks</label>
-
-            <div className="flex flex-wrap gap-2">
-              {editFallbacks.length === 0 ? (
-                <span className="text-xs text-fg-3">None</span>
-              ) : (
-                editFallbacks.map((fb, idx) => (
-                  <span
-                    key={`${fb}-${idx}`}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 bg-bg-3 rounded-[var(--radius-md)] border border-bd-0"
-                  >
-                    <ModelBadge modelId={fb} size="sm" />
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (idx === 0) return
-                        setEditFallbacks((prev) => {
-                          const next = [...prev]
-                          const tmp = next[idx - 1]
-                          next[idx - 1] = next[idx]
-                          next[idx] = tmp
-                          return next
-                        })
-                      }}
-                      className={cn(
-                        'px-1 py-0.5 text-xs rounded bg-bg-2 border border-bd-0 hover:border-bd-1',
-                        idx === 0 && 'opacity-40 pointer-events-none'
-                      )}
-                      title="Move up"
-                    >
-                      ↑
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (idx === editFallbacks.length - 1) return
-                        setEditFallbacks((prev) => {
-                          const next = [...prev]
-                          const tmp = next[idx + 1]
-                          next[idx + 1] = next[idx]
-                          next[idx] = tmp
-                          return next
-                        })
-                      }}
-                      className={cn(
-                        'px-1 py-0.5 text-xs rounded bg-bg-2 border border-bd-0 hover:border-bd-1',
-                        idx === editFallbacks.length - 1 && 'opacity-40 pointer-events-none'
-                      )}
-                      title="Move down"
-                    >
-                      ↓
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setEditFallbacks((prev) => prev.filter((_, i) => i !== idx))}
-                      className="px-1 py-0.5 text-xs rounded bg-bg-2 border border-bd-0 hover:border-bd-1"
-                      title="Remove"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))
-              )}
-            </div>
-
-            <SelectDropdown
-              value={null}
-              onChange={(nextValue) => setEditFallbacks((prev) => [...prev, nextValue])}
-              ariaLabel="Add fallback model"
-              tone="field"
-              size="md"
-              placeholder="Add fallback..."
-              options={fallbackModelOptions}
-              disabled={fallbackModelOptions.length === 0}
-              search="auto"
-              emptyMessage="No more models available"
-            />
-
-            <p className="text-[11px] text-fg-3">Tried in order if primary fails. Stored as a JSON array of model IDs.</p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="text-xs text-fg-2">Role</label>
-              <input
-                value={editRole}
-                onChange={(e) => setEditRole(e.target.value)}
-                className="w-full px-2 py-1.5 bg-bg-2 border border-bd-0 rounded-[var(--radius-md)] text-sm text-fg-0"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-fg-2">Station</label>
-              <SelectDropdown
-                value={editStation}
-                onChange={setEditStation}
-                ariaLabel="Agent station"
-                tone="field"
-                size="md"
-                options={stationOptions}
-                search="auto"
-                footerAction={{
-                  label: '+ Create new...',
-                  onClick: () => setShowCreateStation(true),
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="text-xs text-fg-2">WIP Limit</label>
-              <input
-                type="number"
-                value={editWipLimit}
-                onChange={(e) => setEditWipLimit(parseInt(e.target.value || '0', 10))}
-                className="w-full px-2 py-1.5 bg-bg-2 border border-bd-0 rounded-[var(--radius-md)] text-sm text-fg-0"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-fg-2">Session Key</label>
-              <input
-                value={editSessionKey}
-                onChange={(e) => setEditSessionKey(e.target.value)}
-                className="w-full px-2 py-1.5 bg-bg-2 border border-bd-0 rounded-[var(--radius-md)] text-sm text-fg-0 font-mono"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs text-fg-2">Capabilities</label>
-            <div className="flex flex-wrap gap-2">
-              {CAPABILITY_OPTIONS.map((cap) => (
-                <button
-                  key={cap}
-                  type="button"
-                  onClick={() => setEditCaps((prev) => ({ ...prev, [cap]: !prev[cap] }))}
-                  className={cn(
-                    'px-2 py-1 text-xs rounded border transition-colors',
-                    editCaps[cap]
-                      ? 'bg-status-progress/10 text-status-progress border-status-progress/30'
-                      : 'bg-bg-3 text-fg-2 border-bd-0 hover:border-bd-1'
-                  )}
-                >
-                  {cap}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="pt-2">
-            <button
-              onClick={() => onEdit({
-                displayName: editDisplayName.trim(),
-                role: editRole,
-                station: editStation,
-                wipLimit: editWipLimit,
-                sessionKey: editSessionKey,
-                capabilities: editCaps,
-                model: editModel,
-                fallbacks: editFallbacks,
-              })}
-              className="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-status-warning/10 text-status-warning border border-status-warning/30 hover:bg-status-warning/20 transition-colors"
-            >
-              Save Changes
-            </button>
-          </div>
-        </div>
-      </PageSection>
 
       <StationUpsertModal
         open={showCreateStation}

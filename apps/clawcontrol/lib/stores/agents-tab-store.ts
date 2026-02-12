@@ -35,7 +35,7 @@ async function fetchAgentsTabData(): Promise<{ agents: AgentDTO[]; operations: O
     agentsApi.list({
       mode: 'light',
       includeSessionOverlay: false,
-      includeModelOverlay: false,
+      includeModelOverlay: true,
       syncSessions: false,
       cacheTtlMs: 5000,
     }),

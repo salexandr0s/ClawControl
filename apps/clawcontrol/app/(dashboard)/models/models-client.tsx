@@ -13,6 +13,7 @@ import {
   HttpError,
 } from '@/lib/http'
 import { LoadingState } from '@/components/ui/loading-state'
+import { ActionConfirmModal } from '@/components/ui/action-confirm-modal'
 import { cn } from '@/lib/utils'
 import { usePageReadyTiming } from '@/lib/perf/client-timing'
 import { ProviderLogo } from '@/components/provider-logo'
@@ -50,6 +51,38 @@ type ModelsState = {
 
 type NoticeTone = 'success' | 'warning'
 
+type RemovalConfirmState =
+  | {
+      kind: 'model'
+      model: ModelListItem
+      descriptor: string
+    }
+  | {
+      kind: 'provider'
+      provider: string
+      removableCount: number
+    }
+
+function hasFallbackTag(model: ModelListItem): boolean {
+  return model.tags.some((tag) => tag.startsWith('fallback'))
+}
+
+function hasAliasTag(model: ModelListItem): boolean {
+  return model.tags.some((tag) => tag.startsWith('alias:'))
+}
+
+function canRemoveConfiguredModel(model: ModelListItem): boolean {
+  if (model.tags.includes('default')) return false
+  return hasFallbackTag(model) || hasAliasTag(model)
+}
+
+function removalDescription(model: ModelListItem): string {
+  const parts: string[] = []
+  if (hasFallbackTag(model)) parts.push('fallback')
+  if (hasAliasTag(model)) parts.push('alias')
+  return parts.join(' + ')
+}
+
 export function ModelsClient() {
   const [state, setState] = useState<ModelsState>({
     isLoading: true,
@@ -64,6 +97,10 @@ export function ModelsClient() {
   const [addModalInitialProviderId, setAddModalInitialProviderId] = useState<string | null>(null)
   const [addModalInitialAuthMethod, setAddModalInitialAuthMethod] = useState<ModelAuthMethod | null>(null)
   const [notice, setNotice] = useState<{ message: string; tone: NoticeTone } | null>(null)
+  const [removingModelKeys, setRemovingModelKeys] = useState<Set<string>>(new Set())
+  const [removingProviders, setRemovingProviders] = useState<Set<string>>(new Set())
+  const [removalConfirm, setRemovalConfirm] = useState<RemovalConfirmState | null>(null)
+  const [isConfirmingRemoval, setIsConfirmingRemoval] = useState(false)
 
   const fetchData = useCallback(async (isRefresh = false) => {
     setState((prev) => ({
@@ -197,6 +234,139 @@ export function ModelsClient() {
       7000
     )
   }
+
+  const handleRemoveModel = useCallback(async (model: ModelListItem, skipConfirm = false) => {
+    if (!canRemoveConfiguredModel(model)) {
+      showNotice(
+        `Model ${model.key} cannot be removed directly. Only fallback/alias entries are removable here.`,
+        'warning',
+        6000
+      )
+      return
+    }
+
+    if (!skipConfirm) {
+      setRemovalConfirm({
+        kind: 'model',
+        model,
+        descriptor: removalDescription(model),
+      })
+      return
+    }
+
+    setRemovingModelKeys((prev) => {
+      const next = new Set(prev)
+      next.add(model.key)
+      return next
+    })
+
+    try {
+      const result = await openclawModelsApi.removeModel({ modelKey: model.key })
+      showNotice(
+        `Removed ${result.data.removedActions} reference(s) for ${model.key}.`
+      )
+      await fetchData(true)
+    } catch (err) {
+      const message = err instanceof HttpError ? err.message : `Failed to remove ${model.key}`
+      showNotice(message, 'warning', 7000)
+    } finally {
+      setRemovingModelKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(model.key)
+        return next
+      })
+    }
+  }, [fetchData, showNotice])
+
+  const handleClearProviderModels = useCallback(async (
+    provider: string,
+    removableCount: number,
+    skipConfirm = false
+  ) => {
+    if (removableCount <= 0) {
+      showNotice(`No removable configured model entries for provider "${provider}".`, 'warning', 6000)
+      return
+    }
+
+    if (!skipConfirm) {
+      setRemovalConfirm({
+        kind: 'provider',
+        provider,
+        removableCount,
+      })
+      return
+    }
+
+    setRemovingProviders((prev) => {
+      const next = new Set(prev)
+      next.add(provider)
+      return next
+    })
+
+    try {
+      const result = await openclawModelsApi.removeProviderModels({ provider })
+      if (result.data.removedActions === 0) {
+        showNotice(
+          `No removable entries were found for provider "${provider}".`,
+          'warning',
+          6000
+        )
+      } else {
+        showNotice(
+          `Removed ${result.data.removedModels} model entr${result.data.removedModels === 1 ? 'y' : 'ies'} from "${provider}".`
+        )
+      }
+      await fetchData(true)
+    } catch (err) {
+      const message = err instanceof HttpError ? err.message : `Failed to clear provider "${provider}"`
+      showNotice(message, 'warning', 7000)
+    } finally {
+      setRemovingProviders((prev) => {
+        const next = new Set(prev)
+        next.delete(provider)
+        return next
+      })
+    }
+  }, [fetchData, showNotice])
+
+  const closeRemovalConfirm = useCallback(() => {
+    if (isConfirmingRemoval) return
+    setRemovalConfirm(null)
+  }, [isConfirmingRemoval])
+
+  const handleConfirmRemoval = useCallback(async () => {
+    if (!removalConfirm) return
+
+    setIsConfirmingRemoval(true)
+    try {
+      if (removalConfirm.kind === 'model') {
+        await handleRemoveModel(removalConfirm.model, true)
+      } else {
+        await handleClearProviderModels(
+          removalConfirm.provider,
+          removalConfirm.removableCount,
+          true
+        )
+      }
+      setRemovalConfirm(null)
+    } finally {
+      setIsConfirmingRemoval(false)
+    }
+  }, [removalConfirm, handleRemoveModel, handleClearProviderModels])
+
+  const removalConfirmTitle = removalConfirm
+    ? (removalConfirm.kind === 'model' ? 'Remove Model Reference' : 'Clear Provider Models')
+    : ''
+  const removalConfirmDescription = removalConfirm
+    ? (removalConfirm.kind === 'model'
+      ? `Remove "${removalConfirm.model.key}" from configured ${removalConfirm.descriptor} entries?`
+      : `Clear ${removalConfirm.removableCount} removable model entr${
+        removalConfirm.removableCount === 1 ? 'y' : 'ies'
+      } for provider "${removalConfirm.provider}"?`)
+    : ''
+  const removalConfirmActionLabel = removalConfirm
+    ? (removalConfirm.kind === 'model' ? 'Remove Model' : 'Clear Provider Models')
+    : 'Confirm'
 
   return (
     <div className="w-full space-y-6">
@@ -332,6 +502,9 @@ export function ModelsClient() {
                 const providerModels = modelsByProvider[provider] ?? []
                 const providerAuth = authByProvider.get(provider)
                 const isExpanded = expandedProviders.has(provider)
+                const removableProviderModels = providerModels.filter(canRemoveConfiguredModel)
+                const removableProviderModelCount = removableProviderModels.length
+                const isProviderRemoving = removingProviders.has(provider)
 
                 return (
                   <div key={provider} className="bg-bg-3 rounded-[var(--radius-md)] overflow-hidden">
@@ -358,6 +531,21 @@ export function ModelsClient() {
                     {/* Models List */}
                     {isExpanded && (
                       <div className="bg-bg-2/50">
+                        {removableProviderModelCount > 0 && (
+                          <div className="px-4 py-2 border-b border-bg-3 flex justify-end">
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="danger"
+                              disabled={isProviderRemoving}
+                              onClick={() => handleClearProviderModels(provider, removableProviderModelCount)}
+                            >
+                              {isProviderRemoving
+                                ? 'Removing...'
+                                : `Clear Provider Models (${removableProviderModelCount})`}
+                            </Button>
+                          </div>
+                        )}
                         {providerModels.length > 0 ? (
                           providerModels.map((model, idx) => (
                             <ModelRow
@@ -367,6 +555,8 @@ export function ModelsClient() {
                               providerAuth={providerAuth}
                               isLast={idx === providerModels.length - 1}
                               onFixMissing={handleMissingModelFix}
+                              onRemoveModel={handleRemoveModel}
+                              isRemoving={removingModelKeys.has(model.key)}
                             />
                           ))
                         ) : (
@@ -415,6 +605,19 @@ export function ModelsClient() {
           showNotice('Provider authentication updated')
           await fetchData(true)
         }}
+      />
+
+      <ActionConfirmModal
+        open={removalConfirm !== null}
+        onClose={closeRemovalConfirm}
+        onConfirm={handleConfirmRemoval}
+        title={removalConfirmTitle}
+        description={removalConfirmDescription}
+        confirmLabel={isConfirmingRemoval ? 'Removing...' : removalConfirmActionLabel}
+        isLoading={isConfirmingRemoval}
+        intent="warning"
+        notice="This updates OpenClaw model configuration immediately."
+        showCloseButton={!isConfirmingRemoval}
       />
     </div>
   )
@@ -568,12 +771,16 @@ function ModelRow({
   providerAuth,
   isLast,
   onFixMissing,
+  onRemoveModel,
+  isRemoving,
 }: {
   model: ModelListItem
   provider: string
   providerAuth?: NormalizedProviderAuth
   isLast: boolean
   onFixMissing: (model: ModelListItem, provider: string, providerAuth?: NormalizedProviderAuth) => void
+  onRemoveModel: (model: ModelListItem) => void
+  isRemoving: boolean
 }) {
   const isDefault = model.tags.includes('default')
   const isFallback = model.tags.some((t) => t.startsWith('fallback'))
@@ -581,6 +788,7 @@ function ModelRow({
   const missingModelAuthAction = providerAuth
     ? getAuthAction(providerAuth.status, providerAuth.supportsOauth)
     : null
+  const canRemoveModel = canRemoveConfiguredModel(model)
 
   return (
     <div className={cn(
@@ -660,6 +868,17 @@ function ModelRow({
             onClick={() => onFixMissing(model, provider, providerAuth)}
           >
             {missingModelAuthAction?.label ?? 'How to fix'}
+          </Button>
+        )}
+        {canRemoveModel && (
+          <Button
+            type="button"
+            size="xs"
+            variant="danger"
+            disabled={isRemoving}
+            onClick={() => onRemoveModel(model)}
+          >
+            {isRemoving ? 'Removing...' : 'Remove'}
           </Button>
         )}
       </div>

@@ -79,6 +79,13 @@ describe('button and toggle style contract', () => {
       expect(content, `${relativePath} must use SegmentedToggle`).toMatch(/\bSegmentedToggle\b/)
     }
   })
+
+  it('keeps the Agents List/Hierarchy selector on canonical segmented toggle labels', () => {
+    const content = fileContent('app/(dashboard)/agents/agents-client.tsx')
+    expect(content).toContain('ariaLabel="Agent view"')
+    expect(content).toContain("{ value: 'list', label: 'List' }")
+    expect(content).toContain("{ value: 'hierarchy', label: 'Hierarchy' }")
+  })
 })
 
 describe('ui primitive contracts', () => {

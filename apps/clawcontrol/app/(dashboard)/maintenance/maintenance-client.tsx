@@ -149,6 +149,9 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
   const [errorSummaryLoading, setErrorSummaryLoading] = useState(false)
   const [errorSignaturesLoading, setErrorSignaturesLoading] = useState(false)
   const [includeRawEvidence, setIncludeRawEvidence] = useState(false)
+  const [drawerIncludeRawEvidence, setDrawerIncludeRawEvidence] = useState(false)
+  const [drawerRawEvidenceByHash, setDrawerRawEvidenceByHash] = useState<Record<string, string>>({})
+  const [drawerRawEvidenceLoading, setDrawerRawEvidenceLoading] = useState(false)
   const [selectedErrorHash, setSelectedErrorHash] = useState<string | null>(null)
   const [remediationState, setRemediationState] = useState<{
     signatureHash: string
@@ -166,6 +169,14 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
   const selectedErrorSignature = selectedErrorHash
     ? errorSignatures.find((signature) => signature.signatureHash === selectedErrorHash) ?? null
     : null
+  const selectedRawEvidence = selectedErrorSignature
+    ? (selectedErrorSignature.rawRedactedSample ?? drawerRawEvidenceByHash[selectedErrorSignature.signatureHash] ?? null)
+    : null
+  const selectedEvidenceText = selectedErrorSignature
+    ? drawerIncludeRawEvidence
+      ? (selectedRawEvidence ?? selectedErrorSignature.sample)
+      : selectedErrorSignature.sample
+    : ''
 
   const protectedAction = useProtectedAction({ skipTypedConfirm })
 
@@ -257,6 +268,48 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
 
     return () => window.clearTimeout(timeoutId)
   }, [errorSignatures, refreshErrors])
+
+  useEffect(() => {
+    if (!selectedErrorHash) return
+    setDrawerIncludeRawEvidence(false)
+  }, [selectedErrorHash])
+
+  useEffect(() => {
+    if (!drawerIncludeRawEvidence || !selectedErrorSignature) return
+    if (selectedErrorSignature.rawRedactedSample) return
+    if (drawerRawEvidenceByHash[selectedErrorSignature.signatureHash]) return
+
+    let cancelled = false
+    setDrawerRawEvidenceLoading(true)
+
+    void maintenanceApi.listErrorSignatures({
+      days: 14,
+      limit: 20,
+      includeRaw: true,
+    }).then((result) => {
+      if (cancelled) return
+
+      const match = result.data.signatures.find((signature) => signature.signatureHash === selectedErrorSignature.signatureHash)
+      if (!match?.rawRedactedSample) return
+
+      setDrawerRawEvidenceByHash((prev) => ({
+        ...prev,
+        [match.signatureHash]: match.rawRedactedSample as string,
+      }))
+    }).catch((err) => {
+      if (!cancelled) {
+        console.error('Failed to load raw evidence for signature:', err)
+      }
+    }).finally(() => {
+      if (!cancelled) {
+        setDrawerRawEvidenceLoading(false)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [drawerIncludeRawEvidence, drawerRawEvidenceByHash, selectedErrorSignature])
 
   // Handle playbook click - open in drawer
   const handlePlaybookClick = useCallback(async (id: string) => {
@@ -862,6 +915,13 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
                       const commandSuggestion = signature.classification.suggestedActions.find(
                         (action) => action.kind !== 'maintenance' && typeof action.command === 'string'
                       )?.command ?? signature.classification.extractedCliCommand
+                      const evidenceText = [
+                        signature.signatureText,
+                        '',
+                        includeRawEvidence
+                          ? (signature.rawRedactedSample ?? signature.sample)
+                          : signature.sample,
+                      ].join('\n')
 
                       const isCreating = remediationState?.signatureHash === signature.signatureHash && remediationState.mode === 'create'
                       const isCreatingAndStarting = remediationState?.signatureHash === signature.signatureHash && remediationState.mode === 'create_and_start'
@@ -907,50 +967,45 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
                               </div>
                             </div>
 
-                            <div
-                              className="flex items-center gap-1.5 flex-wrap justify-end"
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              <Button
-                                size="xs"
-                                variant="primary"
-                                disabled={!!remediationState}
-                                onClick={() => void remediateError(signature.signatureHash, 'create')}
-                              >
-                                {isCreating ? <LoadingSpinner size="xs" /> : null}
-                                Create Work Order
-                              </Button>
-                              <Button
-                                size="xs"
-                                variant="secondary"
-                                disabled={!!remediationState}
-                                onClick={() => void remediateError(signature.signatureHash, 'create_and_start')}
-                              >
-                                {isCreatingAndStarting ? <LoadingSpinner size="xs" /> : null}
-                                Create + Start
-                              </Button>
-                              {hasMaintenanceSuggestion ? (
+                            <div className="flex flex-col items-end gap-1.5 shrink-0" onClick={(event) => event.stopPropagation()}>
+                              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                <Button
+                                  size="xs"
+                                  variant="primary"
+                                  disabled={!!remediationState}
+                                  onClick={() => void remediateError(signature.signatureHash, 'create')}
+                                >
+                                  {isCreating ? <LoadingSpinner size="xs" /> : null}
+                                  Create Work Order
+                                </Button>
                                 <Button
                                   size="xs"
                                   variant="secondary"
-                                  disabled={runningAction !== null}
-                                  onClick={() => runSuggestedMaintenanceAction(signature)}
+                                  disabled={!!remediationState}
+                                  onClick={() => void remediateError(signature.signatureHash, 'create_and_start')}
                                 >
-                                  Run Suggested Fix
+                                  {isCreatingAndStarting ? <LoadingSpinner size="xs" /> : null}
+                                  Create + Start
                                 </Button>
+                                <CopyButton text={evidenceText} className="h-[26px]" />
+                              </div>
+
+                              {hasMaintenanceSuggestion ? (
+                                <div className="flex items-center gap-1.5">
+                                  <Button
+                                    size="xs"
+                                    variant="secondary"
+                                    disabled={runningAction !== null}
+                                    onClick={() => runSuggestedMaintenanceAction(signature)}
+                                  >
+                                    Run Suggested Fix
+                                  </Button>
+                                </div>
                               ) : commandSuggestion ? (
-                                <CopyButton text={commandSuggestion} className="h-[26px]" />
+                                <div className="flex items-center gap-1.5">
+                                  <CopyButton text={commandSuggestion} className="h-[26px]" />
+                                </div>
                               ) : null}
-                              <CopyButton
-                                text={[
-                                  signature.signatureText,
-                                  '',
-                                  includeRawEvidence
-                                    ? (signature.rawRedactedSample ?? signature.sample)
-                                    : signature.sample,
-                                ].join('\n')}
-                                className="h-[26px]"
-                              />
                             </div>
                           </div>
                         </button>
@@ -1039,31 +1094,30 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
                   <h5 className="text-xs font-medium text-fg-1 uppercase tracking-wide">Evidence</h5>
                   <div className="flex items-center gap-2">
                     <Button
-                      onClick={() => setIncludeRawEvidence(false)}
+                      onClick={() => setDrawerIncludeRawEvidence(false)}
                       size="xs"
-                      variant={includeRawEvidence ? 'secondary' : 'primary'}
+                      variant={drawerIncludeRawEvidence ? 'secondary' : 'primary'}
                     >
                       Sanitized
                     </Button>
                     <Button
-                      onClick={() => setIncludeRawEvidence(true)}
+                      onClick={() => setDrawerIncludeRawEvidence(true)}
                       size="xs"
-                      variant={includeRawEvidence ? 'primary' : 'secondary'}
+                      variant={drawerIncludeRawEvidence ? 'primary' : 'secondary'}
                     >
                       Raw (Redacted)
                     </Button>
                     <CopyButton
-                      text={includeRawEvidence
-                        ? (selectedErrorSignature.rawRedactedSample ?? selectedErrorSignature.sample)
-                        : selectedErrorSignature.sample}
+                      text={selectedEvidenceText}
                       className="h-[26px]"
                     />
                   </div>
                 </div>
+                {drawerIncludeRawEvidence && drawerRawEvidenceLoading && !selectedRawEvidence ? (
+                  <div className="text-[11px] text-fg-3">Loading raw redacted evidence...</div>
+                ) : null}
                 <pre className="p-3 rounded border border-bd-0 bg-bg-2/70 text-xs text-fg-1 whitespace-pre-wrap break-words">
-                  {includeRawEvidence
-                    ? (selectedErrorSignature.rawRedactedSample ?? selectedErrorSignature.sample)
-                    : selectedErrorSignature.sample}
+                  {selectedEvidenceText}
                 </pre>
               </div>
 

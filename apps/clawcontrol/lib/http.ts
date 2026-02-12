@@ -2519,10 +2519,36 @@ export interface AvailableModelProvider {
   }
 }
 
+export interface RemoveConfiguredModelResult {
+  mode: 'model'
+  modelKey: string
+  provider: string | null
+  removedActions: number
+}
+
+export interface RemoveProviderModelsResult {
+  mode: 'provider'
+  provider: string
+  removedModels: number
+  removedActions: number
+}
+
 export const openclawModelsApi = {
   getAvailable: () =>
     apiGet<{ data: { providers: AvailableModelProvider[] } }>('/api/openclaw/models/available'),
 
   add: (body: { provider: string; authMethod: ModelAuthMethod; apiKey?: string }) =>
     apiPost<{ data: { provider: string } }, typeof body>('/api/openclaw/models/add', body),
+
+  removeModel: (body: { modelKey: string }) =>
+    apiPost<{ data: RemoveConfiguredModelResult }, { mode: 'model'; modelKey: string }>(
+      '/api/openclaw/models/remove',
+      { mode: 'model', modelKey: body.modelKey }
+    ),
+
+  removeProviderModels: (body: { provider: string }) =>
+    apiPost<{ data: RemoveProviderModelsResult }, { mode: 'provider'; provider: string }>(
+      '/api/openclaw/models/remove',
+      { mode: 'provider', provider: body.provider }
+    ),
 }

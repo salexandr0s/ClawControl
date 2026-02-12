@@ -481,6 +481,8 @@ type DynamicCommandSpec = {
   optionalParams?: readonly string[]
   /** Parameters that are rendered as bare flags (`--flag`) when value is `true`. */
   booleanFlags?: readonly string[]
+  /** Parameters rendered as positional args instead of `--key value`. */
+  positionalParams?: readonly string[]
   danger: boolean
   description: string
   /**
@@ -507,6 +509,10 @@ const cronNameValidator = (value: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(value)
 const profileIdValidator = (value: string) => /^[a-zA-Z0-9_:-]{1,128}$/.test(value)
 
 const expiresInValidator = (value: string) => /^[0-9]{1,6}[smhdwy]$/.test(value)
+
+const modelReferenceValidator = (value: string) => /^[a-zA-Z0-9._:/-]{1,256}$/.test(value)
+
+const aliasNameValidator = (value: string) => /^[a-zA-Z0-9._:-]{1,128}$/.test(value)
 
 export const ALLOWED_DYNAMIC_COMMANDS = {
   'cron.runs': {
@@ -634,6 +640,26 @@ export const ALLOWED_DYNAMIC_COMMANDS = {
       'expires-in': expiresInValidator,
     },
   },
+  'models.fallbacks.remove': {
+    baseArgs: ['models', 'fallbacks', 'remove'],
+    requiredParams: ['model'] as const,
+    positionalParams: ['model'] as const,
+    danger: true,
+    description: 'Remove a configured model fallback (requires model id or alias)',
+    paramValidators: {
+      model: modelReferenceValidator,
+    },
+  },
+  'models.aliases.remove': {
+    baseArgs: ['models', 'aliases', 'remove'],
+    requiredParams: ['alias'] as const,
+    positionalParams: ['alias'] as const,
+    danger: true,
+    description: 'Remove a configured model alias (requires alias name)',
+    paramValidators: {
+      alias: aliasNameValidator,
+    },
+  },
 } as const satisfies Record<string, DynamicCommandSpec>
 
 export type AllowedDynamicCommandId = keyof typeof ALLOWED_DYNAMIC_COMMANDS
@@ -697,12 +723,17 @@ export async function runDynamicCommandJson<T = unknown>(
   // Build args with parameters (stable order: required then optional)
   const args: string[] = [...spec.baseArgs]
   const boolFlags = new Set(spec.booleanFlags ?? [])
+  const positionalParams = new Set(spec.positionalParams ?? [])
   for (const key of spec.requiredParams) {
     const value = params[key]
     const valid = validateParam(spec, key, value)
     if (!valid.ok) return { error: valid.error, exitCode: 1 }
     if (boolFlags.has(key)) {
       if (value === 'true') args.push(`--${key}`)
+      continue
+    }
+    if (positionalParams.has(key)) {
+      args.push(value)
       continue
     }
     args.push(`--${key}`, value)
@@ -714,6 +745,10 @@ export async function runDynamicCommandJson<T = unknown>(
     if (!valid.ok) return { error: valid.error, exitCode: 1 }
     if (boolFlags.has(key)) {
       if (value === 'true') args.push(`--${key}`)
+      continue
+    }
+    if (positionalParams.has(key)) {
+      args.push(value)
       continue
     }
     args.push(`--${key}`, value)
@@ -840,6 +875,8 @@ export async function runDynamicCommand(
 
   // Build args with parameters (stable order: required then optional)
   const args: string[] = [...spec.baseArgs]
+  const boolFlags = new Set(spec.booleanFlags ?? [])
+  const positionalParams = new Set(spec.positionalParams ?? [])
   for (const key of spec.requiredParams) {
     const value = params[key]
     const valid = validateParam(spec, key, value)
@@ -852,6 +889,14 @@ export async function runDynamicCommand(
         timedOut: false,
         error: valid.error,
       }
+    }
+    if (boolFlags.has(key)) {
+      if (value === 'true') args.push(`--${key}`)
+      continue
+    }
+    if (positionalParams.has(key)) {
+      args.push(value)
+      continue
     }
     args.push(`--${key}`, value)
   }
@@ -868,6 +913,14 @@ export async function runDynamicCommand(
         timedOut: false,
         error: valid.error,
       }
+    }
+    if (boolFlags.has(key)) {
+      if (value === 'true') args.push(`--${key}`)
+      continue
+    }
+    if (positionalParams.has(key)) {
+      args.push(value)
+      continue
     }
     args.push(`--${key}`, value)
   }
