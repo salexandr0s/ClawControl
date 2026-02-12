@@ -24,6 +24,7 @@ import {
   ShieldOff,
   Upload,
   Trash2,
+  ArrowUpRight,
 } from 'lucide-react'
 
 type OpenClawDiscoverOk = {
@@ -53,6 +54,17 @@ type OpenClawDiscoverResponse = OpenClawDiscoverOk | OpenClawDiscoverNotFound
 
 type GatewayConnectionState = 'idle' | 'testing' | 'connected' | 'auth_required' | 'offline'
 
+type DesktopUpdateInfo = {
+  currentVersion: string
+  latestVersion: string | null
+  updateAvailable: boolean
+  releaseUrl: string
+  releaseName: string | null
+  publishedAt: string | null
+  notes: string | null
+  error?: string
+}
+
 const USER_AVATAR_MAX_DIMENSION = 256
 const USER_AVATAR_MAX_DATA_URL_LENGTH = 1_500_000
 
@@ -61,6 +73,8 @@ declare global {
     clawcontrolDesktop?: {
       pickDirectory: (defaultPath?: string) => Promise<string | null>
       restartServer?: () => Promise<{ ok: boolean; message: string }>
+      checkForUpdates?: () => Promise<DesktopUpdateInfo>
+      openExternalUrl?: (url: string) => Promise<{ ok: boolean; message?: string }>
     }
   }
 }
@@ -85,6 +99,7 @@ export default function SettingsPage() {
   const [remoteAccessMode, setRemoteAccessMode] = useState<RemoteAccessMode>('local_only')
   const [pickerAvailable, setPickerAvailable] = useState(false)
   const [restartAvailable, setRestartAvailable] = useState(false)
+  const [updatesBridgeAvailable, setUpdatesBridgeAvailable] = useState(false)
   const [pickingWorkspace, setPickingWorkspace] = useState(false)
   const [testingGateway, setTestingGateway] = useState(false)
   const [gatewayConnectionState, setGatewayConnectionState] = useState<GatewayConnectionState>('idle')
@@ -97,6 +112,10 @@ export default function SettingsPage() {
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
   const [avatarError, setAvatarError] = useState<string | null>(null)
+  const [updatesLoading, setUpdatesLoading] = useState(false)
+  const [updatesError, setUpdatesError] = useState<string | null>(null)
+  const [openingRelease, setOpeningRelease] = useState(false)
+  const [desktopUpdateInfo, setDesktopUpdateInfo] = useState<DesktopUpdateInfo | null>(null)
 
   // OpenClaw auto-discovery state
   const [discoverData, setDiscoverData] = useState<OpenClawDiscoverResponse | null>(null)
@@ -114,6 +133,11 @@ export default function SettingsPage() {
     if (typeof window !== 'undefined') {
       setPickerAvailable(typeof window.clawcontrolDesktop?.pickDirectory === 'function')
       setRestartAvailable(typeof window.clawcontrolDesktop?.restartServer === 'function')
+      const canCheckUpdates = typeof window.clawcontrolDesktop?.checkForUpdates === 'function'
+      setUpdatesBridgeAvailable(canCheckUpdates)
+      if (canCheckUpdates) {
+        void handleCheckForUpdates(true)
+      }
     }
   }, [])
 
@@ -193,6 +217,53 @@ export default function SettingsPage() {
       setDiscoverData(null)
     } finally {
       setDiscoverLoading(false)
+    }
+  }
+
+  async function handleCheckForUpdates(silent = false) {
+    if (typeof window === 'undefined' || typeof window.clawcontrolDesktop?.checkForUpdates !== 'function') {
+      if (!silent) {
+        setUpdatesError('Update checks are only available in the desktop app.')
+      }
+      return
+    }
+
+    setUpdatesLoading(true)
+    if (!silent) {
+      setUpdatesError(null)
+    }
+
+    try {
+      const info = await window.clawcontrolDesktop.checkForUpdates()
+      setDesktopUpdateInfo(info)
+      setUpdatesError(info.error ?? null)
+    } catch (err) {
+      setUpdatesError(err instanceof Error ? err.message : 'Failed to check for updates')
+    } finally {
+      setUpdatesLoading(false)
+    }
+  }
+
+  async function handleOpenReleasePage() {
+    const releaseUrl = desktopUpdateInfo?.releaseUrl
+    if (!releaseUrl) return
+
+    setOpeningRelease(true)
+    setUpdatesError(null)
+
+    try {
+      if (typeof window !== 'undefined' && typeof window.clawcontrolDesktop?.openExternalUrl === 'function') {
+        const result = await window.clawcontrolDesktop.openExternalUrl(releaseUrl)
+        if (!result.ok) {
+          throw new Error(result.message ?? 'Failed to open release page')
+        }
+      } else if (typeof window !== 'undefined') {
+        window.open(releaseUrl, '_blank', 'noopener,noreferrer')
+      }
+    } catch (err) {
+      setUpdatesError(err instanceof Error ? err.message : 'Failed to open release page')
+    } finally {
+      setOpeningRelease(false)
     }
   }
 
@@ -440,6 +511,110 @@ export default function SettingsPage() {
               <span>{avatarError}</span>
             </div>
           )}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-sm font-medium text-fg-0">App Updates</h2>
+          <p className="text-xs text-fg-2 mt-0.5">
+            Check the latest desktop release and open download/update notes.
+          </p>
+        </div>
+
+        <div className="p-4 rounded-[var(--radius-lg)] bg-bg-2 border border-bd-0 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-fg-3">Installed:</span>
+                <span className="font-mono text-fg-1">
+                  {desktopUpdateInfo?.currentVersion ?? 'unknown'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-fg-3">Latest:</span>
+                <span className="font-mono text-fg-1">
+                  {desktopUpdateInfo?.latestVersion ?? 'unknown'}
+                </span>
+              </div>
+              <div className="text-xs">
+                <span
+                  className={cn(
+                    'font-medium',
+                    desktopUpdateInfo?.updateAvailable
+                      ? 'text-status-warning'
+                      : desktopUpdateInfo
+                        ? 'text-status-success'
+                        : 'text-fg-3'
+                  )}
+                >
+                  {desktopUpdateInfo?.updateAvailable
+                    ? 'Update available'
+                    : desktopUpdateInfo
+                      ? 'You are up to date'
+                      : 'Not checked yet'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => void handleCheckForUpdates(false)}
+                disabled={updatesLoading || !updatesBridgeAvailable}
+                variant="secondary"
+                size="sm"
+                className={cn((updatesLoading || !updatesBridgeAvailable) && 'text-fg-3')}
+              >
+                {updatesLoading ? <LoadingSpinner size="sm" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                {updatesLoading ? 'Checking...' : 'Check for Updates'}
+              </Button>
+
+              <Button
+                onClick={() => void handleOpenReleasePage()}
+                disabled={!desktopUpdateInfo?.releaseUrl || openingRelease || !updatesBridgeAvailable}
+                variant={desktopUpdateInfo?.updateAvailable ? 'primary' : 'secondary'}
+                size="sm"
+                className={cn((!desktopUpdateInfo?.releaseUrl || openingRelease || !updatesBridgeAvailable) && 'text-fg-3')}
+              >
+                {openingRelease ? <LoadingSpinner size="sm" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
+                {desktopUpdateInfo?.updateAvailable ? 'Update Now' : 'Open Release'}
+              </Button>
+            </div>
+          </div>
+
+          {!updatesBridgeAvailable && (
+            <p className="text-xs text-fg-3">
+              Update checks are available in the desktop app only.
+            </p>
+          )}
+
+          {desktopUpdateInfo?.publishedAt && (
+            <p className="text-xs text-fg-3">
+              Published: {new Date(desktopUpdateInfo.publishedAt).toLocaleString()}
+            </p>
+          )}
+
+          {desktopUpdateInfo?.notes && (
+            <div className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-1 p-3 space-y-1">
+              <p className="text-xs font-medium text-fg-1">
+                {desktopUpdateInfo.releaseName ?? 'Release notes'}
+              </p>
+              <p className="text-xs text-fg-2 whitespace-pre-wrap break-words">
+                {desktopUpdateInfo.notes}
+              </p>
+            </div>
+          )}
+
+          {updatesError && (
+            <div className="flex items-center gap-2 p-2 rounded bg-status-danger/10 text-status-danger text-xs">
+              <AlertCircle className="w-3 h-3 shrink-0" />
+              <span>{updatesError}</span>
+            </div>
+          )}
+
+          <p className="text-xs text-fg-3">
+            Desktop updates are delivered via GitHub Releases.
+          </p>
         </div>
       </section>
 

@@ -13,6 +13,17 @@ declare global {
     clawcontrolDesktop?: {
       pickDirectory: (defaultPath?: string) => Promise<string | null>
       restartServer?: () => Promise<{ ok: boolean; message: string }>
+      checkForUpdates?: () => Promise<{
+        currentVersion: string
+        latestVersion: string | null
+        updateAvailable: boolean
+        releaseUrl: string
+        releaseName: string | null
+        publishedAt: string | null
+        notes: string | null
+        error?: string
+      }>
+      openExternalUrl?: (url: string) => Promise<{ ok: boolean; message?: string }>
     }
   }
 }

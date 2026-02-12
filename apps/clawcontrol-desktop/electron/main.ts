@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain, nativeImage } from 'electron'
+import { app, BrowserWindow, Menu, dialog, ipcMain, nativeImage, shell } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -25,6 +25,12 @@ const SAVE_SETTINGS_CHANNEL = 'clawcontrol:save-settings'
 const GET_INIT_STATUS_CHANNEL = 'clawcontrol:get-init-status'
 const TEST_GATEWAY_CHANNEL = 'clawcontrol:test-gateway'
 const RUN_MODEL_AUTH_LOGIN_CHANNEL = 'clawcontrol:run-model-auth-login'
+const CHECK_FOR_UPDATES_CHANNEL = 'clawcontrol:check-for-updates'
+const OPEN_EXTERNAL_URL_CHANNEL = 'clawcontrol:open-external-url'
+const GITHUB_REPOSITORY = 'salexandr0s/ClawControl'
+const GITHUB_API_RELEASES_BASE = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases`
+const DEFAULT_RELEASE_PAGE_URL = `https://github.com/${GITHUB_REPOSITORY}/releases`
+const RELEASE_NOTES_MAX_LENGTH = 1600
 // Add a custom startup logo under apps/clawcontrol-desktop/assets using one of these names.
 const LOADING_LOGO_FILES = [
   'loading-logo.gif',
@@ -53,10 +59,236 @@ interface DesktopSettings {
   updatedAt?: string
 }
 
+interface DesktopUpdateState {
+  lastSeenVersion?: string
+  updatedAt?: string
+}
+
+interface GithubReleaseResponse {
+  tag_name?: string
+  html_url?: string
+  name?: string
+  body?: string
+  published_at?: string
+}
+
+interface DesktopUpdateInfo {
+  currentVersion: string
+  latestVersion: string | null
+  updateAvailable: boolean
+  releaseUrl: string
+  releaseName: string | null
+  publishedAt: string | null
+  notes: string | null
+  error?: string
+}
+
+interface OpenExternalUrlResponse {
+  ok: boolean
+  message?: string
+}
+
 function isBrokenPipeError(error: unknown): error is NodeJS.ErrnoException {
   if (!(error instanceof Error)) return false
   const maybeErrno = error as NodeJS.ErrnoException
   return maybeErrno.code === 'EPIPE' || maybeErrno.code === 'ERR_STREAM_DESTROYED'
+}
+
+function getDesktopUpdateStatePath(): string {
+  return path.join(app.getPath('userData'), 'desktop-updates.json')
+}
+
+function normalizeVersionInput(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  return trimmed.replace(/^v/i, '')
+}
+
+function parseSemver(value: string): {
+  major: number
+  minor: number
+  patch: number
+  prerelease: string | null
+} | null {
+  const normalized = normalizeVersionInput(value)
+  if (!normalized) return null
+  const match = normalized.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/)
+  if (!match) return null
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease: match[4] ?? null,
+  }
+}
+
+function compareVersions(a: string, b: string): number {
+  const aParsed = parseSemver(a)
+  const bParsed = parseSemver(b)
+
+  if (!aParsed || !bParsed) {
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+  }
+
+  if (aParsed.major !== bParsed.major) return aParsed.major - bParsed.major
+  if (aParsed.minor !== bParsed.minor) return aParsed.minor - bParsed.minor
+  if (aParsed.patch !== bParsed.patch) return aParsed.patch - bParsed.patch
+
+  if (aParsed.prerelease === bParsed.prerelease) return 0
+  if (aParsed.prerelease === null) return 1
+  if (bParsed.prerelease === null) return -1
+  return aParsed.prerelease.localeCompare(bParsed.prerelease, undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  })
+}
+
+function sanitizeReleaseNotes(input: string | null | undefined): string | null {
+  if (typeof input !== 'string') return null
+  const cleaned = input
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+  if (!cleaned) return null
+  if (cleaned.length <= RELEASE_NOTES_MAX_LENGTH) return cleaned
+  return `${cleaned.slice(0, RELEASE_NOTES_MAX_LENGTH)}…`
+}
+
+function isTrustedGithubReleaseUrl(rawUrl: string | null | undefined): boolean {
+  if (typeof rawUrl !== 'string' || rawUrl.trim().length === 0) return false
+
+  try {
+    const parsed = new URL(rawUrl)
+    const host = parsed.hostname.toLowerCase()
+    return parsed.protocol === 'https:' && (host === 'github.com' || host === 'www.github.com')
+  } catch {
+    return false
+  }
+}
+
+function readDesktopUpdateState(): DesktopUpdateState {
+  const statePath = getDesktopUpdateStatePath()
+  if (!fs.existsSync(statePath)) return {}
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>
+    return {
+      ...(typeof raw.lastSeenVersion === 'string' && raw.lastSeenVersion.trim().length > 0
+        ? { lastSeenVersion: raw.lastSeenVersion.trim() }
+        : {}),
+      ...(typeof raw.updatedAt === 'string' && raw.updatedAt.trim().length > 0
+        ? { updatedAt: raw.updatedAt.trim() }
+        : {}),
+    }
+  } catch {
+    return {}
+  }
+}
+
+function writeDesktopUpdateState(next: DesktopUpdateState): void {
+  const statePath = getDesktopUpdateStatePath()
+  const payload = {
+    ...(next.lastSeenVersion ? { lastSeenVersion: next.lastSeenVersion } : {}),
+    updatedAt: new Date().toISOString(),
+  }
+
+  fs.mkdirSync(path.dirname(statePath), { recursive: true })
+  fs.writeFileSync(statePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+}
+
+async function fetchGitHubRelease(pathname: string): Promise<GithubReleaseResponse | null> {
+  try {
+    const response = await fetch(`${GITHUB_API_RELEASES_BASE}/${pathname}`, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'ClawControl Desktop',
+      },
+    })
+
+    if (!response.ok) return null
+    const json = (await response.json()) as GithubReleaseResponse
+    return json
+  } catch {
+    return null
+  }
+}
+
+async function getDesktopUpdateInfo(): Promise<DesktopUpdateInfo> {
+  const currentVersion = app.getVersion()
+  const latestRelease = await fetchGitHubRelease('latest')
+
+  if (!latestRelease) {
+    return {
+      currentVersion,
+      latestVersion: null,
+      updateAvailable: false,
+      releaseUrl: DEFAULT_RELEASE_PAGE_URL,
+      releaseName: null,
+      publishedAt: null,
+      notes: null,
+      error: 'Unable to fetch latest release metadata.',
+    }
+  }
+
+  const latestVersion = normalizeVersionInput(latestRelease.tag_name)
+  const updateAvailable = Boolean(
+    latestVersion
+    && compareVersions(latestVersion, currentVersion) > 0
+  )
+
+  return {
+    currentVersion,
+    latestVersion,
+    updateAvailable,
+    releaseUrl: isTrustedGithubReleaseUrl(latestRelease.html_url)
+      ? (latestRelease.html_url as string)
+      : DEFAULT_RELEASE_PAGE_URL,
+    releaseName: typeof latestRelease.name === 'string' && latestRelease.name.trim().length > 0
+      ? latestRelease.name.trim()
+      : null,
+    publishedAt: typeof latestRelease.published_at === 'string' ? latestRelease.published_at : null,
+    notes: sanitizeReleaseNotes(latestRelease.body),
+  }
+}
+
+async function maybeShowWhatsNew(): Promise<void> {
+  const currentVersion = app.getVersion()
+  const state = readDesktopUpdateState()
+  const lastSeenVersion = normalizeVersionInput(state.lastSeenVersion)
+
+  if (!lastSeenVersion) {
+    writeDesktopUpdateState({ lastSeenVersion: currentVersion })
+    return
+  }
+
+  if (compareVersions(currentVersion, lastSeenVersion) <= 0) return
+
+  const release = await fetchGitHubRelease(`tags/v${currentVersion}`)
+  const releaseTitle = typeof release?.name === 'string' && release.name.trim().length > 0
+    ? release.name.trim()
+    : `ClawControl v${currentVersion}`
+  const releaseNotes = sanitizeReleaseNotes(release?.body) ?? 'No release notes were published for this version.'
+  const messageBoxOptions: Electron.MessageBoxOptions = {
+    type: 'info',
+    title: `What’s New in v${currentVersion}`,
+    message: releaseTitle,
+    detail: releaseNotes,
+    buttons: ['OK'],
+    defaultId: 0,
+    noLink: true,
+  }
+
+  try {
+    if (mainWindow) {
+      await dialog.showMessageBox(mainWindow, messageBoxOptions)
+    } else {
+      await dialog.showMessageBox(messageBoxOptions)
+    }
+  } finally {
+    writeDesktopUpdateState({ lastSeenVersion: currentVersion })
+  }
 }
 
 function installStdIoGuards(): void {
@@ -730,6 +962,7 @@ async function startApp(): Promise<void> {
     const alreadyRunning = await isClawControlServerRunning()
     if (alreadyRunning) {
       createMainWindow()
+      void maybeShowWhatsNew()
       return
     }
 
@@ -771,6 +1004,7 @@ async function startApp(): Promise<void> {
     }
 
     createMainWindow()
+    void maybeShowWhatsNew()
   })().finally(() => {
     startInFlight = null
   })
@@ -870,6 +1104,33 @@ ipcMain.handle(
     }
 
     return runModelAuthLoginInTerminal(providerId)
+  }
+)
+
+ipcMain.handle(CHECK_FOR_UPDATES_CHANNEL, async (): Promise<DesktopUpdateInfo> => {
+  return getDesktopUpdateInfo()
+})
+
+ipcMain.handle(
+  OPEN_EXTERNAL_URL_CHANNEL,
+  async (_event, payload: { url?: unknown }): Promise<OpenExternalUrlResponse> => {
+    const url = typeof payload?.url === 'string' ? payload.url.trim() : ''
+    if (!isTrustedGithubReleaseUrl(url)) {
+      return {
+        ok: false,
+        message: 'Only trusted GitHub release URLs can be opened.',
+      }
+    }
+
+    try {
+      await shell.openExternal(url)
+      return { ok: true }
+    } catch (err) {
+      return {
+        ok: false,
+        message: err instanceof Error ? err.message : 'Failed to open external URL.',
+      }
+    }
   }
 )
 

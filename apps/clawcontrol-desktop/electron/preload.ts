@@ -15,6 +15,22 @@ interface RunModelAuthLoginResponse {
   message?: string
 }
 
+interface DesktopUpdateInfo {
+  currentVersion: string
+  latestVersion: string | null
+  updateAvailable: boolean
+  releaseUrl: string
+  releaseName: string | null
+  publishedAt: string | null
+  notes: string | null
+  error?: string
+}
+
+interface OpenExternalUrlResponse {
+  ok: boolean
+  message?: string
+}
+
 interface DesktopSettingsPayload {
   gatewayHttpUrl?: string | null
   gatewayWsUrl?: string | null
@@ -50,4 +66,10 @@ contextBridge.exposeInMainWorld('clawcontrolDesktop', {
 
   runModelAuthLogin: async (providerId: string): Promise<RunModelAuthLoginResponse> =>
     ipcRenderer.invoke('clawcontrol:run-model-auth-login', { providerId }) as Promise<RunModelAuthLoginResponse>,
+
+  checkForUpdates: async (): Promise<DesktopUpdateInfo> =>
+    ipcRenderer.invoke('clawcontrol:check-for-updates') as Promise<DesktopUpdateInfo>,
+
+  openExternalUrl: async (url: string): Promise<OpenExternalUrlResponse> =>
+    ipcRenderer.invoke('clawcontrol:open-external-url', { url }) as Promise<OpenExternalUrlResponse>,
 })
