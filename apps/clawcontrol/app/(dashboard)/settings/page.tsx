@@ -518,68 +518,62 @@ export default function SettingsPage() {
         <div>
           <h2 className="text-sm font-medium text-fg-0">App Updates</h2>
           <p className="text-xs text-fg-2 mt-0.5">
-            Check the latest desktop release and open download/update notes.
+            Check latest desktop release status.
           </p>
         </div>
 
-        <div className="p-4 rounded-[var(--radius-lg)] bg-bg-2 border border-bd-0 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-fg-3">Installed:</span>
-                <span className="font-mono text-fg-1">
-                  {desktopUpdateInfo?.currentVersion ?? 'unknown'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-fg-3">Latest:</span>
-                <span className="font-mono text-fg-1">
-                  {desktopUpdateInfo?.latestVersion ?? 'unknown'}
-                </span>
-              </div>
-              <div className="text-xs">
-                <span
-                  className={cn(
-                    'font-medium',
-                    desktopUpdateInfo?.updateAvailable
-                      ? 'text-status-warning'
-                      : desktopUpdateInfo
-                        ? 'text-status-success'
-                        : 'text-fg-3'
-                  )}
-                >
-                  {desktopUpdateInfo?.updateAvailable
-                    ? 'Update available'
+        <div className="p-4 rounded-[var(--radius-lg)] bg-bg-2 border border-bd-0 space-y-3">
+          <div className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-1 p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-fg-3">Installed:</span>
+              <span className="font-mono text-fg-1">{desktopUpdateInfo?.currentVersion ?? 'unknown'}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-fg-3">Latest:</span>
+              <span className="font-mono text-fg-1">{desktopUpdateInfo?.latestVersion ?? 'unknown'}</span>
+            </div>
+            <div className="text-xs">
+              <span
+                className={cn(
+                  'font-medium',
+                  desktopUpdateInfo?.updateAvailable
+                    ? 'text-status-warning'
                     : desktopUpdateInfo
-                      ? 'You are up to date'
-                      : 'Not checked yet'}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={() => void handleCheckForUpdates(false)}
-                disabled={updatesLoading || !updatesBridgeAvailable}
-                variant="secondary"
-                size="sm"
-                className={cn((updatesLoading || !updatesBridgeAvailable) && 'text-fg-3')}
+                      ? 'text-status-success'
+                      : 'text-fg-3'
+                )}
               >
-                {updatesLoading ? <LoadingSpinner size="sm" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                {updatesLoading ? 'Checking...' : 'Check for Updates'}
-              </Button>
-
-              <Button
-                onClick={() => void handleOpenReleasePage()}
-                disabled={!desktopUpdateInfo?.releaseUrl || openingRelease || !updatesBridgeAvailable}
-                variant={desktopUpdateInfo?.updateAvailable ? 'primary' : 'secondary'}
-                size="sm"
-                className={cn((!desktopUpdateInfo?.releaseUrl || openingRelease || !updatesBridgeAvailable) && 'text-fg-3')}
-              >
-                {openingRelease ? <LoadingSpinner size="sm" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
-                {desktopUpdateInfo?.updateAvailable ? 'Update Now' : 'Open Release'}
-              </Button>
+                {desktopUpdateInfo?.updateAvailable
+                  ? 'Update available'
+                  : desktopUpdateInfo
+                    ? 'You are up to date'
+                    : 'Not checked yet'}
+              </span>
             </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => void handleCheckForUpdates(false)}
+              disabled={updatesLoading || !updatesBridgeAvailable}
+              variant="secondary"
+              size="sm"
+              className={cn((updatesLoading || !updatesBridgeAvailable) && 'text-fg-3')}
+            >
+              {updatesLoading ? <LoadingSpinner size="sm" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              {updatesLoading ? 'Checking...' : 'Check for Updates'}
+            </Button>
+
+            <Button
+              onClick={() => void handleOpenReleasePage()}
+              disabled={!desktopUpdateInfo?.releaseUrl || openingRelease || !updatesBridgeAvailable}
+              variant="secondary"
+              size="sm"
+              className={cn((!desktopUpdateInfo?.releaseUrl || openingRelease || !updatesBridgeAvailable) && 'text-fg-3')}
+            >
+              {openingRelease ? <LoadingSpinner size="sm" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
+              Open Release
+            </Button>
           </div>
 
           {!updatesBridgeAvailable && (
@@ -588,33 +582,12 @@ export default function SettingsPage() {
             </p>
           )}
 
-          {desktopUpdateInfo?.publishedAt && (
-            <p className="text-xs text-fg-3">
-              Published: {new Date(desktopUpdateInfo.publishedAt).toLocaleString()}
-            </p>
-          )}
-
-          {desktopUpdateInfo?.notes && (
-            <div className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-1 p-3 space-y-1">
-              <p className="text-xs font-medium text-fg-1">
-                {desktopUpdateInfo.releaseName ?? 'Release notes'}
-              </p>
-              <p className="text-xs text-fg-2 whitespace-pre-wrap break-words">
-                {desktopUpdateInfo.notes}
-              </p>
-            </div>
-          )}
-
           {updatesError && (
             <div className="flex items-center gap-2 p-2 rounded bg-status-danger/10 text-status-danger text-xs">
               <AlertCircle className="w-3 h-3 shrink-0" />
               <span>{updatesError}</span>
             </div>
           )}
-
-          <p className="text-xs text-fg-3">
-            Desktop updates are delivered via GitHub Releases.
-          </p>
         </div>
       </section>
 
