@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -25,6 +26,7 @@ export function ModalFrame({
   className,
   contentClassName,
 }: ModalFrameProps) {
+  const [mounted, setMounted] = useState(false)
   const contentRef = useRef<HTMLElement>(null)
 
   const handleKeyDown = useCallback(
@@ -38,6 +40,12 @@ export function ModalFrame({
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [handleKeyDown])
+
+  // Render in a portal so fixed positioning/backdrop always spans the full viewport.
+  // This avoids stacking-context / overflow clipping issues inside the dashboard shell.
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // Prevent body scroll when open
   useEffect(() => {
@@ -61,7 +69,9 @@ export function ModalFrame({
     full: 'w-[min(1200px,calc(100vw-2rem))]',
   }
 
-  return (
+  if (!mounted) return null
+
+  return createPortal(
     <div
       className={cn(
         'fixed inset-0 z-50 flex items-center justify-center p-4',
@@ -99,7 +109,8 @@ export function ModalFrame({
       >
         {children}
       </section>
-    </div>
+    </div>,
+    document.body
   )
 }
 

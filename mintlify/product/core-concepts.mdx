@@ -34,7 +34,7 @@ Protected actions use policy enforcement from `@clawcontrol/core`.
 - Policy attributes: risk level, confirmation mode, and approval requirement.
 - Confirmation modes: `NONE`, `CONFIRM`, `WO_CODE`.
 - Approval states: `pending`, `approved`, `rejected`.
-- Server routes use `withGovernor` / `enforceTypedConfirm` wrappers for enforcement.
+- Server routes enforce policy server-side using `withGovernor` (route wrapper) and `enforceActionPolicy` / `enforceGovernor` (helpers).
 
 ## Agents
 
@@ -54,11 +54,11 @@ Workspace is the controlled filesystem surface.
 
 ## Last updated
 
-2026-02-09
+2026-02-13
 
 ## Related pages
 
-- [Work Orders + Operations Feature Guide](/features/work-orders-operations)
-- [Approvals / Governor](/features/approvals-governor)
+- [Work Orders and Operations](/features/work-orders-operations)
+- [Approvals and Governance](/features/approvals-governor)
 - [Workspace Browser and Editing](/features/workspace-browser-editing)
-- [Data and Persistence](/data/persistence-and-migrations)
+- [Persistence and Migrations](/data/persistence-and-migrations)

@@ -1,14 +1,15 @@
-# Quickstart: Desktop App Run
+# Run the Desktop App
 
 This path runs ClawControl through the Electron wrapper.
 
 ## Development Run
 
 ```bash
-git clone https://github.com/salexandr0s/clawcontrol.git
-cd clawcontrol
+git clone https://github.com/salexandr0s/ClawControl.git
+cd ClawControl
 npm install
 npm run db:migrate
+npm run build --workspace=clawcontrol
 ./start.sh --desktop
 ```
 
@@ -26,10 +27,10 @@ npm run db:migrate
 
 ## Last updated
 
-2026-02-09
+2026-02-13
 
 ## Related pages
 
-- [Release Install Path](/quickstart/release-install)
+- [Install From GitHub Releases](/quickstart/release-install)
 - [Unsigned Desktop Install Guidance](/operations/unsigned-desktop-install)
-- [Remote Tunnel-only Workflow](/remote/tailscale-ssh-tunnel-only)
+- [Tailscale Tunnel (SSH Port Forwarding)](/remote/tailscale-ssh-tunnel-only)

@@ -95,7 +95,7 @@ jobs:
             ### Web Only (no Xcode required)
             ```bash
             git clone https://github.com/${{ github.repository }}.git
-            cd clawcontrol
+            cd ClawControl
             npm install && npm run db:migrate && npm run dev
             # Open http://localhost:3000
             ```
@@ -103,8 +103,9 @@ jobs:
             ### Full Setup with Launcher
             ```bash
             git clone https://github.com/${{ github.repository }}.git
-            cd clawcontrol
+            cd ClawControl
             npm install && npm run db:migrate
+            npm run build --workspace=clawcontrol
             ./start.sh --desktop
             ```
 

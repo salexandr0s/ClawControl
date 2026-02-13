@@ -1,4 +1,4 @@
-# Deployment Runbook: Publish `docs.clawcontrol.cc`
+# Publish the Docs Site (docs.clawcontrol.cc)
 
 This runbook prepares and publishes this Mintlify site under the custom domain.
 
@@ -7,9 +7,7 @@ This runbook prepares and publishes this Mintlify site under the custom domain.
 ```bash
 cd mintlify
 npm install
-npm run validate
-npm run links
-npm run a11y
+npm run check
 ```
 
 Fix all validation/link issues before publishing.
@@ -26,17 +24,14 @@ In Mintlify project settings, add `docs.clawcontrol.cc`.
 
 Mintlify will provide required DNS records. Copy exact values from dashboard.
 
-Required placeholders to replace from dashboard:
+Typically you will be asked to add:
 
-- `<MINTLIFY_DNS_TYPE_FROM_DASHBOARD>`
-- `<MINTLIFY_HOST_FROM_DASHBOARD>`
-- `<MINTLIFY_TARGET_FROM_DASHBOARD>`
-- `<MINTLIFY_TXT_NAME_FROM_DASHBOARD>`
-- `<MINTLIFY_TXT_VALUE_FROM_DASHBOARD>`
+- a CNAME record for `docs.clawcontrol.cc`
+- a TXT record used for domain verification
 
 ## 4. Configure DNS
 
-Create records in authoritative DNS zone for `clawcontrol.cc` using the exact Mintlify-provided values.
+Create the required records in the authoritative DNS zone for `clawcontrol.cc` using the exact Mintlify-provided values.
 
 Do not guess target values.
 
@@ -64,10 +59,10 @@ Confirm response matches Mintlify record target/verification values.
 
 ## Last updated
 
-2026-02-09
+2026-02-13
 
 ## Related pages
 
-- [Operations: Release Distribution + Checksums](/operations/release-distribution-checksums)
-- [Quickstart: Release Install](/quickstart/release-install)
-- [Developers: Contributing + Docs Maintenance](/developers/contributing-and-docs-maintenance)
+- [Release Artifacts and Checksums](/operations/release-distribution-checksums)
+- [Install From GitHub Releases](/quickstart/release-install)
+- [Contributing and Docs Maintenance](/developers/contributing-and-docs-maintenance)

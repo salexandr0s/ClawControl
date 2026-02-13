@@ -24,6 +24,7 @@ import {
   Radio,
   Cpu,
   GitBranch,
+  Boxes,
 } from 'lucide-react'
 import type { Route } from 'next'
 
@@ -50,6 +51,7 @@ const navItems: NavItem[] = [
   { href: '/models' as Route, label: 'Models', icon: Cpu },
   { href: '/gateway-live' as Route, label: 'Gateway', icon: Radio },
   { href: '/live' as Route, label: 'Live', icon: Activity },
+  { href: '/ascii-logo' as Route, label: 'ASCII Logo', icon: Boxes },
   { href: '/skills' as Route, label: 'Skills', icon: Sparkles },
   { href: '/plugins' as Route, label: 'Plugins', icon: Puzzle },
 ]

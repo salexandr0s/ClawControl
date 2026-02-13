@@ -1,0 +1,66 @@
+# UI Buttons and Toggles
+
+This page defines the canonical button, segmented-toggle, and dropdown/menu styles used in ClawControl.
+
+## Source of Truth
+
+- `@clawcontrol/ui` `Button` and `buttonLikeClass`
+- `@clawcontrol/ui` `SegmentedToggle`
+- `@clawcontrol/ui` `SelectDropdown` and `DropdownMenu`
+- Legacy CSS classes (`.btn-primary`, `.btn-secondary`) are compatibility-only and should not be used in new code.
+
+## Button Variants
+
+- `primary`: main positive action on a surface
+- `secondary`: neutral actions
+- `ghost`: low-emphasis actions
+- `danger`: destructive actions (delete, uninstall, hard reject)
+
+## Button Sizes
+
+- `xs`: dense controls and compact toolbars
+- `sm`: default page header actions
+- `md`: modal footer and form actions
+- `icon`: icon-only button layout
+
+## Segmented Toggles
+
+- `tone="neutral"`: tabs/view switches such as Agents/Teams/Stations or List/Hierarchy
+- `tone="accent"`: when selected state should be emphasized (for example compact layout mode toggles)
+
+## Dropdowns and Menus
+
+- `SelectDropdown`: value selection controls in toolbars, forms, modals, and cards
+  - `tone="toolbar"`: compact filter/sort controls
+  - `tone="field"`: standard form/editor controls
+  - Keyboard contract: `ArrowUp/Down`, `Enter`, `Escape`, `role="listbox"` / `role="option"`
+  - Search defaults to `search="auto"` and appears for larger option sets
+- `DropdownMenu`: action menus (for example “New File / New Folder”)
+  - Keyboard contract: `role="menu"` / `role="menuitem"`
+  - Use semantic danger menu items for destructive actions only
+  - Prefer portal-based rendering to avoid clipping in scroll containers
+
+## Do / Don't
+
+- Do use `Button` for user-facing actions on pages, drawers, and modal footers.
+- Do use `buttonLikeClass` for anchor/label elements that must look like buttons.
+- Do use `SegmentedToggle` instead of hand-rolled segmented button groups.
+- Do use `SelectDropdown` instead of native `<select>` for primary app controls.
+- Do use `DropdownMenu` instead of ad-hoc absolute-positioned popovers.
+- Don't add new `btn-primary` / `btn-secondary` usage.
+- Don't use ad-hoc action classes for non-danger actions.
+- Don't introduce new native OS dropdowns for primary app controls.
+
+## Exceptions
+
+- Tiny icon-only utility controls (dismiss, collapse, row affordances) may remain bespoke if they are not primary user actions.
+- Semantic status badges are not action buttons and are not covered by this spec.
+
+## Last updated
+
+2026-02-13
+
+## Related pages
+
+- [Repository Layout](/developers/repo-layout)
+- [Contributing and Docs Maintenance](/developers/contributing-and-docs-maintenance)

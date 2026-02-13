@@ -85,8 +85,8 @@ Some features are CLI-backed (Models, Plugins, Cron, Maintenance actions). If CL
 | `npm run lint` | Lint repository |
 | `npm run typecheck` | Type-check repository |
 | `npm run db:migrate` | Apply Prisma migrations for `clawcontrol` |
-| `./start.sh --web` | Start local web runtime |
-| `./start.sh --desktop` | Start desktop mode |
+| `./start.sh --web` | Start local web runtime (requires `npm run build --workspace=clawcontrol`) |
+| `./start.sh --desktop` | Start desktop mode (requires `npm run build --workspace=clawcontrol`) |
 | `./stop.sh` | Stop local processes |
 
 ## Documentation

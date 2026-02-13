@@ -1,0 +1,352 @@
+# Agent Templates
+
+This page defines the authoring, import, export, and validation contract for **agent templates** in ClawControl.
+
+This is the in-product template system used by the Agents/Templates UI and the `/api/agent-templates/*` endpoints.
+
+## Scope and Compatibility
+
+This reference tracks the current implementation in:
+
+- `packages/core/src/schemas/agent-template.schema.ts`
+- `apps/clawcontrol/lib/templates.ts`
+- `apps/clawcontrol/app/api/agent-templates/import/route.ts`
+- `apps/clawcontrol/app/api/agents/create-from-template/route.ts`
+
+Import supports:
+
+- pasted JSON export payload (legacy wrapper body)
+- uploaded `.json` / `.template.json` files (single template)
+- uploaded `.zip` files (single template or multi-template bundle)
+
+Export remains JSON (`<id>.template.json`) for compatibility.
+
+## Directory Structure
+
+Templates live under:
+
+- `/agent-templates/<templateId>/`
+
+Minimum required file:
+
+- `template.json`
+
+Strongly recommended files:
+
+- `SOUL.md`
+- `overlay.md`
+- `README.md`
+
+Example:
+
+```text
+/agent-templates/clawcontrol-ops-v1/
+  template.json
+  SOUL.md
+  overlay.md
+  README.md
+```
+
+Rules:
+
+- Folder name must match `template.json.id`.
+- Hidden path segments are rejected during import.
+
+## Template ID Rules (Use the Strict Form)
+
+Schema pattern allows:
+
+- `^[a-z0-9][a-z0-9-_]{1,48}$`
+
+The UI create flow enforces a stricter pattern:
+
+- `^[a-z0-9][a-z0-9-_]{1,48}[a-z0-9]$`
+
+To avoid UI/API mismatch, always use the strict form:
+
+- lowercase letters, digits, `-`, `_`
+- 3 to 50 characters
+- starts and ends with alphanumeric
+
+## `template.json` Contract
+
+Required fields:
+
+- `id` (string)
+- `name` (string)
+- `description` (string)
+- `version` (string)
+- `role` (enum)
+
+Allowed `role` values:
+
+- `CEO`
+- `BUILD`
+- `OPS`
+- `REVIEW`
+- `SPEC`
+- `QA`
+- `SHIP`
+- `COMPOUND`
+- `UPDATE`
+- `CUSTOM`
+
+No unknown top-level keys are allowed (`additionalProperties: false`).
+
+Optional fields:
+
+- `namingPattern`
+- `sessionKeyPattern`
+- `paramsSchema`
+- `render`
+- `defaults`
+- `recommendations`
+- `provisioning`
+- `author`
+- `tags`
+
+## Rendering Engine and Variables
+
+Rendering uses simple token replacement (`{{variable}}`).
+
+Supported behavior:
+
+- Direct token replacement only
+- No loops, no conditionals, no helpers
+- Unknown tokens remain literal
+
+Parameters available during create/preview:
+
+- all `defaults` values
+- all user-provided `params`
+- `agentDisplayName`
+- `agentSlug`
+- `sessionKey`
+- `agentName` (legacy alias of `agentDisplayName`)
+
+Notes:
+
+- Do not rely on `{{templateId}}` unless you explicitly provide it as a parameter.
+- Keep render targets deterministic and self-contained.
+
+## `paramsSchema` Guidance
+
+Use `paramsSchema` to define what the operator must provide.
+
+Rules:
+
+- `paramsSchema.type` should be `object`.
+- Define fields under `paramsSchema.properties`.
+- Use `paramsSchema.required` for mandatory values.
+
+Validation behavior:
+
+- Missing required runtime params blocks preview/create-from-template.
+- If `required` lists fields not in `properties`, scanner emits warnings.
+
+## Render Targets Guidance
+
+Each render target must include:
+
+- `source`
+- `destination`
+
+Source path rules:
+
+- relative path only
+- must not include `..`
+- must not include `\\`
+- must not include null bytes
+- must not start with `/`
+
+If `render.targets` is omitted, defaults are used:
+
+- `SOUL.md -> workspace/agents/{{agentSlug}}/SOUL.md`
+- `overlay.md -> workspace/agents/{{agentSlug}}.md`
+
+## Import / Export Formats
+
+Export endpoint returns JSON (downloaded as `<id>.template.json`):
+
+```json
+{
+  "templateId": "clawcontrol-build-v1",
+  "name": "ClawControl Build Template",
+  "version": "1.0.0",
+  "exportedAt": "2026-02-06T00:00:00.000Z",
+  "files": {
+    "template.json": "{...}",
+    "SOUL.md": "# ...",
+    "overlay.md": "# ...",
+    "README.md": "# ..."
+  }
+}
+```
+
+Legacy JSON API import expects a wrapper body:
+
+```json
+{
+  "template": { "...": "export payload" },
+  "typedConfirmText": "CONFIRM"
+}
+```
+
+Uploaded file types:
+
+- `.zip`
+- `.json`
+- `.template.json`
+
+### ZIP Layouts
+
+A) Single template at archive root:
+
+```text
+template.json
+SOUL.md
+overlay.md
+README.md
+```
+
+B) Single template in one top-level folder:
+
+```text
+<templateId>/template.json
+<templateId>/SOUL.md
+<templateId>/overlay.md
+```
+
+C) Bundle archive (multiple top-level template folders):
+
+```text
+alpha/template.json
+alpha/SOUL.md
+alpha/overlay.md
+beta/template.json
+beta/SOUL.md
+beta/overlay.md
+```
+
+Bundle rules:
+
+- each top-level folder must include its own `template.json`
+- duplicate template IDs across bundle entries are rejected
+- import is all-or-nothing (no partial writes)
+
+Noise entries automatically ignored:
+
+- `__MACOSX/**`
+- `.DS_Store`
+
+Unsupported or mixed layouts are rejected with a clear error.
+
+## Security and Size Limits
+
+Import hard limits:
+
+- max files: 100
+- max file size: 10 MB each
+- max total payload: 50 MB
+
+Rejected file names include:
+
+- empty names
+- absolute paths
+- any `..`
+- Windows drive paths
+- backslashes
+- null bytes
+- leading `/`
+- hidden path segments (for example `.git`)
+
+All writes are constrained by workspace path policy and allowed root areas.
+
+Validation checks include:
+
+- `template.json` exists and parses
+- schema + semantic validation
+- folder-to-id rules (for folder-based ZIP imports)
+- required source files exist:
+  - if `render.targets` is provided: all `target.source` files must exist
+  - if `render.targets` is omitted: `SOUL.md` and `overlay.md` are required
+- duplicate IDs in one bundle are rejected
+- conflicts with existing `/agent-templates/<id>` are rejected
+
+## Governance and Confirmations
+
+These actions are governor-protected:
+
+- `template.create` (caution, typed confirm)
+- `template.import` (danger, typed confirm + approval)
+- `template.delete` (danger, typed confirm + approval)
+- `template.export` (safe)
+- `agent.create_from_template` (caution, typed confirm)
+
+If governance blocks an action, the API returns policy metadata and an error (often `428` or `403`, depending on the route).
+
+## Author Checklist
+
+Before distributing a template:
+
+1. Ensure folder name equals template id exactly.
+2. Validate id against strict pattern (`^[a-z0-9][a-z0-9-_]{1,48}[a-z0-9]$`).
+3. Confirm `template.json` has only allowed keys.
+4. Ensure `paramsSchema.required` keys exist in `paramsSchema.properties`.
+5. Include `SOUL.md` and `overlay.md` sources referenced by `render.targets`.
+6. Remove unresolved placeholders you did not intend to keep literal.
+7. Add `README.md` with usage, required params, and expected outputs.
+8. Preview with `/api/agents/create-from-template/preview` using required params.
+9. Import into a clean environment to verify no id/folder mismatch issues.
+10. Export and re-import once to confirm portability.
+
+## Known Implementation Notes
+
+- Create-from-template renders previews and registers the agent, but does not persist rendered files to disk yet.
+- Export currently returns JSON payload even though import supports ZIP.
+- Treat uploaded template content as untrusted input and avoid embedding secrets.
+
+## Quick Troubleshooting
+
+`Template validation failed`
+
+- Check required keys, role enum, and unknown properties in `template.json`.
+
+`Template id must match folder`
+
+- Rename folder or update `template.json.id` to exact match.
+
+`Missing required parameters`
+
+- Provide all fields listed in `paramsSchema.required`.
+
+`Invalid file name` during import
+
+- Remove traversal, absolute, hidden, backslash, or null-byte paths.
+
+`Template already exists`
+
+- Use a new template id/versioned id (for example `clawcontrol-build-v2`).
+
+`Unsupported ZIP layout`
+
+- Use one of the supported ZIP layouts and ensure each bundle folder has `template.json`.
+
+`Duplicate template ID(s) in bundle`
+
+- Ensure each bundled template uses a unique `template.json.id`.
+
+`Missing required source file(s)`
+
+- Add all `render.targets[].source` files, or include default `SOUL.md` + `overlay.md` when `render.targets` is omitted.
+
+## Last updated
+
+2026-02-13
+
+## Related pages
+
+- [Agents, Teams, and Templates](/features/agents-hierarchy-templates)
+- [Agents, Templates, and Stations (API)](/api/agents-templates-stations)
+- [Package Artifacts](/reference/packages)
+- [Workspace Agent Generator](/reference/workspace-agent-generator)

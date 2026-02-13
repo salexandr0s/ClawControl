@@ -13,9 +13,31 @@ This page tracks key request/data paths from UI action to persistence and audit.
 ## Protected Action Flow (Typed Confirm)
 
 1. Client includes `typedConfirmText` in request body.
-2. Route calls `enforceTypedConfirm` or `withGovernor`.
-3. Invalid/missing confirmation returns `428`/`403` with policy metadata.
+2. Route enforces policy via `withGovernor` (wrapper) or `enforceActionPolicy` / `enforceGovernor` (helpers).
+3. Invalid/missing confirmation returns `403` or `428` with policy metadata (depending on the route).
 4. If allowed, action executes and logs activity/receipt data.
+
+```mermaid
+sequenceDiagram
+  participant UI as UI
+  participant API as API Route
+  participant Gov as Governor Enforcement
+  participant Repo as Repos (SQLite/FS)
+  participant Audit as Activities/Receipts
+
+  UI->>API: POST /api/... (typedConfirmText)
+  API->>Gov: withGovernor / enforceActionPolicy
+
+  alt Not allowed
+    Gov-->>API: denied (policy + reason)
+    API-->>UI: 403/428 error response
+  else Allowed
+    Gov-->>API: allowed
+    API->>Repo: mutate state
+    Repo->>Audit: write activities + receipts
+    API-->>UI: 200/201 { data }
+  end
+```
 
 ## Console Message Flow
 
@@ -39,11 +61,11 @@ This page tracks key request/data paths from UI action to persistence and audit.
 
 ## Last updated
 
-2026-02-09
+2026-02-13
 
 ## Related pages
 
-- [Approvals / Governor](/features/approvals-governor)
-- [Work Orders + Operations](/features/work-orders-operations)
-- [Maintenance / Recovery](/features/maintenance-recovery)
+- [Approvals and Governance](/features/approvals-governor)
+- [Work Orders and Operations](/features/work-orders-operations)
+- [Maintenance and Recovery](/features/maintenance-recovery)
 - [API Overview](/api/overview)

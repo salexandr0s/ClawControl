@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "mint dev",
+    "lint:content": "node scripts/docs-lint.mjs",
+    "check": "npm run lint:content && npm run validate && npm run links && npm run a11y",
     "validate": "mint validate",
     "links": "mint broken-links",
     "a11y": "mint a11y"

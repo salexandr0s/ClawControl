@@ -1,4 +1,4 @@
-# Developers: Contributing and Docs Maintenance
+# Contributing and Docs Maintenance
 
 This page defines how to maintain this Mintlify docs site.
 
@@ -18,9 +18,7 @@ When updating docs, prioritize:
 ```bash
 cd mintlify
 npm install
-npm run validate
-npm run links
-npm run a11y
+npm run check
 ```
 
 3. verify cross-links and navigation updates in `docs.json`
@@ -38,14 +36,14 @@ When release behavior changes (installation, checksums, trust model), update:
 
 - quickstart release page
 - operations release/checksum page
-- deployment runbook if publish flow changes
+- docs publishing runbook if publish flow changes
 
 ## Last updated
 
-2026-02-09
+2026-02-13
 
 ## Related pages
 
-- [Developers: Build/Test/Lint/Typecheck](/developers/build-test-lint-typecheck)
-- [Operations: Release Distribution + Checksums](/operations/release-distribution-checksums)
-- [Deployment Runbook](/deploy/publish-docs-clawcontrol-cc)
+- [Build, Test, Lint, and Typecheck](/developers/build-test-lint-typecheck)
+- [Release Artifacts and Checksums](/operations/release-distribution-checksums)
+- [Publish the Docs Site (docs.clawcontrol.cc)](/deploy/publish-docs-clawcontrol-cc)

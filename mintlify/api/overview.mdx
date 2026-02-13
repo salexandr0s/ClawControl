@@ -1,4 +1,4 @@
-# API Reference Overview
+# API Overview
 
 This section documents the implemented local API surface in `/apps/clawcontrol/app/api/**`.
 
@@ -12,11 +12,14 @@ The API is local-only and not designed for internet exposure.
 
 ## Response Conventions
 
-Most endpoints return one of:
+All endpoints return JSON.
+
+Successful responses typically return one of:
 
 - `{ "data": ... }`
 - `{ "data": ..., "meta": ... }`
-- `{ "error": "..." }`
+
+Error responses always include an `error` string and may also include `code`, `details`, or `policy` depending on the endpoint.
 
 ## Common Status Codes
 
@@ -25,9 +28,45 @@ Most endpoints return one of:
 - `400` invalid input
 - `403` forbidden (policy/gate)
 - `404` not found
-- `428` typed confirmation required
+- `428` typed confirmation required (some routes)
 - `500` server error
 - `502/503` upstream OpenClaw/gateway unavailable patterns
+
+## Policy Errors (Typed Confirm / Approval)
+
+Typed-confirm failures use error codes such as:
+
+- `TYPED_CONFIRM_REQUIRED`
+- `TYPED_CONFIRM_INVALID`
+
+Depending on the route, missing typed confirmation may return `403` or `428`.
+
+Example (wrapper-style error shape):
+
+```json
+{
+  "error": "Typed confirmation required for \"Ship work order\"",
+  "code": "TYPED_CONFIRM_REQUIRED",
+  "details": {
+    "actionKind": "work_order.ship",
+    "confirmMode": "WO_CODE",
+    "required": "WO-1234"
+  }
+}
+```
+
+Example (policy-only error shape):
+
+```json
+{
+  "error": "TYPED_CONFIRM_REQUIRED",
+  "policy": {
+    "riskLevel": "danger",
+    "confirmMode": "CONFIRM",
+    "requiresApproval": false
+  }
+}
+```
 
 ## cURL-first Example
 
@@ -37,22 +76,22 @@ curl -sS "http://127.0.0.1:3000/api/work-orders?limit=10"
 
 ## Grouped API Pages
 
-- [Config + Init](/api/config-init)
-- [OpenClaw + Console + Cron](/api/openclaw-console-cron)
-- [Work Orders + Operations + Receipts](/api/work-orders-operations-receipts)
-- [Agents + Templates + Stations](/api/agents-templates-stations)
-- [Workflows + Teams + Packages](/api/workflows-teams-packages)
-- [Plugins + Skills + Models](/api/plugins-skills-models)
-- [Workspace + Maintenance + Security + Sync](/api/workspace-maintenance-security-sync)
-- [Streaming](/api/streaming)
-- [Internal Endpoint Index](/api/internal-endpoint-index)
+- [Config and Init](/api/config-init)
+- [OpenClaw, Console, and Cron](/api/openclaw-console-cron)
+- [Work Orders, Operations, and Receipts](/api/work-orders-operations-receipts)
+- [Agents, Templates, and Stations](/api/agents-templates-stations)
+- [Workflows, Teams, and Packages](/api/workflows-teams-packages)
+- [Plugins, Skills, and Models](/api/plugins-skills-models)
+- [Workspace, Maintenance, Security, and Sync](/api/workspace-maintenance-security-sync)
+- [Streaming (SSE)](/api/streaming)
+- [Endpoint Index](/api/internal-endpoint-index)
 
 ## Last updated
 
-2026-02-09
+2026-02-13
 
 ## Related pages
 
-- [Security and Local-only Enforcement](/security/networking-local-only)
-- [Product Architecture](/product/architecture)
-- [Operations Troubleshooting](/operations/troubleshooting)
+- [Local-only Networking Enforcement](/security/networking-local-only)
+- [Architecture](/product/architecture)
+- [Troubleshooting](/operations/troubleshooting)

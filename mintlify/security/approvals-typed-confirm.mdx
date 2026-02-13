@@ -1,4 +1,4 @@
-# Security: Approval / Typed Confirm Model
+# Approval and Typed Confirm Model
 
 This page documents approval and typed confirmation enforcement.
 
@@ -11,6 +11,28 @@ This page documents approval and typed confirmation enforcement.
 ## Route-level Enforcement
 
 Mutating endpoints use server enforcement wrappers so policy cannot be bypassed from client-side UI changes.
+
+## Decision Tree (Simplified)
+
+```mermaid
+flowchart TD
+  A["Protected action request"] --> B{"Requires approval?"}
+  B -- "Yes" --> C{"Approval exists and approved?"}
+  C -- "No" --> D["Deny: APPROVAL_REQUIRED / APPROVAL_PENDING / APPROVAL_REJECTED"]
+  C -- "Yes" --> E{"Confirm mode"}
+  B -- "No" --> E
+
+  E -- "NONE" --> F["Execute action"]
+  E -- "CONFIRM" --> G{"typedConfirmText valid?"}
+  E -- "WO_CODE" --> H{"typedConfirmText matches work order code?"}
+
+  G -- "No" --> I["Deny: TYPED_CONFIRM_REQUIRED / TYPED_CONFIRM_INVALID"]
+  H -- "No" --> I
+  G -- "Yes" --> F
+  H -- "Yes" --> F
+
+  F --> J["Write activities + receipts"]
+```
 
 ## Common Error Outcomes
 
@@ -30,10 +52,10 @@ Successful and denied actions are logged into activities; command-like actions a
 
 ## Last updated
 
-2026-02-09
+2026-02-13
 
 ## Related pages
 
-- [Feature: Approvals / Governor](/features/approvals-governor)
-- [API: Work Orders + Operations + Receipts](/api/work-orders-operations-receipts)
-- [Feature: Maintenance / Recovery](/features/maintenance-recovery)
+- [Approvals and Governance](/features/approvals-governor)
+- [Work Orders, Operations, and Receipts (API)](/api/work-orders-operations-receipts)
+- [Maintenance and Recovery](/features/maintenance-recovery)

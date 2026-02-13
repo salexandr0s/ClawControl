@@ -1,4 +1,4 @@
-# Feature: Approvals / Governor
+# Approvals and Governance
 
 This page documents policy enforcement behavior for protected actions.
 
@@ -12,10 +12,11 @@ Policies define:
 
 ## Enforcement Paths
 
-Server-side wrappers:
+Server-side enforcement:
 
 - `withGovernor()` for approval + typed confirm gates
-- `enforceTypedConfirm()` for typed-confirm-only actions
+- `enforceActionPolicy()` for typed-confirm-only actions
+- `enforceGovernor()` when a route cannot use the wrapper pattern
 
 ## Approval Lifecycle
 
@@ -39,10 +40,10 @@ Protected route failures return structured errors such as:
 
 ## Last updated
 
-2026-02-09
+2026-02-13
 
 ## Related pages
 
-- [Security: Approval and Typed Confirm](/security/approvals-typed-confirm)
-- [Feature: Work Orders + Operations](/features/work-orders-operations)
-- [API: Work Orders + Operations + Receipts](/api/work-orders-operations-receipts)
+- [Approval and Typed Confirm Model](/security/approvals-typed-confirm)
+- [Work Orders and Operations](/features/work-orders-operations)
+- [Work Orders, Operations, and Receipts (API)](/api/work-orders-operations-receipts)

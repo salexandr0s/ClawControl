@@ -1,4 +1,4 @@
-# Feature: Work Orders + Operations
+# Work Orders and Operations
 
 This page describes implemented work tracking behavior for work orders and operations.
 
@@ -25,6 +25,48 @@ Operation capabilities include:
 
 Implemented statuses: `todo`, `in_progress`, `blocked`, `review`, `done`, `rework`.
 
+## Lifecycle Diagrams
+
+Work order lifecycle (typical):
+
+```mermaid
+stateDiagram-v2
+  [*] --> planned
+  planned --> active: start
+  active --> blocked
+  blocked --> active
+  active --> review: ready for review
+  review --> shipped
+  planned --> cancelled
+  active --> cancelled
+  blocked --> cancelled
+  review --> cancelled
+```
+
+Operation lifecycle (typical):
+
+```mermaid
+stateDiagram-v2
+  [*] --> todo
+  todo --> in_progress
+  in_progress --> review
+  review --> done
+  in_progress --> blocked
+  blocked --> in_progress
+  review --> rework
+  rework --> in_progress
+```
+
+Work order stage mapping:
+
+```mermaid
+flowchart LR
+  WO["Work Order"] --> WF["Selected Workflow"]
+  WF --> ST["Current Stage"]
+  ST --> OP["Operation (one per stage)"]
+  OP --> Audit["Activities + Receipts"]
+```
+
 ## UI Surfaces
 
 - `/work-orders`: table + kanban views with explicit Start actions.
@@ -41,10 +83,10 @@ Manual operation graph mutation and manual operation status transitions are bloc
 
 ## Last updated
 
-2026-02-10
+2026-02-13
 
 ## Related pages
 
 - [Core Concepts](/product/core-concepts)
-- [Approvals / Governor](/features/approvals-governor)
-- [API: Work Orders + Operations + Receipts](/api/work-orders-operations-receipts)
+- [Approvals and Governance](/features/approvals-governor)
+- [Work Orders, Operations, and Receipts (API)](/api/work-orders-operations-receipts)
