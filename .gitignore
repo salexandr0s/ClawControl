@@ -94,7 +94,9 @@ CODEX_TASK.md
 
 # Keep only public docs tracked under /docs (local planning docs stay ignored)
 docs/*
-!docs/agent-templates.md
 !docs/AGENT_STARTER_TEMPLATE.md
+!docs/packages-and-marketplace-artifacts.md
 !docs/local-only-admin.md
 !docs/REMOTE_TAILSCALE.md
+!docs/ui-buttons-and-toggles.md
+!docs/workflows.md

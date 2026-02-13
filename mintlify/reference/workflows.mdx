@@ -16,6 +16,9 @@ Each workflow includes:
 
 Each stage defines the assigned role/station and optional gating or loop configuration.
 
+Workflows reference **specialist agents** only. The CEO is not represented inside workflow YAML.
+By default, ClawControl treats the OpenClaw runtime agent `main` as the CEO inbox (escalation/notification target).
+
 ## Built-in vs Custom Workflows
 
 ClawControl loads workflows from two sources:

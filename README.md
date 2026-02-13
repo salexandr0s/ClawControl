@@ -75,6 +75,17 @@ ClawControl surfaces two separate runtime layers:
 
 Some features are CLI-backed (Models, Plugins, Cron, Maintenance actions). If CLI is unavailable, these features degrade with explicit errors and fix hints.
 
+## Default CEO (OpenClaw `main`)
+
+ClawControl treats the OpenClaw runtime agent `main` as the default CEO inbox (the place escalations and blocks are routed).
+
+On first run and on workspace changes, ClawControl will create-if-missing:
+
+- `agents/main/SOUL.md`
+- `agents/main/HEARTBEAT.md`
+
+Workflows reference specialist agents only; the CEO is not represented inside workflow YAML.
+
 ## Common Commands
 
 | Command | Purpose |
@@ -93,14 +104,13 @@ Some features are CLI-backed (Models, Plugins, Cron, Maintenance actions). If CL
 
 - Product/API docs (Mintlify): `mintlify/`
 - UI action standards (buttons/toggles/dropdowns): [docs/ui-buttons-and-toggles.md](docs/ui-buttons-and-toggles.md)
-- Agent template guide: [docs/agent-templates.md](docs/agent-templates.md)
 - Workflows guide: [docs/workflows.md](docs/workflows.md)
 - Packages and marketplace artifacts: [docs/packages-and-marketplace-artifacts.md](docs/packages-and-marketplace-artifacts.md)
 - Marketplace canonical implementation: `../Market_ClawControl`
 - Agent starter contract: [docs/AGENT_STARTER_TEMPLATE.md](docs/AGENT_STARTER_TEMPLATE.md)
 - Remote tunnel access: [docs/REMOTE_TAILSCALE.md](docs/REMOTE_TAILSCALE.md)
 - Local-only administration: [docs/local-only-admin.md](docs/local-only-admin.md)
-- Authoring guide: [TEMPLATE_GUIDE.md](TEMPLATE_GUIDE.md)
+- Agent template authoring guide: [TEMPLATE_GUIDE.md](TEMPLATE_GUIDE.md)
 
 ## Security and Operations
 

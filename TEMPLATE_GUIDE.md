@@ -88,6 +88,7 @@ Required fields:
 Allowed `role` values:
 
 - `CEO`
+- `MANAGER`
 - `BUILD`
 - `OPS`
 - `REVIEW`
@@ -99,6 +100,10 @@ Allowed `role` values:
 - `CUSTOM`
 
 No unknown top-level keys are allowed (`additionalProperties: false`).
+
+Note:
+
+- Most template bundles should not try to package or replace the OpenClaw runtime agent `main`. ClawControl treats `main` as the default CEO inbox. Use `role: "CEO"` templates only if you explicitly want to create a separate CEO agent in addition to `main`.
 
 Optional fields:
 

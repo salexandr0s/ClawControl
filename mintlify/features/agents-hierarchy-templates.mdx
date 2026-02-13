@@ -14,6 +14,11 @@ Agent records include runtime identity and control fields:
 - dispatch eligibility and WIP limit
 - model + fallback configuration
 
+Default CEO behavior:
+
+- If the OpenClaw runtime agent `main` exists, ClawControl treats it as the default CEO inbox (escalation/notification target).
+- On fresh installs and workspace changes, ClawControl scaffolds `agents/main/SOUL.md` and `agents/main/HEARTBEAT.md` create-if-missing.
+
 ## Agent Actions
 
 Implemented actions include:

@@ -1,10 +1,10 @@
----
-title: Package Artifacts
----
+# Packages and Marketplace Artifacts
 
-This page documents the `.clawpack.zip` package format used by ClawControl for import/deploy/export flows.
+Last updated: 2026-02-13
 
-## Package Format
+ClawControl supports portable package artifacts for import/deploy/export flows.
+
+## 1. Package Format
 
 Extension:
 
@@ -21,9 +21,9 @@ Supported package kinds:
 - `workflow`
 - `team_with_workflows`
 
-## Supported Package Contents
+## 2. Supported Package Contents
 
-Packages may include:
+Optional content folders:
 
 - `agent-templates/<templateId>/...`
 - `workflows/<workflowId>.yaml`
@@ -35,12 +35,12 @@ Notes:
 
 - Do not attempt to package or replace the OpenClaw runtime agent `main`. ClawControl treats `main` as the default CEO inbox and scaffolds `agents/main/*` create-if-missing.
 
-## Import / Deploy Flow
+## 3. Import / Deploy Flow
 
-Package import is a two-step flow:
+Package flow is two-step:
 
-1. Analyze/stage package (`POST /api/packages/import`)
-2. Deploy staged package (`POST /api/packages/deploy`)
+1. Analyze package (`/api/packages/import`)
+2. Deploy staged package (`/api/packages/deploy`)
 
 Analyze reports:
 
@@ -56,18 +56,7 @@ Deploy supports scoped application toggles:
 - teams
 - selection
 
-```mermaid
-flowchart LR
-  A["Upload .clawpack.zip"] --> B["Analyze (stage)"]
-  B --> C{"Conflicts?"}
-  C -- "Yes" --> D["Review + decide what to deploy"]
-  C -- "No" --> E["Deploy staged artifacts"]
-  D --> E
-  E --> F["Write workspace files / DB records"]
-  F --> G["Record history: /workflow-packages/history/*.json"]
-```
-
-## Rollback Behavior
+## 4. Rollback Behavior
 
 Deployment is best-effort transactional:
 
@@ -75,9 +64,9 @@ Deployment is best-effort transactional:
 - created workflows/teams are reverted when possible
 - previous selection overlay is restored if selection deployment fails
 
-## Export
+## 5. Export
 
-Package exports are available via API:
+You can export package artifacts from API:
 
 - `GET /api/packages/:id/export?kind=workflow`
 - `GET /api/packages/:id/export?kind=agent_template`
@@ -89,27 +78,17 @@ Exported packages include:
 - `clawcontrol-package.yaml` (runtime manifest)
 - `marketplace/listing.yaml` (optional marketplace sidecar metadata)
 
-## Security and Governance
+## 6. Security and Governance
 
 All mutating package routes require:
 
 - operator session + CSRF
-- action-policy enforcement (typed confirm and/or approvals, depending on action kind)
+- governor action policy (`package.import`, `package.deploy`, `package.export`)
 
-## Workspace History
+## 7. Workspace History
 
-Analyze/deploy/export events are recorded under:
+Package analyze/deploy/export events are recorded under:
 
 - `/workflow-packages/history/*.json`
 
 These records are local operational traces for auditability and debugging.
-
-## Last updated
-
-2026-02-13
-
-## Related pages
-
-- [Workflows, Teams, and Packages](/features/workflows-packages-teams)
-- [Workflows, Teams, and Packages (API)](/api/workflows-teams-packages)
-- [Workflows](/reference/workflows)
