@@ -402,6 +402,14 @@ export async function resolveCeoSessionKey(client: AgentQueryClient): Promise<st
   const available = agents.filter((agent) => !isUnavailable(agent.status) && agent.sessionKey.startsWith('agent:'))
   if (available.length === 0) return null
 
+  // Hard default: if the OpenClaw "main" agent exists and is available, treat it as CEO.
+  // This matches the UX expectation that users primarily interact with their main agent.
+  const main = available.find((agent) => {
+    const runtime = normalizeText(agent.runtimeAgentId ?? extractAgentIdFromSessionKey(agent.sessionKey))
+    return runtime === 'main'
+  })
+  if (main) return main.sessionKey
+
   const scored = available
     .map((agent) => {
       const capabilities = parseCapabilityKeys(agent.capabilities)

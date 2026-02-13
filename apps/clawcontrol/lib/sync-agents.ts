@@ -167,6 +167,8 @@ export async function syncAgentsFromOpenClaw(
   for (const agent of agents) {
     if (!agent?.id) continue
 
+    const normalizedRuntimeId = agent.id.trim().toLowerCase()
+    const isMainAgent = normalizedRuntimeId === 'main'
     const name = inferDisplayName(agent)
     const sessionKey = inferSessionKey(agent.id)
     const fallbacks = Array.isArray(agent.fallbacks) ? agent.fallbacks : undefined
@@ -176,23 +178,37 @@ export async function syncAgentsFromOpenClaw(
 
     seenSessionKeys.add(sessionKey)
 
+    const mainAgentPatch = isMainAgent
+      ? {
+          kind: 'ceo' as const,
+          role: 'CEO',
+          station: 'strategic',
+          // Capabilities are used for routing/selection hints and CEO resolution.
+          capabilities: {
+            strategic: true,
+            can_delegate: true,
+            can_send_messages: true,
+          },
+        }
+      : null
+
     if (!existing) {
       await repos.agents.create({
         name,
         displayName: name,
         slug: slugifyDisplayName(name),
         runtimeAgentId: agent.id,
-        kind: 'worker',
+        ...(mainAgentPatch ?? { kind: 'worker' as const }),
         dispatchEligible: true,
         nameSource: 'openclaw',
-        role: 'agent',
-        station: defaultStationId,
+        role: mainAgentPatch?.role ?? 'agent',
+        station: mainAgentPatch?.station ?? defaultStationId,
         sessionKey,
-        capabilities: { [defaultStationId]: true },
+        capabilities: mainAgentPatch?.capabilities ?? { [defaultStationId]: true },
         wipLimit: inferDefaultAgentWipLimit({
           id: agent.id,
           name,
-          station: defaultStationId,
+          station: mainAgentPatch?.station ?? defaultStationId,
         }),
         isStale: false,
         staleAt: null,
@@ -201,6 +217,20 @@ export async function syncAgentsFromOpenClaw(
       })
       added++
     } else {
+      const shouldPromoteMain =
+        isMainAgent
+        && existing.kind === 'worker'
+        && existing.role === 'agent'
+        && existing.station === defaultStationId
+
+      const existingCapabilities = existing.capabilities ?? {}
+      const promotedCapabilities = shouldPromoteMain && mainAgentPatch
+        ? {
+            ...existingCapabilities,
+            ...mainAgentPatch.capabilities,
+          }
+        : undefined
+
       await repos.agents.update(existing.id, {
         ...(existing.nameSource === 'user'
           ? {}
@@ -211,6 +241,14 @@ export async function syncAgentsFromOpenClaw(
         runtimeAgentId: agent.id,
         isStale: false,
         staleAt: null,
+        ...(shouldPromoteMain && mainAgentPatch
+          ? {
+              kind: mainAgentPatch.kind,
+              role: mainAgentPatch.role,
+              station: mainAgentPatch.station,
+              capabilities: promotedCapabilities,
+            }
+          : {}),
         ...(agent.model ? { model: agent.model } : {}),
         ...(fallbacks !== undefined ? { fallbacks: JSON.stringify(fallbacks) } : {}),
       })

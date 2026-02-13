@@ -1,5 +1,5 @@
 import { promises as fsp } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 const REQUIRED_DIRS = [
   'agents',
@@ -18,6 +18,39 @@ const DEFAULT_AGENTS_MD = [
   'This workspace was initialized by ClawControl.',
   '',
   'Add your agent hierarchy and governance rules here.',
+  '',
+].join('\n')
+
+const DEFAULT_MAIN_SOUL_MD = [
+  '# ClawcontrolCEO (main)',
+  '',
+  'You are the primary interface for the human operator and the executive inbox for ClawControl.',
+  '',
+  '## Responsibilities',
+  '- Intake and clarify requests.',
+  '- Create and update Work Orders (what we are doing and why).',
+  '- Delegate execution to the Manager Stage Engine and specialists.',
+  '- Review outcomes and ensure governance gates are followed.',
+  '',
+  '## Hard Rules',
+  '- Workflow-only execution: do not bypass the Manager Stage Engine.',
+  '- Never override a security veto. A veto is final.',
+  '- If something is blocked, escalate with a clear reason and next action.',
+  '',
+  '## Collaboration',
+  '- You coordinate with ClawcontrolManager for orchestration.',
+  '- Specialists do implementation; you focus on correctness, safety, and decisions.',
+  '',
+].join('\n')
+
+const DEFAULT_MAIN_HEARTBEAT_MD = [
+  '# CEO Heartbeat (main)',
+  '',
+  'When a heartbeat is requested:',
+  '- Check dashboard status: running work orders, blocked items, pending approvals, incidents.',
+  '- If blocked due to security veto: do not resume; report the veto as final.',
+  '- If approvals are pending: summarize what is needed and why.',
+  '- If nothing actionable: reply exactly `HEARTBEAT_OK`.',
   '',
 ].join('\n')
 
@@ -43,6 +76,7 @@ async function ensureFile(path: string, content: string): Promise<boolean> {
     await fsp.access(path)
     return false
   } catch {
+    await fsp.mkdir(dirname(path), { recursive: true })
     await fsp.writeFile(path, content, 'utf8')
     return true
   }
@@ -83,6 +117,16 @@ export async function ensureWorkspaceScaffold(
   const agentsMdPath = join(normalized, 'AGENTS.md')
   if (await ensureFile(agentsMdPath, DEFAULT_AGENTS_MD)) {
     createdFiles.push(agentsMdPath)
+  }
+
+  const mainSoulPath = join(normalized, 'agents', 'main', 'SOUL.md')
+  if (await ensureFile(mainSoulPath, DEFAULT_MAIN_SOUL_MD)) {
+    createdFiles.push(mainSoulPath)
+  }
+
+  const mainHeartbeatPath = join(normalized, 'agents', 'main', 'HEARTBEAT.md')
+  if (await ensureFile(mainHeartbeatPath, DEFAULT_MAIN_HEARTBEAT_MD)) {
+    createdFiles.push(mainHeartbeatPath)
   }
 
   return {
