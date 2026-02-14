@@ -13,11 +13,29 @@ const REQUIRED_DIRS = [
 ] as const
 
 const DEFAULT_AGENTS_MD = [
-  '# AGENTS.md',
+  '# AGENTS.md — Workspace Rules',
   '',
-  'This workspace was initialized by ClawControl.',
+  'This file is the source of truth for agent behavior in this workspace.',
+  'ClawControl created this stub because `AGENTS.md` was missing.',
   '',
-  'Add your agent hierarchy and governance rules here.',
+  '## Quick Start (ClawControl)',
+  '- `main` is the default CEO inbox (OpenClaw runtime agent).',
+  '- Use workflow-only execution via the Manager Stage Engine.',
+  '- Security veto is final.',
+  '',
+  '## Agent File Contract',
+  'For each agent id/slug:',
+  '- `agents/<id>/SOUL.md` (identity + hard rules)',
+  '- `agents/<id>/HEARTBEAT.md` (heartbeat checklist)',
+  '- `agents/<id>/MEMORY.md` (long-term notes; keep concise)',
+  '- `agents/<id>.md` (overlay/prompt glue, if used)',
+  '',
+  '## Fill This In',
+  '1. Your agent hierarchy (CEO -> Manager -> Specialists).',
+  '2. Tool policies (allowlists/denylists).',
+  '3. Governance: proposals, approvals, risk classes, gates.',
+  '',
+  'Docs: https://docs.clawcontrol.cc/reference/workspace-files',
   '',
 ].join('\n')
 

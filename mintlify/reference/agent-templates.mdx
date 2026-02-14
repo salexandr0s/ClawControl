@@ -33,11 +33,16 @@ Minimum required file:
 
 - `template.json`
 
-Strongly recommended files:
+Recommended files:
 
 - `SOUL.md`
+- `HEARTBEAT.md` (recommended in v1; required for ClawControl starter defaults)
 - `overlay.md`
 - `README.md`
+
+Optional (template-specific):
+
+- `MEMORY.md` (agent-local scaffold, if you render it into `agents/<id>/MEMORY.md`)
 
 Example:
 
@@ -45,6 +50,7 @@ Example:
 /agent-templates/clawcontrol-ops-v1/
   template.json
   SOUL.md
+  HEARTBEAT.md
   overlay.md
   README.md
 ```
@@ -169,6 +175,7 @@ Source path rules:
 If `render.targets` is omitted, defaults are used:
 
 - `SOUL.md -> workspace/agents/{{agentSlug}}/SOUL.md`
+- `HEARTBEAT.md -> workspace/agents/{{agentSlug}}/HEARTBEAT.md`
 - `overlay.md -> workspace/agents/{{agentSlug}}.md`
 
 ## Import / Export Formats

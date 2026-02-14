@@ -92,6 +92,7 @@
               "reference/workflows",
               "reference/packages",
               "reference/agent-templates",
+              "reference/workspace-files",
               "reference/workspace-agent-generator",
               "reference/ui-buttons-and-toggles"
             ]

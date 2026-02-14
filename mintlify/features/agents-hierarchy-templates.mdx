@@ -19,6 +19,16 @@ Default CEO behavior:
 - If the OpenClaw runtime agent `main` exists, ClawControl treats it as the default CEO inbox (escalation/notification target).
 - On fresh installs and workspace changes, ClawControl scaffolds `agents/main/SOUL.md` and `agents/main/HEARTBEAT.md` create-if-missing.
 
+Workspace contract (recommended):
+
+- Maintain a workspace-root `AGENTS.md` with your governance and hierarchy rules.
+- Keep per-agent files under `agents/<id>/`:
+  - `SOUL.md`
+  - `HEARTBEAT.md`
+  - `MEMORY.md`
+
+See [Workspace Files](/reference/workspace-files).
+
 ## Agent Actions
 
 Implemented actions include:

@@ -1,0 +1,76 @@
+---
+title: Workspace Files (AGENTS.md and Agent Memory)
+---
+
+ClawControl is **workspace-backed**: it reads and writes files under your configured OpenClaw workspace (for example `~/OpenClaw`).
+
+This page documents the **minimum file contract** you should keep in place, especially when installing the **ClawControl Starter Pack** (teams + workflows + templates).
+
+## Workspace Root
+
+Required:
+
+- `AGENTS.md`
+  - Global agent/governance rules for this workspace.
+  - ClawControl will create a minimal stub **create-if-missing** on first run, but you should fill it in.
+
+Recommended:
+
+- `MEMORY.md`
+  - Workspace-wide memory (shared context, decisions, conventions).
+  - Keep it short, current, and free of secrets.
+
+## Per-Agent Files
+
+For each agent id/slug `<id>`, use:
+
+- `agents/<id>/SOUL.md`
+  - Identity, non-negotiable rules, and what “good” means for that agent.
+- `agents/<id>/HEARTBEAT.md`
+  - What to check and how to report when a heartbeat is requested.
+- `agents/<id>/MEMORY.md`
+  - Long-term notes that agent should remember (preferences, pitfalls, project norms).
+  - Treat as curated context, not a dump of logs.
+
+Optional (but common):
+
+- `agents/<id>.md`
+  - Overlay/prompt glue used by some OpenClaw setups to define role-level behavior.
+
+## Minimal `AGENTS.md` Skeleton
+
+```md
+# AGENTS.md — Workspace Rules
+
+## Core Rules
+- Workflow-only execution (Manager Stage Engine).
+- PlanReview required before Build/UI/Ops.
+- Security veto is final.
+
+## Default CEO Inbox
+- OpenClaw runtime agent `main` is the default CEO inbox in ClawControl.
+
+## Agent Hierarchy
+- CEO: main
+- Manager: manager
+- Specialists: research, plan, plan_review, build, build_review, ui, ui_review, security, ops
+
+## Tool Policy (Example)
+- Do not run destructive commands without explicit approval.
+- Do not exfiltrate secrets or internal workspace data.
+```
+
+## Starter Pack Notes
+
+- Starter packs intentionally **do not overwrite** your existing `AGENTS.md` or global workspace memory.
+- If you install a starter pack into an empty workspace, ClawControl will scaffold `AGENTS.md` plus `agents/main/SOUL.md` and `agents/main/HEARTBEAT.md` create-if-missing.
+
+## Last updated
+
+2026-02-14
+
+## Related pages
+
+- [Agents, Teams, and Templates](/features/agents-hierarchy-templates)
+- [Workflows, Teams, and Packages](/features/workflows-packages-teams)
+- [Agent Templates](/reference/agent-templates)
