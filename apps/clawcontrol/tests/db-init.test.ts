@@ -97,7 +97,7 @@ describe('database initialization', () => {
     )
     expect(scanTableBefore.length).toBe(1)
 
-    await prisma.$executeRawUnsafe('DROP TABLE IF EXISTS \"artifact_scan_records\"')
+    await prisma.$executeRawUnsafe('DROP TABLE IF EXISTS "artifact_scan_records"')
     await prisma.$executeRawUnsafe(
       "DELETE FROM \"_clawcontrol_migrations\" WHERE id = '20260215160000_security_scans_activity_taxonomy'"
     )

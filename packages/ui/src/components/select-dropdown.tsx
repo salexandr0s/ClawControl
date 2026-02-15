@@ -231,11 +231,20 @@ export function SelectDropdown<T extends string = string>({
         nextStyle.width = menuWidth
       }
 
-      if (align === 'start') {
-        nextStyle.left = Math.max(viewportPadding, rect.left)
-      } else {
-        nextStyle.right = Math.max(viewportPadding, window.innerWidth - rect.right)
-      }
+      // Clamp horizontally so expanded menus don't render off-screen.
+      const measuredWidth = menuRef.current?.offsetWidth ?? rect.width
+      const widthForClamp =
+        menuWidth === 'trigger'
+          ? Math.min(Math.max(rect.width, measuredWidth), maxAllowedWidth)
+          : typeof menuWidth === 'number'
+            ? Math.min(menuWidth, maxAllowedWidth)
+            : Math.min(measuredWidth, maxAllowedWidth)
+      const desiredLeft = align === 'start' ? rect.left : rect.right - widthForClamp
+      const left = Math.min(
+        Math.max(viewportPadding, desiredLeft),
+        window.innerWidth - viewportPadding - widthForClamp
+      )
+      nextStyle.left = left
 
       setMenuStyle(nextStyle)
     },
@@ -407,7 +416,12 @@ export function SelectDropdown<T extends string = string>({
             type="button"
             role="option"
             aria-selected={isSelected}
-            title={option.title}
+            title={
+              option.title ??
+              (typeof option.label === 'string'
+                ? option.label
+                : option.textValue ?? String(option.value))
+            }
             tabIndex={activeIndex === index ? 0 : -1}
             aria-disabled={option.disabled ? true : undefined}
             disabled={option.disabled}
