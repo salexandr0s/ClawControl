@@ -244,7 +244,8 @@ function isIgnorableSqlError(message: string, sql: string): boolean {
   }
 
   if (msg.includes('duplicate column name')) {
-    return statement.startsWith('alter table') && statement.includes(' add column ')
+    // Allow formatting differences (newline between ADD and COLUMN, multiple spaces, etc).
+    return statement.startsWith('alter table') && /\badd\s+column\b/i.test(statement)
   }
 
   if (msg.includes('no such table')) {
