@@ -76,6 +76,50 @@ describe('database initialization', () => {
     await fsp.rm(tempRoot, { recursive: true, force: true })
   })
 
+  it('applies newly added migrations even when the required schema is already present', async () => {
+    const tempRoot = join(tmpdir(), `db-init-upgrade-${randomUUID()}`)
+    const dbPath = join(tempRoot, 'fresh.db')
+    await fsp.mkdir(tempRoot, { recursive: true })
+
+    process.env.DATABASE_URL = `file:${dbPath}`
+    process.env.CLAWCONTROL_MIGRATIONS_DIR = join(process.cwd(), 'prisma', 'migrations')
+
+    delete (globalThis as { prisma?: unknown }).prisma
+    vi.resetModules()
+
+    const mod = await import('@/lib/db/init')
+    const first = await mod.ensureDatabaseInitialized()
+    expect(first.ok).toBe(true)
+
+    const { prisma } = await import('@/lib/db')
+    const scanTableBefore = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_scan_records' LIMIT 1"
+    )
+    expect(scanTableBefore.length).toBe(1)
+
+    await prisma.$executeRawUnsafe('DROP TABLE IF EXISTS \"artifact_scan_records\"')
+    await prisma.$executeRawUnsafe(
+      "DELETE FROM \"_clawcontrol_migrations\" WHERE id = '20260215160000_security_scans_activity_taxonomy'"
+    )
+    await prisma.$disconnect()
+
+    delete (globalThis as { prisma?: unknown }).prisma
+    vi.resetModules()
+
+    const mod2 = await import('@/lib/db/init')
+    const second = await mod2.ensureDatabaseInitialized()
+    expect(second.ok).toBe(true)
+
+    const { prisma: prisma2 } = await import('@/lib/db')
+    const scanTableAfter = await prisma2.$queryRawUnsafe<Array<{ name: string }>>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_scan_records' LIMIT 1"
+    )
+    expect(scanTableAfter.length).toBe(1)
+    await prisma2.$disconnect()
+
+    await fsp.rm(tempRoot, { recursive: true, force: true })
+  })
+
   it('returns DB_MIGRATION_FAILED when schema is missing and migrations directory is unavailable', async () => {
     const tempRoot = join(tmpdir(), `db-init-${randomUUID()}`)
     const dbPath = join(tempRoot, 'fresh.db')

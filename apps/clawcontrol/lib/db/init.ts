@@ -316,15 +316,6 @@ function escapeSqlString(value: string): string {
   return value.replace(/'/g, "''")
 }
 
-async function baselineMigrations(migrations: MigrationEntry[]): Promise<void> {
-  for (const migration of migrations) {
-    const escaped = escapeSqlString(migration.id)
-    await prisma.$executeRawUnsafe(
-      `INSERT OR IGNORE INTO "${MIGRATION_TRACKING_TABLE}" ("id") VALUES ('${escaped}')`
-    )
-  }
-}
-
 async function applyMigration(migration: MigrationEntry): Promise<void> {
   const sql = fs.readFileSync(migration.filePath, 'utf8')
   const statements = splitSqlStatements(sql)
@@ -346,7 +337,7 @@ async function applyMigration(migration: MigrationEntry): Promise<void> {
   )
 }
 
-async function applyMigrations(migrationsDir: string): Promise<void> {
+async function applyMigrations(migrationsDir: string): Promise<{ appliedCount: number; totalMigrations: number }> {
   const migrations = listMigrations(migrationsDir)
   if (migrations.length === 0) {
     throw new Error(`No migrations found in ${migrationsDir}`)
@@ -356,19 +347,20 @@ async function applyMigrations(migrationsDir: string): Promise<void> {
 
   const applied = await readAppliedMigrations()
 
-  if (applied.size === 0 && (await hasRequiredSchema())) {
-    await baselineMigrations(migrations)
-    return
-  }
+  let appliedCount = 0
 
   for (const migration of migrations) {
     if (applied.has(migration.id)) continue
     await applyMigration(migration)
+    applied.add(migration.id)
+    appliedCount += 1
   }
 
   if (!(await hasRequiredSchema())) {
     throw new Error('Database schema is incomplete after migration execution')
   }
+
+  return { appliedCount, totalMigrations: migrations.length }
 }
 
 function detectFailureCode(error: unknown): DbInitErrorCode {
@@ -405,24 +397,28 @@ async function initializeOnce(): Promise<DbInitStatus> {
     await prisma.$queryRawUnsafe('PRAGMA schema_version;')
 
     const schemaReady = await hasRequiredSchema()
-    if (!schemaReady) {
-      if (!migrationsDir) {
-        throw new Error('Could not locate prisma migration directory')
-      }
-      await applyMigrations(migrationsDir)
+
+    let appliedMigrations = 0
+    if (migrationsDir) {
+      const result = await applyMigrations(migrationsDir)
+      appliedMigrations = result.appliedCount
+    } else if (!schemaReady) {
+      throw new Error('Could not locate prisma migration directory')
     }
 
     lastStatus = statusNow({
       ok: true,
-      initialized: true,
-      code: null,
-      message: schemaReady
-        ? 'Database schema already initialized'
-        : 'Database schema initialized successfully',
-      databaseUrl,
-      databasePath,
-      migrationsDir,
-    })
+    initialized: true,
+    code: null,
+    message: schemaReady
+      ? appliedMigrations > 0
+        ? `Database migrations applied (${appliedMigrations})`
+        : 'Database schema already initialized'
+      : 'Database schema initialized successfully',
+    databaseUrl,
+    databasePath,
+    migrationsDir,
+  })
 
     return lastStatus
   } catch (error) {
