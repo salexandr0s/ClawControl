@@ -97,6 +97,7 @@ docs/*
 !docs/AGENT_STARTER_TEMPLATE.md
 !docs/packages-and-marketplace-artifacts.md
 !docs/local-only-admin.md
+!docs/clawhub-marketplace.md
 !docs/REMOTE_TAILSCALE.md
 !docs/ui-buttons-and-toggles.md
 !docs/workflows.md

@@ -22,6 +22,7 @@ export type { PluginsRepo, PluginFilters, InstallPluginInput, UpdatePluginInput,
 export { PluginUnsupportedError } from './plugins'
 export type { GatewayRepo, GatewayStatusDTO as GatewayRepoStatusDTO, GatewayHealthDTO, GatewayProbeDTO } from './gateway'
 export type { CronRepo, CronStatusDTO as CronRepoStatusDTO, CronJobDTO as CronRepoJobDTO, CronRunDTO as CronRepoRunDTO, CronSchedule, CronPayload } from './cron'
+export type { ClawHubInstallsRepo, UpsertClawHubSkillInstallInput, ClawHubInstallScope } from './clawhubInstalls'
 
 // Types (DTOs for UI consumption)
 export type {
@@ -65,4 +66,5 @@ export type {
   DashboardStatsDTO,
   GatewayStatusDTO,
   WorkspaceFileDTO,
+  ClawHubSkillInstallDTO,
 } from './types'

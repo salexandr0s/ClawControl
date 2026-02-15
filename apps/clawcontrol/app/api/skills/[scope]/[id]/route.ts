@@ -26,8 +26,50 @@ export async function GET(
     return NextResponse.json({ error: 'Skill not found' }, { status: 404 })
   }
 
+  const scopeKey = scope === 'global' ? '__global__' : (skill.agentId ?? '')
+  let marketplace: {
+    provider: 'clawhub'
+    slug: string
+    scope: 'global' | 'agent'
+    scopeKey: string
+    version: string
+    sourceUrl: string
+    installMethod: string
+    manifestHash: string | null
+    installedAt: Date
+    installedBy: string
+    lastReceiptId: string | null
+  } | null = null
+
+  if (scopeKey) {
+    try {
+      const installs = await repos.clawhubInstalls.listActiveBySlug(skill.name)
+      const match = installs.find((i) => i.scope === scope && i.scopeKey === scopeKey) ?? null
+      if (match) {
+        marketplace = {
+          provider: 'clawhub',
+          slug: match.slug,
+          scope: match.scope,
+          scopeKey: match.scopeKey,
+          version: match.version,
+          sourceUrl: match.sourceUrl,
+          installMethod: match.installMethod,
+          manifestHash: match.manifestHash,
+          installedAt: match.installedAt,
+          installedBy: match.installedBy,
+          lastReceiptId: match.lastReceiptId,
+        }
+      }
+    } catch {
+      // If clawhub install tracking table doesn't exist (pre-migration DB), omit marketplace metadata.
+    }
+  }
+
   return NextResponse.json({
-    data: skill,
+    data: {
+      ...skill,
+      marketplace,
+    },
   })
 }
 
