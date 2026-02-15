@@ -288,33 +288,21 @@ export function FindSkillsClient() {
                         {item.owner?.handle ? `by @${item.owner.handle}` : 'by —'}
                       </div>
                     </div>
-                    {item.installed.any && (
-                      <span className="shrink-0 text-[11px] px-2 py-1 rounded-full border border-status-info/20 bg-status-info/10 text-status-info">
-                        Installed
-                      </span>
-                    )}
+                    <div className="shrink-0 flex items-center gap-2">
+                      {item.tags?.latest && (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-bd-0 bg-bg-3 text-fg-2 font-mono">
+                          v{item.tags.latest}
+                        </span>
+                      )}
+                      {item.installed.any && (
+                        <span className="shrink-0 text-[11px] px-2 py-1 rounded-full border border-status-info/20 bg-status-info/10 text-status-info">
+                          {item.installed.global?.version ? `Installed v${item.installed.global.version}` : 'Installed'}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="text-xs text-fg-1 mt-2 line-clamp-3">{item.summary}</div>
-
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {(() => {
-                      const badge = moderationBadge(item.moderation)
-                      const Icon = badge.icon
-                      return (
-                        <span className={cn('inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border', badge.className)}>
-                          <Icon className="w-3.5 h-3.5" />
-                          {badge.label}
-                        </span>
-                      )
-                    })()}
-
-                    {item.tags?.latest && (
-                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-bd-0 bg-bg-3 text-fg-2">
-                        v{item.tags.latest}
-                      </span>
-                    )}
-                  </div>
 
                   <div className="mt-3 flex items-center justify-between text-xs text-fg-2">
                     <div className="flex items-center gap-3">
@@ -327,11 +315,16 @@ export function FindSkillsClient() {
                         {formatCount(item.stats?.stars)}
                       </span>
                     </div>
-                    {item.installed.global?.version && (
-                      <span className="font-mono text-[11px] text-fg-3 group-hover:text-fg-2 transition-colors">
-                        current v{item.installed.global.version}
-                      </span>
-                    )}
+                    {(() => {
+                      const badge = moderationBadge(item.moderation)
+                      const Icon = badge.icon
+                      return (
+                        <span className={cn('inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border', badge.className)}>
+                          <Icon className="w-3.5 h-3.5" />
+                          {badge.label}
+                        </span>
+                      )
+                    })()}
                   </div>
                 </Link>
               ))}
