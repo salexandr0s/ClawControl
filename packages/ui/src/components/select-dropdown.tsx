@@ -206,6 +206,7 @@ export function SelectDropdown<T extends string = string>({
       const rect = triggerEl.getBoundingClientRect()
       const gap = 6
       const viewportPadding = 8
+      const maxAllowedWidth = Math.max(0, window.innerWidth - viewportPadding * 2)
       const estimatedHeight = menuRef.current?.offsetHeight ?? 260
       const placeAbove =
         rect.bottom + gap + estimatedHeight > window.innerHeight - viewportPadding &&
@@ -216,12 +217,16 @@ export function SelectDropdown<T extends string = string>({
         zIndex: 70,
         top: placeAbove ? rect.top - gap : rect.bottom + gap,
         transform: placeAbove ? 'translateY(-100%)' : undefined,
+        maxWidth: maxAllowedWidth,
       }
 
       if (menuWidth === 'trigger') {
-        nextStyle.width = rect.width
+        // Prefer menus that can expand to fit option labels while keeping at least the trigger width.
+        // This prevents short triggers (e.g. "Stars") from truncating longer menu options (e.g. "Downloads").
+        nextStyle.width = 'max-content'
+        nextStyle.minWidth = Math.min(rect.width, maxAllowedWidth)
       } else if (typeof menuWidth === 'number') {
-        nextStyle.width = `${menuWidth}px`
+        nextStyle.width = Math.min(menuWidth, maxAllowedWidth)
       } else if (typeof menuWidth === 'string') {
         nextStyle.width = menuWidth
       }
