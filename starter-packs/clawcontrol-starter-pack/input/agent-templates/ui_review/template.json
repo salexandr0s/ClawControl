@@ -1,0 +1,40 @@
+{
+  "id": "ui_review",
+  "name": "UI Review",
+  "description": "Review UI/content changes for quality and consistency.",
+  "version": "1.0.0",
+  "role": "REVIEW",
+  "render": {
+    "engine": "mustache",
+    "targets": [
+      {
+        "source": "SOUL.md",
+        "destination": "workspace/agents/{{agentSlug}}/SOUL.md"
+      },
+      {
+        "source": "HEARTBEAT.md",
+        "destination": "workspace/agents/{{agentSlug}}/HEARTBEAT.md"
+      },
+      {
+        "source": "MEMORY.md",
+        "destination": "workspace/agents/{{agentSlug}}/MEMORY.md"
+      },
+      {
+        "source": "overlay.md",
+        "destination": "workspace/agents/{{agentSlug}}.md"
+      }
+    ]
+  },
+  "provisioning": {
+    "enabled": true,
+    "steps": [
+      "create_files",
+      "register_agent"
+    ]
+  },
+  "author": "clawcontrol",
+  "tags": [
+    "clawcontrol",
+    "default"
+  ]
+}

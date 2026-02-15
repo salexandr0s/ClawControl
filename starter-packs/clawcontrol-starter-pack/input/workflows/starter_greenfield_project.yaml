@@ -1,0 +1,43 @@
+id: starter_greenfield_project
+description: Starter workflow (editable) for greenfield projects with planning, build stories, review, and optional security/ops.
+stages:
+  - ref: research
+    agent: research
+    optional: true
+    condition: unknowns_exist
+
+  - ref: plan
+    agent: plan
+
+  - ref: plan_review
+    agent: plan_review
+    loopTarget: plan
+    maxIterations: 2
+
+  - ref: build_stories
+    agent: build
+    type: loop
+    loop:
+      over: stories
+      completion: all_done
+      verifyEach: true
+      verifyStageRef: build_review
+      maxStories: 25
+
+  - ref: build_review
+    agent: build_review
+    loopTarget: build_stories
+    maxIterations: 2
+
+  - ref: security
+    agent: security
+    optional: true
+    condition: security_relevant
+    canVeto: true
+    loopTarget: build_stories
+    maxIterations: 1
+
+  - ref: ops
+    agent: ops
+    optional: true
+    condition: deployment_needed

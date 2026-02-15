@@ -1,0 +1,40 @@
+{
+  "id": "research",
+  "name": "Research",
+  "description": "Discovery and context gathering for a work order.",
+  "version": "1.0.0",
+  "role": "SPEC",
+  "render": {
+    "engine": "mustache",
+    "targets": [
+      {
+        "source": "SOUL.md",
+        "destination": "workspace/agents/{{agentSlug}}/SOUL.md"
+      },
+      {
+        "source": "HEARTBEAT.md",
+        "destination": "workspace/agents/{{agentSlug}}/HEARTBEAT.md"
+      },
+      {
+        "source": "MEMORY.md",
+        "destination": "workspace/agents/{{agentSlug}}/MEMORY.md"
+      },
+      {
+        "source": "overlay.md",
+        "destination": "workspace/agents/{{agentSlug}}.md"
+      }
+    ]
+  },
+  "provisioning": {
+    "enabled": true,
+    "steps": [
+      "create_files",
+      "register_agent"
+    ]
+  },
+  "author": "clawcontrol",
+  "tags": [
+    "clawcontrol",
+    "default"
+  ]
+}

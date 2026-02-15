@@ -1,0 +1,29 @@
+id: starter_ops_change
+description: Starter workflow (editable) for ops/infra/deploy changes with plan gate, iterative ops stories, security veto, and finalize.
+stages:
+  - ref: plan
+    agent: plan
+
+  - ref: plan_review
+    agent: plan_review
+    loopTarget: plan
+    maxIterations: 2
+
+  - ref: ops_stories
+    agent: ops
+    type: loop
+    loop:
+      over: stories
+      completion: all_done
+      verifyEach: true
+      verifyStageRef: security
+      maxStories: 12
+
+  - ref: security
+    agent: security
+    canVeto: true
+    loopTarget: ops_stories
+    maxIterations: 1
+
+  - ref: ops_finalize
+    agent: ops

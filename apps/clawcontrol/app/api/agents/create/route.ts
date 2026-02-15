@@ -154,14 +154,12 @@ export async function POST(request: NextRequest) {
     })
     await repos.receipts.append(receipt.id, {
       stream: 'stdout',
+      chunk: `  Created memory file: ${filesResult.files.memory}\n`,
+    })
+    await repos.receipts.append(receipt.id, {
+      stream: 'stdout',
       chunk: `  Created overlay file: ${filesResult.files.overlay}\n`,
     })
-    if (filesResult.files.agentsMd) {
-      await repos.receipts.append(receipt.id, {
-        stream: 'stdout',
-        chunk: `  Updated AGENTS.md\n`,
-      })
-    }
 
     // Step 2: Register/update in OpenClaw config so runtime can see the agent
     await repos.receipts.append(receipt.id, {

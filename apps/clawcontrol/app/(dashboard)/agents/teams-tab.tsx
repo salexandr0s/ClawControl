@@ -506,6 +506,23 @@ export function TeamsTab() {
     })
   }
 
+  const instantiateAgents = () => {
+    if (!selected) return
+
+    protectedAction.trigger({
+      actionKind: 'team.instantiate_agents',
+      actionTitle: 'Instantiate Agents',
+      actionDescription: `Create missing agents and materialize workspace files for ${selected.name}`,
+      entityName: selected.name,
+      onConfirm: async (typedConfirmText) => {
+        const result = await agentTeamsApi.instantiateAgents(selected.id, { typedConfirmText })
+        await fetchTeams()
+        setNotice(`Agents instantiated (created ${result.data.createdAgents.length}, existing ${result.data.existingAgents.length})`)
+      },
+      onError: (err) => setError(err.message),
+    })
+  }
+
   if (loading) {
     return <div className="p-6 text-sm text-fg-2">Loading teams…</div>
   }
@@ -602,6 +619,7 @@ export function TeamsTab() {
             </div>
 
             <div className="flex items-center gap-2">
+              <Button type="button" onClick={instantiateAgents} variant="primary" size="sm">Instantiate Agents</Button>
               <Button type="button" onClick={openEdit} variant="secondary" size="sm">Edit</Button>
               <Button type="button" onClick={exportTeam} variant="secondary" size="sm">
                 <Download className="w-3.5 h-3.5" />

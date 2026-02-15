@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import {
   PageHeader,
   PageSection,
@@ -418,15 +419,13 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
           subtitle={`${skills.length} skills • ${enabledCount} enabled`}
           actions={
             <div className="flex items-center gap-2">
-              <a
-                href="https://github.com/openclaw/skills"
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href={{ pathname: '/skills/find' }}
                 className={buttonLikeClass({ variant: 'secondary', size: 'md' })}
               >
                 <ExternalLink className="w-3.5 h-3.5" />
                 Find Skills
-              </a>
+              </Link>
               <label className={buttonLikeClass({ variant: 'secondary', size: 'md', className: 'cursor-pointer' })}>
                 <Upload className="w-3.5 h-3.5" />
                 Upload Skill
@@ -598,6 +597,47 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
             {/* Validation Status */}
             {selectedSkill.validation && (
               <ValidationPanel validation={selectedSkill.validation} />
+            )}
+
+            {selectedSkill.marketplace?.provider === 'clawhub' && (
+              <PageSection
+                title="Marketplace"
+                description="This skill was installed via ClawHub Marketplace (governed, receipt-backed)."
+              >
+                <div className="p-4 bg-bg-3 rounded-[var(--radius-md)] border border-bd-0 space-y-2">
+                  <dl className="grid grid-cols-2 gap-2 text-xs">
+                    <dt className="text-fg-2">Source</dt>
+                    <dd className="text-fg-1 font-mono">
+                      {selectedSkill.marketplace.slug}@{selectedSkill.marketplace.version}
+                    </dd>
+                    <dt className="text-fg-2">Scope</dt>
+                    <dd className="text-fg-1">{selectedSkill.marketplace.scope}</dd>
+                    <dt className="text-fg-2">Receipt</dt>
+                    <dd className="text-fg-1 font-mono">
+                      {selectedSkill.marketplace.lastReceiptId ? (
+                        <Link
+                          href="/work-orders/system"
+                          className="text-status-info hover:underline underline-offset-2"
+                        >
+                          {selectedSkill.marketplace.lastReceiptId}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                    </dd>
+                  </dl>
+
+                  <a
+                    href={selectedSkill.marketplace.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-fg-2 hover:text-fg-1 underline underline-offset-2"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    View on ClawHub
+                  </a>
+                </div>
+              </PageSection>
             )}
 
             {/* Duplicate Modal */}

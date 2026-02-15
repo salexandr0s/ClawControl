@@ -317,6 +317,30 @@ export interface SkillDTO {
 }
 
 // ============================================================================
+// CLAWHUB MARKETPLACE
+// ============================================================================
+
+export type ClawHubInstallScope = 'global' | 'agent'
+
+export interface ClawHubSkillInstallDTO {
+  id: string
+  slug: string
+  displayName: string
+  version: string
+  scope: ClawHubInstallScope
+  scopeKey: string
+  agentId: string | null
+  sourceUrl: string
+  installMethod: string
+  manifestHash: string | null
+  installedAt: Date
+  installedBy: string
+  lastReceiptId: string | null
+  uninstalledAt: Date | null
+  updatedAt: Date
+}
+
+// ============================================================================
 // PLUGINS
 // ============================================================================
 

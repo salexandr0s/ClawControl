@@ -83,6 +83,7 @@ interface ParsedPackage {
   workflows: WorkflowConfig[]
   teams: PackageTeamArtifact[]
   selection: WorkflowSelectionConfig | null
+  installDoc: { path: string; content: string } | null
   fileCount: number
 }
 
@@ -111,6 +112,7 @@ export interface PackageAnalysis {
     workflows: string[]
     teams: string[]
   }
+  installDoc?: { path: string; preview: string } | null
   stagedUntil: string
 }
 
@@ -371,10 +373,20 @@ async function parsePackageBuffer(buffer: Buffer): Promise<ParsedPackage> {
   const workflows: WorkflowConfig[] = []
   const teams: PackageTeamArtifact[] = []
   let selection: WorkflowSelectionConfig | null = null
+  let installDoc: { path: string; content: string } | null = null
 
   for (const entry of fileEntries) {
     const path = entry.normalized
     if (path === 'clawcontrol-package.yaml' || path === 'clawcontrol-package.yml') {
+      continue
+    }
+
+    if (path === 'POST_INSTALL.md') {
+      const raw = await entry.zipEntry.async('string')
+      installDoc = {
+        path,
+        content: raw,
+      }
       continue
     }
 
@@ -457,6 +469,7 @@ async function parsePackageBuffer(buffer: Buffer): Promise<ParsedPackage> {
     workflows,
     teams,
     selection,
+    installDoc,
     fileCount: fileEntries.length,
   }
 }
@@ -638,6 +651,12 @@ export async function analyzePackageImport(file: File): Promise<PackageAnalysis>
       hasSelection: Boolean(parsed.selection),
     },
     conflicts,
+    installDoc: parsed.installDoc
+      ? {
+          path: parsed.installDoc.path,
+          preview: parsed.installDoc.content.slice(0, 4000),
+        }
+      : null,
     stagedUntil: new Date(stagedUntilMs).toISOString(),
   }
 }

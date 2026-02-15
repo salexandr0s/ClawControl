@@ -1,0 +1,23 @@
+id: clawcontrol-starter
+slug: clawcontrol-starter
+name: ClawControl Starter Team
+description: Core specialist templates + editable starter workflows + selection overlay. Uses your existing OpenClaw main agent as CEO.
+source: imported
+workflowIds:
+  - starter_greenfield_project
+  - starter_bug_fix
+  - starter_content_creation
+  - starter_security_audit
+  - starter_ops_change
+templateIds:
+  - manager
+  - research
+  - plan
+  - plan_review
+  - build
+  - build_review
+  - ui
+  - ui_review
+  - security
+  - ops
+healthStatus: healthy

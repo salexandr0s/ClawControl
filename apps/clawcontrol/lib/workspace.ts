@@ -6,7 +6,7 @@
  */
 
 import type { StationId } from '@clawcontrol/core'
-import { encodeWorkspaceId, readWorkspaceFileById, writeWorkspaceFileById, ensureWorkspaceRootExists } from './fs/workspace-fs'
+import { encodeWorkspaceId, writeWorkspaceFileById, ensureWorkspaceRootExists } from './fs/workspace-fs'
 import { slugifyDisplayName } from './agent-identity'
 
 // ============================================================================
@@ -161,6 +161,19 @@ export function generateHeartbeatContent(input: AgentTemplateInput): string {
 }
 
 /**
+ * Generate a MEMORY.md template for an agent.
+ */
+export function generateMemoryContent(input: AgentTemplateInput): string {
+  return `# MEMORY.md — ${input.displayName}
+
+## What I Should Remember
+- Project-specific norms and pitfalls.
+- Workflow governance rules (workflow-only; PlanReview gates; security veto finality).
+- Role-specific output discipline.
+`
+}
+
+/**
  * Generate the section to add to AGENTS.md for a new agent
  */
 export function generateAgentsMdSection(input: AgentTemplateInput): string {
@@ -193,8 +206,8 @@ export interface CreateAgentFilesResult {
   files: {
     soul?: string
     heartbeat?: string
+    memory?: string
     overlay?: string
-    agentsMd?: boolean
   }
   error?: string
 }
@@ -243,6 +256,19 @@ export async function createAgentFiles(input: CreateAgentFilesInput): Promise<Cr
     }
   }
 
+  const memoryContent = generateMemoryContent(templateInput)
+  const memoryId = encodeWorkspaceId(`/agents/${slug}/MEMORY.md`)
+
+  try {
+    await writeWorkspaceFileById(memoryId, memoryContent)
+  } catch (err) {
+    return {
+      success: false,
+      files: { soul: soulId, heartbeat: heartbeatId },
+      error: `Failed to write memory file: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  }
+
   const overlayContent = generateOverlayContent(templateInput)
   const overlayId = encodeWorkspaceId(`/agents/${slug}.md`)
 
@@ -251,30 +277,9 @@ export async function createAgentFiles(input: CreateAgentFilesInput): Promise<Cr
   } catch (err) {
     return {
       success: false,
-      files: { soul: soulId, heartbeat: heartbeatId },
+      files: { soul: soulId, heartbeat: heartbeatId, memory: memoryId },
       error: `Failed to write overlay file: ${err instanceof Error ? err.message : String(err)}`,
     }
-  }
-
-  const agentSection = generateAgentsMdSection(templateInput)
-  const agentsMdId = encodeWorkspaceId('/AGENTS.md')
-  let existingAgentsMd = ''
-  try {
-    existingAgentsMd = (await readWorkspaceFileById(agentsMdId)).content
-  } catch {
-    // AGENTS.md may not exist yet; create it.
-    existingAgentsMd = '# AGENTS\n'
-  }
-
-  const needsNewline = existingAgentsMd.length > 0 && !existingAgentsMd.endsWith('\n')
-  const appendedAgentsMd = existingAgentsMd + (needsNewline ? '\n' : '') + agentSection
-
-  let agentsMdOk = false
-  try {
-    await writeWorkspaceFileById(agentsMdId, appendedAgentsMd)
-    agentsMdOk = true
-  } catch {
-    agentsMdOk = false
   }
 
   return {
@@ -282,8 +287,8 @@ export async function createAgentFiles(input: CreateAgentFilesInput): Promise<Cr
     files: {
       soul: soulId,
       heartbeat: heartbeatId,
+      memory: memoryId,
       overlay: overlayId,
-      agentsMd: agentsMdOk,
     },
   }
 }

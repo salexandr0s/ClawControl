@@ -17,6 +17,7 @@ import { createFsSkillsRepo, type SkillsRepo } from './skills'
 import { createCliPluginsRepo, type PluginsRepo } from './plugins'
 import { createCliGatewayRepo, type GatewayRepo } from './gateway'
 import { createCliCronRepo, type CronRepo } from './cron'
+import { createDbClawHubInstallsRepo, type ClawHubInstallsRepo } from './clawhubInstalls'
 
 // ============================================================================
 // REPOSITORY CONTAINER
@@ -33,6 +34,7 @@ export interface Repos {
   activities: ActivitiesRepo
   receipts: ReceiptsRepo
   search: SearchRepo
+  clawhubInstalls: ClawHubInstallsRepo
 
   // FS-backed repos
   skills: SkillsRepo
@@ -63,6 +65,7 @@ export function createRepos(): Repos {
     activities: createDbActivitiesRepo(),
     receipts: createDbReceiptsRepo(),
     search: createDbSearchRepo(),
+    clawhubInstalls: createDbClawHubInstallsRepo(),
     skills: createFsSkillsRepo(),
     plugins: createCliPluginsRepo(),
     gateway: createCliGatewayRepo(),

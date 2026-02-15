@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getOrLoadWithCache, invalidateAsyncCache } from '@/lib/perf/async-cache'
+import { getOrLoadWithCache, invalidateAsyncCache, invalidateAsyncCacheByPrefix } from '@/lib/perf/async-cache'
 
 describe('async-cache', () => {
   it('returns cached values within ttl', async () => {
@@ -46,5 +46,34 @@ describe('async-cache', () => {
     expect(b.value).toBe('ok')
     expect(c.value).toBe('ok')
     expect(b.sharedInFlight || c.sharedInFlight).toBe(true)
+  })
+
+  it('invalidates cached entries by prefix', async () => {
+    invalidateAsyncCache()
+    let usageCalls = 0
+    let otherCalls = 0
+
+    await getOrLoadWithCache('usage.one', 10_000, async () => {
+      usageCalls += 1
+      return 'usage'
+    })
+    await getOrLoadWithCache('other.one', 10_000, async () => {
+      otherCalls += 1
+      return 'other'
+    })
+
+    invalidateAsyncCacheByPrefix('usage.')
+
+    await getOrLoadWithCache('usage.one', 10_000, async () => {
+      usageCalls += 1
+      return 'usage2'
+    })
+    await getOrLoadWithCache('other.one', 10_000, async () => {
+      otherCalls += 1
+      return 'other2'
+    })
+
+    expect(usageCalls).toBe(2)
+    expect(otherCalls).toBe(1)
   })
 })

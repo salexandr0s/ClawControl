@@ -180,6 +180,9 @@ model Agent {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
+  // Relations
+  clawHubSkillInstalls ClawHubSkillInstall[]
+
   @@index([status])
   @@index([station])
   @@index([teamId])
@@ -633,6 +636,36 @@ model Skill {
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   @@map("skills")
+}
+
+// ========================================================================
+// CLAWHUB MARKETPLACE (skill install tracking)
+// ========================================================================
+
+model ClawHubSkillInstall {
+  id            String    @id @default(cuid())
+  slug          String
+  displayName   String    @map("display_name")
+  version       String
+  scope         String    // global|agent
+  scopeKey      String    @map("scope_key") // __global__|<agentSlug>
+  agentId       String?   @map("agent_id")
+  sourceUrl     String    @map("source_url")
+  installMethod String    @map("install_method")
+  manifestHash  String?   @map("manifest_hash")
+  installedAt   DateTime  @default(now()) @map("installed_at")
+  installedBy   String    @default("user") @map("installed_by")
+  lastReceiptId String?   @map("last_receipt_id")
+  uninstalledAt DateTime? @map("uninstalled_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  agent Agent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@unique([slug, scopeKey])
+  @@index([slug])
+  @@index([agentId])
+  @@map("clawhub_skill_installs")
 }
 
 // ============================================================================

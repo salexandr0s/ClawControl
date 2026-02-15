@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Route } from 'next'
 import {
@@ -88,6 +88,10 @@ interface DashboardProps {
 
 interface UsageSummaryApi {
   data: {
+    range: 'daily' | 'weekly' | 'monthly'
+    from: string
+    to: string
+    agentId: string | null
     totals: {
       inputTokens: string
       outputTokens: string
@@ -114,6 +118,19 @@ interface UsageBreakdownApi {
     }>
   }
 }
+
+interface UsageSyncApi {
+  ok: boolean
+  lockAcquired: boolean
+  filesScanned: number
+  filesUpdated: number
+  sessionsUpdated: number
+  toolsUpserted: number
+  cursorResets: number
+  durationMs: number
+}
+
+const USAGE_WINDOW_DAYS = 30
 
 // ============================================================================
 // COLUMNS
@@ -238,112 +255,154 @@ export function Dashboard({
   const [usageBreakdown, setUsageBreakdown] = useState<UsageBreakdownApi['data'] | null>(null)
   const [usageLoading, setUsageLoading] = useState(true)
   const [usageSyncing, setUsageSyncing] = useState(false)
+  const [usageSyncMeta, setUsageSyncMeta] = useState<{ at: string; stats: UsageSyncApi } | null>(null)
+  const [usageError, setUsageError] = useState<string | null>(null)
   const [showDailyTable, setShowDailyTable] = useState(false)
+
+  const loadUsageMetrics = useCallback(async (metaSuffix: string) => {
+    const { fromIso, toIso } = resolveUsageWindowIso(USAGE_WINDOW_DAYS)
+    const summaryParams = new URLSearchParams({
+      range: 'daily',
+      from: fromIso,
+      to: toIso,
+    })
+    const breakdownParams = new URLSearchParams({
+      groupBy: 'model',
+      from: fromIso,
+      to: toIso,
+    })
+
+    const [summaryRes, breakdownRes] = await Promise.all([
+      timedClientFetch(`/api/openclaw/usage/summary?${summaryParams.toString()}`, undefined, {
+        page: 'dashboard',
+        name: `usage.summary.${metaSuffix}`,
+      }),
+      timedClientFetch(`/api/openclaw/usage/breakdown?${breakdownParams.toString()}`, undefined, {
+        page: 'dashboard',
+        name: `usage.breakdown.model.${metaSuffix}`,
+      }),
+    ])
+
+    if (summaryRes.ok) {
+      const summaryJson = (await summaryRes.json()) as UsageSummaryApi
+      setUsageSummary(summaryJson.data)
+    }
+
+      if (breakdownRes.ok) {
+        const breakdownJson = (await breakdownRes.json()) as UsageBreakdownApi
+        setUsageBreakdown(breakdownJson.data)
+      }
+  }, [])
 
   useEffect(() => {
     const loadUsage = async () => {
       setUsageLoading(true)
+      setUsageError(null)
       try {
-        const [summaryRes, breakdownRes] = await Promise.all([
-          timedClientFetch('/api/openclaw/usage/summary?range=daily', undefined, {
-            page: 'dashboard',
-            name: 'usage.summary',
-          }),
-          timedClientFetch('/api/openclaw/usage/breakdown?groupBy=model', undefined, {
-            page: 'dashboard',
-            name: 'usage.breakdown.model',
-          }),
-        ])
-
-        if (summaryRes.ok) {
-          const summaryJson = (await summaryRes.json()) as UsageSummaryApi
-          setUsageSummary(summaryJson.data)
-        }
-
-        if (breakdownRes.ok) {
-          const breakdownJson = (await breakdownRes.json()) as UsageBreakdownApi
-          setUsageBreakdown(breakdownJson.data)
-        }
+        await loadUsageMetrics('initial')
+      } catch {
+        setUsageError('Usage metrics failed to load')
       } finally {
         setUsageLoading(false)
       }
     }
 
     void loadUsage()
-  }, [])
+  }, [loadUsageMetrics])
 
   useEffect(() => {
     const warmSync = async () => {
       try {
-        await timedClientFetch('/api/openclaw/usage/sync', { method: 'POST' }, {
+        const syncRes = await timedClientFetch('/api/openclaw/usage/sync', { method: 'POST' }, {
           page: 'dashboard',
           name: 'usage.sync',
         })
-        const [summaryRes, breakdownRes] = await Promise.all([
-          timedClientFetch('/api/openclaw/usage/summary?range=daily', undefined, {
-            page: 'dashboard',
-            name: 'usage.summary.warm',
-          }),
-          timedClientFetch('/api/openclaw/usage/breakdown?groupBy=model', undefined, {
-            page: 'dashboard',
-            name: 'usage.breakdown.model.warm',
-          }),
-        ])
-        if (summaryRes.ok) {
-          const summaryJson = (await summaryRes.json()) as UsageSummaryApi
-          setUsageSummary(summaryJson.data)
+        if (syncRes.ok) {
+          const syncJson = (await syncRes.json()) as UsageSyncApi
+          setUsageSyncMeta({ at: new Date().toISOString(), stats: syncJson })
         }
-        if (breakdownRes.ok) {
-          const breakdownJson = (await breakdownRes.json()) as UsageBreakdownApi
-          setUsageBreakdown(breakdownJson.data)
-        }
+        await loadUsageMetrics('warm')
       } catch {
         // Keep dashboard responsive even when sync is unavailable.
       }
     }
     void warmSync()
-  }, [])
+  }, [loadUsageMetrics])
 
   const handleSyncUsage = async () => {
     setUsageSyncing(true)
+    setUsageError(null)
     try {
-      await timedClientFetch('/api/openclaw/usage/sync', { method: 'POST' }, {
+      const syncRes = await timedClientFetch('/api/openclaw/usage/sync', { method: 'POST' }, {
         page: 'dashboard',
         name: 'usage.sync.manual',
       })
 
-      const [summaryRes, breakdownRes] = await Promise.all([
-        timedClientFetch('/api/openclaw/usage/summary?range=daily', undefined, {
-          page: 'dashboard',
-          name: 'usage.summary.manual',
-        }),
-        timedClientFetch('/api/openclaw/usage/breakdown?groupBy=model', undefined, {
-          page: 'dashboard',
-          name: 'usage.breakdown.model.manual',
-        }),
-      ])
-
-      if (summaryRes.ok) {
-        const summaryJson = (await summaryRes.json()) as UsageSummaryApi
-        setUsageSummary(summaryJson.data)
+      if (!syncRes.ok) {
+        setUsageError(`Usage sync failed (${syncRes.status})`)
+        return
       }
 
-      if (breakdownRes.ok) {
-        const breakdownJson = (await breakdownRes.json()) as UsageBreakdownApi
-        setUsageBreakdown(breakdownJson.data)
-      }
+      const syncJson = (await syncRes.json()) as UsageSyncApi
+      setUsageSyncMeta({ at: new Date().toISOString(), stats: syncJson })
+
+      await loadUsageMetrics('manual')
+    } catch {
+      setUsageError('Usage sync failed')
     } finally {
       setUsageSyncing(false)
     }
   }
 
-  const usageSeries = useMemo(
-    () => (usageSummary?.series ?? []).slice(-14),
-    [usageSummary?.series]
-  )
+  const usageDayCount = useMemo(() => {
+    if (!usageSummary) return USAGE_WINDOW_DAYS
+    return getUtcInclusiveDayCount(usageSummary.from, usageSummary.to)
+  }, [usageSummary?.from, usageSummary?.to])
+
+  const avgPerDay = useMemo(() => {
+    if (!usageSummary) return null
+    const dayCount = BigInt(Math.max(1, usageDayCount))
+    try {
+      const totalTokens = BigInt(usageSummary.totals.totalTokens)
+      const totalCostMicros = BigInt(usageSummary.totals.totalCostMicros)
+      return {
+        avgTokens: (totalTokens / dayCount).toString(),
+        avgCostMicros: (totalCostMicros / dayCount).toString(),
+      }
+    } catch {
+      return null
+    }
+  }, [usageSummary, usageDayCount])
+
+  const usageSeries = useMemo(() => {
+    if (!usageSummary) return []
+    const fromDay = startOfUtcDay(new Date(usageSummary.from))
+    const toDay = startOfUtcDay(new Date(usageSummary.to))
+    const dayCount = getUtcInclusiveDayCount(fromDay.toISOString(), toDay.toISOString())
+    const targetDays = Math.min(USAGE_WINDOW_DAYS, dayCount)
+
+    const map = new Map((usageSummary.series ?? []).map((point) => [point.bucketStart, point]))
+    const start = new Date(toDay)
+    start.setUTCDate(start.getUTCDate() - (targetDays - 1))
+
+    const filled: Array<{ bucketStart: string; totalTokens: string; totalCostMicros: string }> = []
+    for (let i = 0; i < targetDays; i++) {
+      const next = new Date(start)
+      next.setUTCDate(start.getUTCDate() + i)
+      const bucketStart = next.toISOString()
+      const point = map.get(bucketStart)
+      filled.push({
+        bucketStart,
+        totalTokens: point?.totalTokens ?? '0',
+        totalCostMicros: point?.totalCostMicros ?? '0',
+      })
+    }
+
+    return filled
+  }, [usageSummary?.from, usageSummary?.to, usageSummary?.series])
 
   const dailyRows = useMemo(
-    () => usageSeries.slice(-7).reverse(),
+    () => usageSeries.slice().reverse(),
     [usageSeries]
   )
 
@@ -407,14 +466,19 @@ export function Dashboard({
             <div className="text-sm text-fg-2">Loading usage metrics…</div>
           ) : usageSummary ? (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <MiniMetric
-                  label="Total Tokens"
+                  label={`Total Tokens (${usageDayCount}d)`}
                   value={formatCompactNumber(usageSummary.totals.totalTokens)}
                 />
                 <MiniMetric
-                  label="Total Cost"
+                  label={`Total Cost (${usageDayCount}d)`}
                   value={formatUsdFromMicros(usageSummary.totals.totalCostMicros)}
+                />
+                <MiniMetric
+                  label={`Avg / day (${usageDayCount}d)`}
+                  value={avgPerDay ? formatUsdFromMicros(avgPerDay.avgCostMicros) : '—'}
+                  subValue={avgPerDay ? `Tokens: ${formatCompactNumber(avgPerDay.avgTokens)}` : undefined}
                 />
                 <MiniMetric
                   label="Cache Efficiency"
@@ -424,11 +488,20 @@ export function Dashboard({
                   label="Cache Read"
                   value={formatCompactNumber(usageSummary.totals.cacheReadTokens)}
                 />
+                <MiniMetric
+                  label="Last Sync"
+                  value={usageSyncMeta ? formatShortDateTime(usageSyncMeta.at) : '—'}
+                  subValue={usageSyncMeta ? formatUsageSyncSummary(usageSyncMeta.stats) : undefined}
+                />
               </div>
+
+              {usageError && (
+                <div className="text-xs text-status-danger">{usageError}</div>
+              )}
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs text-fg-2">Daily usage (tokens)</div>
+                  <div className="text-xs text-fg-2">Daily usage (tokens, last {USAGE_WINDOW_DAYS} days)</div>
                   <button
                     onClick={() => setShowDailyTable((prev) => !prev)}
                     className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border border-bd-0 bg-bg-3 text-fg-2 hover:text-fg-1"
@@ -454,9 +527,9 @@ export function Dashboard({
                       {usageSeries.map((point) => {
                         const value = Number(point.totalTokens)
                         const heightPct =
-                          maxSeriesValue > 0 && Number.isFinite(value)
-                            ? Math.max(8, (value / maxSeriesValue) * 100)
-                            : 8
+                          maxSeriesValue > 0 && Number.isFinite(value) && value > 0
+                            ? Math.max(2, (value / maxSeriesValue) * 100)
+                            : 0
                         return (
                           <div
                             key={point.bucketStart}
@@ -589,6 +662,66 @@ export function Dashboard({
   )
 }
 
+const USAGE_RANGE_ROUND_MS = 60_000
+
+function startOfUtcDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+}
+
+function resolveUsageWindowIso(days: number): { fromIso: string; toIso: string } {
+  const roundedNowMs = Math.floor(Date.now() / USAGE_RANGE_ROUND_MS) * USAGE_RANGE_ROUND_MS
+  const to = new Date(roundedNowMs)
+
+  const toDay = startOfUtcDay(to)
+  const safeDays = Math.max(1, Math.floor(days))
+  const from = new Date(toDay)
+  from.setUTCDate(toDay.getUTCDate() - (safeDays - 1))
+
+  return {
+    fromIso: from.toISOString(),
+    toIso: to.toISOString(),
+  }
+}
+
+function getUtcInclusiveDayCount(fromIso: string, toIso: string): number {
+  const from = startOfUtcDay(new Date(fromIso))
+  const to = startOfUtcDay(new Date(toIso))
+  const diffMs = to.getTime() - from.getTime()
+
+  if (!Number.isFinite(diffMs)) return 1
+
+  const dayCount = Math.floor(diffMs / 86_400_000) + 1
+  return dayCount > 0 ? dayCount : 1
+}
+
+function formatShortDateTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatDurationMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '0ms'
+  if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)}m`
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.round(ms)}ms`
+}
+
+function formatUsageSyncSummary(stats: UsageSyncApi): string {
+  if (!stats.lockAcquired) return 'Another sync is running'
+
+  const duration = formatDurationMs(stats.durationMs)
+  if (stats.sessionsUpdated > 0) return `Updated ${stats.sessionsUpdated} sessions (${duration})`
+  if (stats.filesUpdated > 0) return `Updated ${stats.filesUpdated} files (${duration})`
+  return `No updates (${duration})`
+}
+
 function formatCompactNumber(value: string): string {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return value
@@ -601,11 +734,14 @@ function formatUsdFromMicros(micros: string): string {
   return `$${parsed.toFixed(parsed >= 10 ? 2 : 4)}`
 }
 
-function MiniMetric({ label, value }: { label: string; value: string }) {
+function MiniMetric({ label, value, subValue }: { label: string; value: string; subValue?: string }) {
   return (
     <div className="p-2.5 rounded border border-bd-0 bg-bg-3">
       <div className="text-[11px] text-fg-2">{label}</div>
-      <div className="text-sm text-fg-0 font-medium mt-0.5">{value}</div>
+      <div className="text-sm text-fg-0 font-medium mt-0.5 tabular-nums">{value}</div>
+      {subValue && (
+        <div className="text-[11px] text-fg-2 mt-1 tabular-nums">{subValue}</div>
+      )}
     </div>
   )
 }

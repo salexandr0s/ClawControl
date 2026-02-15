@@ -37,12 +37,9 @@ Recommended files:
 
 - `SOUL.md`
 - `HEARTBEAT.md` (recommended in v1; required for ClawControl starter defaults)
+- `MEMORY.md` (recommended; required by ClawControl starter packs and most clawpack bundles)
 - `overlay.md`
 - `README.md`
-
-Optional (template-specific):
-
-- `MEMORY.md` (agent-local scaffold, if you render it into `agents/<id>/MEMORY.md`)
 
 Example:
 
@@ -51,6 +48,7 @@ Example:
   template.json
   SOUL.md
   HEARTBEAT.md
+  MEMORY.md
   overlay.md
   README.md
 ```
@@ -176,6 +174,7 @@ If `render.targets` is omitted, defaults are used:
 
 - `SOUL.md -> workspace/agents/{{agentSlug}}/SOUL.md`
 - `HEARTBEAT.md -> workspace/agents/{{agentSlug}}/HEARTBEAT.md`
+- `MEMORY.md -> workspace/agents/{{agentSlug}}/MEMORY.md`
 - `overlay.md -> workspace/agents/{{agentSlug}}.md`
 
 ## Import / Export Formats
@@ -307,7 +306,7 @@ Before distributing a template:
 2. Validate id against strict pattern (`^[a-z0-9][a-z0-9-_]{1,48}[a-z0-9]$`).
 3. Confirm `template.json` has only allowed keys.
 4. Ensure `paramsSchema.required` keys exist in `paramsSchema.properties`.
-5. Include `SOUL.md` and `overlay.md` sources referenced by `render.targets`.
+5. Include `SOUL.md`, `HEARTBEAT.md`, `MEMORY.md`, and `overlay.md` sources referenced by `render.targets`.
 6. Remove unresolved placeholders you did not intend to keep literal.
 7. Add `README.md` with usage, required params, and expected outputs.
 8. Preview with `/api/agents/create-from-template/preview` using required params.
@@ -316,7 +315,7 @@ Before distributing a template:
 
 ## Known Implementation Notes
 
-- Create-from-template renders previews and registers the agent, but does not persist rendered files to disk yet.
+- Create-from-template renders previews, registers the agent, and materializes allowlisted workspace files (create-if-missing).
 - Export currently returns JSON payload even though import supports ZIP.
 - Treat uploaded template content as untrusted input and avoid embedding secrets.
 
@@ -356,7 +355,7 @@ Before distributing a template:
 
 ## Last updated
 
-2026-02-13
+2026-02-14
 
 ## Related pages
 

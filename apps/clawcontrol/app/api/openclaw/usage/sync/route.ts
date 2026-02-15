@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { invalidateAsyncCacheByPrefix } from '@/lib/perf/async-cache'
 import { withIngestionLease } from '@/lib/openclaw/ingestion-lease'
 import { syncUsageTelemetry } from '@/lib/openclaw/usage-sync'
 
@@ -33,6 +34,9 @@ export async function POST(request: NextRequest) {
       maxMs: body.maxMs,
       maxFiles: body.maxFiles,
     })
+
+    // Ensure summary/breakdown endpoints reflect fresh DB state immediately after a sync.
+    invalidateAsyncCacheByPrefix('usage.')
 
     return {
       ok: true,

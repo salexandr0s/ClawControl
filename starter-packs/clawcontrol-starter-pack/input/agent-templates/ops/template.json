@@ -1,0 +1,40 @@
+{
+  "id": "ops",
+  "name": "Ops",
+  "description": "Operational changes (deploy, infra, migrations) with safety and rollback mindset.",
+  "version": "1.0.0",
+  "role": "OPS",
+  "render": {
+    "engine": "mustache",
+    "targets": [
+      {
+        "source": "SOUL.md",
+        "destination": "workspace/agents/{{agentSlug}}/SOUL.md"
+      },
+      {
+        "source": "HEARTBEAT.md",
+        "destination": "workspace/agents/{{agentSlug}}/HEARTBEAT.md"
+      },
+      {
+        "source": "MEMORY.md",
+        "destination": "workspace/agents/{{agentSlug}}/MEMORY.md"
+      },
+      {
+        "source": "overlay.md",
+        "destination": "workspace/agents/{{agentSlug}}.md"
+      }
+    ]
+  },
+  "provisioning": {
+    "enabled": true,
+    "steps": [
+      "create_files",
+      "register_agent"
+    ]
+  },
+  "author": "clawcontrol",
+  "tags": [
+    "clawcontrol",
+    "default"
+  ]
+}

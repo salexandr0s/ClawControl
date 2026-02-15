@@ -66,7 +66,7 @@ export function slugifyDisplayName(input: string): string {
   const slug = input
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[^a-z0-9_-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-')
 

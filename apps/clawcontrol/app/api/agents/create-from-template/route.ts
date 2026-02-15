@@ -4,18 +4,43 @@ import { getRepos } from '@/lib/repo'
 import {
   getTemplateById,
   renderTemplate,
+  materializeTemplateFiles,
   previewTemplateRender,
 } from '@/lib/templates'
 import { upsertAgentToOpenClaw, removeAgentFromOpenClaw } from '@/lib/services/openclaw-config'
-import { generateAgentName, generateSessionKey, AGENT_ROLE_MAP } from '@/lib/workspace'
-import { buildUniqueSlug, slugifyDisplayName } from '@/lib/agent-identity'
+import { buildCapabilitiesForTemplate } from '@/lib/services/agent-provisioning'
+import { prisma } from '@/lib/db'
+import { validateWorkspacePath } from '@/lib/fs/path-policy'
+import { generateSessionKey, AGENT_ROLE_MAP } from '@/lib/workspace'
+import { buildUniqueSlug } from '@/lib/agent-identity'
 import { isCanonicalStationId, normalizeStationId, type StationId } from '@clawcontrol/core'
+import { promises as fsp } from 'node:fs'
 
 interface CreateFromTemplateInput {
   templateId: string
   params: Record<string, unknown>
   displayName?: string
   typedConfirmText: string
+}
+
+async function ensureWorkspaceFilesExist(paths: string[]): Promise<{ ok: true } | { ok: false; missing: string[] }> {
+  const missing: string[] = []
+  for (const workspacePath of paths) {
+    const validated = validateWorkspacePath(workspacePath)
+    if (!validated.valid || !validated.resolvedPath) {
+      missing.push(workspacePath)
+      continue
+    }
+
+    try {
+      await fsp.access(validated.resolvedPath)
+    } catch {
+      missing.push(workspacePath)
+    }
+  }
+
+  if (missing.length > 0) return { ok: false, missing }
+  return { ok: true }
 }
 
 /**
@@ -91,12 +116,9 @@ export async function POST(request: NextRequest) {
 
   // Generate display name, immutable slug, and session key
   const role = template.config?.role || template.role
-  const agentDisplayName = String(input.displayName ?? generateAgentName(role)).trim()
+  const agentDisplayName = String(input.displayName ?? template.name).trim()
   const existingAgents = await repos.agents.list()
-  const agentSlug = buildUniqueSlug(
-    slugifyDisplayName(agentDisplayName),
-    existingAgents.map((agent) => agent.slug)
-  )
+  const agentSlug = buildUniqueSlug(templateId, existingAgents.map((agent) => agent.slug))
 
   const duplicateByName = await repos.agents.getByName(agentDisplayName)
   if (duplicateByName) {
@@ -125,7 +147,7 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     )
   }
-  const stationId: StationId = station
+  const stationId: StationId = templateId === 'security' ? 'security' : station
 
   // Merge defaults with provided params
   const mergedParams = {
@@ -159,14 +181,10 @@ export async function POST(request: NextRequest) {
       chunk: `Creating agent ${agentDisplayName} (${agentSlug}) from template ${template.name}...\n`,
     })
 
-    // Build capabilities object based on template role
-    const capabilitiesObj: Record<string, boolean> = {
-      canRead: true,
-      canWrite: true,
-      canExecute: role === 'BUILD' || role === 'OPS',
-      canApprove: role === 'CEO' || role === 'REVIEW',
-      canDelegate: role === 'CEO' || role === 'MANAGER',
-    }
+    const capabilitiesObj = buildCapabilitiesForTemplate({
+      templateId,
+      stationId,
+    })
 
     await repos.receipts.append(receipt.id, {
       stream: 'stdout',
@@ -203,7 +221,7 @@ export async function POST(request: NextRequest) {
       role,
       station: stationId,
       sessionKey,
-      capabilities: capabilitiesObj,
+      capabilities: capabilitiesObj as unknown as Record<string, boolean>,
       wipLimit: 2,
     })
     createdAgentId = agent.id
@@ -221,6 +239,51 @@ export async function POST(request: NextRequest) {
       chunk: `  Files to generate: ${renderedFiles.length}\n`,
     })
 
+    // Materialize (create-if-missing) the rendered workspace files.
+    const materialized = await materializeTemplateFiles(templateId, mergedParams)
+    if (!materialized.ok) {
+      await repos.receipts.append(receipt.id, {
+        stream: 'stderr',
+        chunk: `Failed to materialize template files: ${materialized.error}\n`,
+      })
+      if (materialized.rejectedTargets.length > 0) {
+        await repos.receipts.append(receipt.id, {
+          stream: 'stderr',
+          chunk: `Rejected targets: ${materialized.rejectedTargets.map((t) => t.destination).join(', ')}\n`,
+        })
+      }
+      throw new Error(materialized.error || 'Template file materialization failed')
+    }
+
+    if (materialized.writtenPaths.length > 0) {
+      await repos.receipts.append(receipt.id, {
+        stream: 'stdout',
+        chunk: `  Materialized files (written):\n${materialized.writtenPaths.map((p) => `    - ${p}`).join('\n')}\n`,
+      })
+    }
+    if (materialized.skippedPaths.length > 0) {
+      await repos.receipts.append(receipt.id, {
+        stream: 'stdout',
+        chunk: `  Materialized files (skipped existing):\n${materialized.skippedPaths.map((p) => `    - ${p}`).join('\n')}\n`,
+      })
+    }
+
+    // Verify required files exist after materialization.
+    const requiredWorkspaceFiles = [
+      `/agents/${agentSlug}/SOUL.md`,
+      `/agents/${agentSlug}/HEARTBEAT.md`,
+      `/agents/${agentSlug}/MEMORY.md`,
+    ]
+    const expectsOverlay = renderedFiles.some((file) => file.destination === `workspace/agents/${agentSlug}.md`)
+    if (expectsOverlay) {
+      requiredWorkspaceFiles.push(`/agents/${agentSlug}.md`)
+    }
+
+    const verify = await ensureWorkspaceFilesExist(requiredWorkspaceFiles)
+    if (!verify.ok) {
+      throw new Error(`Missing required agent files after provisioning: ${verify.missing.join(', ')}`)
+    }
+
     // Log activity
     await repos.activities.create({
       type: 'agent.created_from_template',
@@ -237,6 +300,10 @@ export async function POST(request: NextRequest) {
         station: stationId,
         filesGenerated: renderedFiles.length,
         openClawAgentId,
+        materialized: {
+          written: materialized.writtenPaths,
+          skipped: materialized.skippedPaths,
+        },
       },
     })
 
@@ -253,6 +320,10 @@ export async function POST(request: NextRequest) {
         filesGenerated: renderedFiles.length,
         openClawAgentId,
         openClawSynced: true,
+        materialized: {
+          written: materialized.writtenPaths,
+          skipped: materialized.skippedPaths,
+        },
       },
     })
 
@@ -260,6 +331,10 @@ export async function POST(request: NextRequest) {
       data: agent,
       agentDisplayName,
       agentSlug,
+      materialized: {
+        written: materialized.writtenPaths,
+        skipped: materialized.skippedPaths,
+      },
       files: renderedFiles.map((f) => ({
         source: f.source,
         destination: f.destination,
@@ -275,12 +350,29 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Failed to create agent'
 
-    if (!createdAgentId && openClawEntryCreated && openClawAgentId) {
+    // Roll back DB agent record if it was created.
+    if (createdAgentId) {
+      try {
+        await prisma.agent.delete({ where: { id: createdAgentId } })
+        await repos.receipts.append(receipt.id, {
+          stream: 'stdout',
+          chunk: `Rolled back DB agent record ${createdAgentId} after provisioning failure.\n`,
+        })
+      } catch (rollbackErr) {
+        await repos.receipts.append(receipt.id, {
+          stream: 'stderr',
+          chunk: `Failed to roll back DB agent record ${createdAgentId}: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}\n`,
+        })
+      }
+    }
+
+    // Roll back OpenClaw entry if this request created it.
+    if (openClawEntryCreated && openClawAgentId) {
       const rollback = await removeAgentFromOpenClaw(openClawAgentId)
       await repos.receipts.append(receipt.id, {
         stream: rollback.ok ? 'stdout' : 'stderr',
         chunk: rollback.ok
-          ? `Rolled back OpenClaw entry for ${openClawAgentId} after DB failure.\n`
+          ? `Rolled back OpenClaw entry for ${openClawAgentId} after failure.\n`
           : `Failed to roll back OpenClaw entry for ${openClawAgentId}: ${rollback.error}\n`,
       })
     }

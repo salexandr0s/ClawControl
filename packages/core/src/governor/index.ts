@@ -102,6 +102,7 @@ export type ActionKind =
   | 'team.import'
   | 'team.export'
   | 'team.deploy'
+  | 'team.instantiate_agents'
   // Package actions
   | 'package.import'
   | 'package.deploy'
@@ -601,6 +602,12 @@ export const ACTION_POLICIES: Record<ActionKind, ActionPolicy> = {
     requiresApproval: true,
     approvalType: 'scope_change',
     description: 'Deploy team package contents',
+  },
+  'team.instantiate_agents': {
+    riskLevel: 'caution',
+    confirmMode: 'CONFIRM',
+    requiresApproval: false,
+    description: 'Instantiate team agents from templates',
   },
 
   // Package actions

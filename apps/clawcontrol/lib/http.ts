@@ -1001,6 +1001,21 @@ export interface SkillWithContent extends SkillSummary {
   skillMd: string
   config?: string
   validation?: SkillValidationResult
+  marketplace?: SkillMarketplaceInstallSummary | null
+}
+
+export interface SkillMarketplaceInstallSummary {
+  provider: 'clawhub'
+  slug: string
+  scope: 'global' | 'agent'
+  scopeKey: string
+  version: string
+  sourceUrl: string
+  installMethod: string
+  manifestHash: string | null
+  installedAt: Date
+  installedBy: string
+  lastReceiptId: string | null
 }
 
 export const skillsApi = {
@@ -1157,6 +1172,206 @@ export const skillsApi = {
       )
     }
     return res.json() as Promise<{ data: SkillSummary }>
+  }),
+}
+
+// ============================================================================
+// CLAWHUB MARKETPLACE
+// ============================================================================
+
+export type ClawHubListSort = 'downloads' | 'stars' | 'updated'
+
+export interface ClawHubOwnerSummary {
+  handle: string
+  displayName: string
+  image: string | null
+}
+
+export interface ClawHubModerationSummary {
+  isSuspicious: boolean
+  isMalwareBlocked: boolean
+}
+
+export interface ClawHubInstalledSummary {
+  any: boolean
+  global: { version: string; installedAt: Date; lastReceiptId: string | null } | null
+  agents: Array<{ agentSlug: string; version: string; installedAt: Date; lastReceiptId: string | null }>
+  agentCount: number
+}
+
+export interface ClawHubStatsSummary {
+  comments: number
+  downloads: number
+  installsAllTime: number
+  installsCurrent: number
+  stars: number
+  versions: number
+}
+
+export interface ClawHubLatestVersionSummary {
+  version: string
+  createdAt: number
+  changelog: string
+}
+
+export interface ClawHubMarketplaceSkillListItem {
+  slug: string
+  displayName: string
+  summary: string
+  tags: { latest: string } | null
+  stats: ClawHubStatsSummary | null
+  createdAt: number
+  updatedAt: number
+  latestVersion: ClawHubLatestVersionSummary | null
+  owner: ClawHubOwnerSummary | null
+  moderation: ClawHubModerationSummary | null
+  installed: ClawHubInstalledSummary
+}
+
+export interface ClawHubMarketplaceSkillDetail {
+  skill: {
+    slug: string
+    displayName: string
+    summary: string
+    tags: { latest: string } | null
+    stats: ClawHubStatsSummary
+    createdAt: number
+    updatedAt: number
+  }
+  latestVersion: ClawHubLatestVersionSummary | null
+  owner: {
+    handle: string
+    userId: string
+    displayName: string
+    image: string | null
+  } | null
+  moderation: ClawHubModerationSummary | null
+  installed: ClawHubInstalledSummary
+}
+
+export interface ClawHubVersionsListItem {
+  version: string
+  createdAt: number
+  changelog: string
+  changelogSource: string | null
+}
+
+export interface ClawHubVersionFileEntry {
+  path: string
+  size: number
+  sha256: string
+  contentType: string | null
+}
+
+export interface ClawHubSkillVersionDetail {
+  skill: { slug: string; displayName: string }
+  version: {
+    version: string
+    createdAt: number
+    changelog: string
+    changelogSource: string | null
+    files: ClawHubVersionFileEntry[]
+  }
+  manifestHash: string
+}
+
+export interface ClawHubLocalScanWarning {
+  code: string
+  severity: 'info' | 'warning' | 'danger'
+  message: string
+}
+
+export interface ClawHubLocalScanResult {
+  blocked: boolean
+  moderation: ClawHubModerationSummary | null
+  warnings: ClawHubLocalScanWarning[]
+  stats: { fileCount: number; totalBytes: number }
+}
+
+export const clawhubApi = {
+  listSkills: (params?: {
+    q?: string
+    sort?: ClawHubListSort
+    limit?: number
+    cursor?: string
+    nonSuspiciousOnly?: boolean
+  }) => apiGet<{ data: ClawHubMarketplaceSkillListItem[]; meta: { cursor: string | null; hasMore: boolean } }>(
+    '/api/clawhub/skills',
+    params
+  ),
+
+  getSkill: (slug: string) => apiGet<{ data: ClawHubMarketplaceSkillDetail }>(`/api/clawhub/skills/${slug}`),
+
+  listVersions: (slug: string, params?: { limit?: number; cursor?: string }) =>
+    apiGet<{ data: ClawHubVersionsListItem[]; meta: { cursor: string | null; hasMore: boolean } }>(
+      `/api/clawhub/skills/${slug}/versions`,
+      params
+    ),
+
+  getVersion: (slug: string, version: string) =>
+    apiGet<{ data: ClawHubSkillVersionDetail }>(`/api/clawhub/skills/${slug}/versions/${version}`),
+
+  getFileText: (slug: string, version: string, path: string) =>
+    apiFetch(`/api/clawhub/skills/${slug}/file?version=${encodeURIComponent(version)}&path=${encodeURIComponent(path)}`, {
+      method: 'GET',
+      headers: { Accept: 'text/plain,text/markdown,*/*' },
+    }).then(async (res) => {
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({ error: 'Failed to fetch file' }))
+        throw new HttpError(json.error || 'Failed to fetch file', res.status, json.code, json.details)
+      }
+      return res.text()
+    }),
+
+  scan: (slug: string, version: string) =>
+    apiGet<{ data: ClawHubLocalScanResult }>(`/api/clawhub/skills/${slug}/scan`, { version }),
+
+  install: (slug: string, data: {
+    version: string
+    scope: 'global' | 'agent'
+    agentSlugs?: string[]
+    overwrite?: boolean
+    typedConfirmText: string
+  }) => apiFetch(`/api/clawhub/skills/${slug}/install`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(data),
+  }).then(async (res) => {
+    const json = await res.json().catch(() => ({ error: 'Install failed' }))
+    if (!res.ok) {
+      throw new HttpError(json.error || 'Install failed', res.status, json.code || json.error, {
+        ...(json.details ? { ...json.details } : {}),
+        ...(json.policy ? { policy: json.policy } : {}),
+        ...(json.receiptId ? { receiptId: json.receiptId } : {}),
+      })
+    }
+    return json as { data: unknown; receiptId: string }
+  }),
+
+  uninstall: (slug: string, data: {
+    scope: 'global' | 'agent'
+    agentSlugs?: string[]
+    typedConfirmText: string
+  }) => apiFetch(`/api/clawhub/skills/${slug}/uninstall`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(data),
+  }).then(async (res) => {
+    const json = await res.json().catch(() => ({ error: 'Uninstall failed' }))
+    if (!res.ok) {
+      throw new HttpError(json.error || 'Uninstall failed', res.status, json.code || json.error, {
+        ...(json.details ? { ...json.details } : {}),
+        ...(json.policy ? { policy: json.policy } : {}),
+        ...(json.receiptId ? { receiptId: json.receiptId } : {}),
+      })
+    }
+    return json as { success: boolean; receiptId: string }
   }),
 }
 
@@ -1912,6 +2127,25 @@ export interface AgentTeamSummary {
   updatedAt: string
 }
 
+export interface TeamInstantiateAgentsOutcome {
+  templateId: string
+  status: 'created' | 'existing'
+  agentId: string
+  agentSlug: string
+  filesWritten: string[]
+  filesSkipped: string[]
+}
+
+export interface TeamInstantiateAgentsResult {
+  teamId: string
+  createdAgents: Array<{ id: string; slug: string; displayName: string }>
+  existingAgents: Array<{ id: string; slug: string; displayName: string }>
+  outcomes: TeamInstantiateAgentsOutcome[]
+  filesWritten: string[]
+  filesSkipped: string[]
+  receiptId: string
+}
+
 export type ClawPackageKind = 'agent_template' | 'agent_team' | 'workflow' | 'team_with_workflows'
 
 export interface PackageImportAnalysis {
@@ -1937,6 +2171,7 @@ export interface PackageImportAnalysis {
     workflows: string[]
     teams: string[]
   }
+  installDoc?: { path: string; preview: string } | null
   stagedUntil: string
 }
 
@@ -2074,6 +2309,12 @@ export const agentTeamsApi = {
 
   delete: (id: string, data: { typedConfirmText?: string }) =>
     apiDeleteJson<{ success: true }, { typedConfirmText?: string }>(`/api/agent-teams/${id}`, data),
+
+  instantiateAgents: (id: string, data: { typedConfirmText?: string }) =>
+    apiPost<{ data: TeamInstantiateAgentsResult }, { typedConfirmText?: string }>(
+      `/api/agent-teams/${id}/instantiate`,
+      data
+    ),
 
   export: (id: string, confirm?: string) => {
     const query = confirm ? `?confirm=${encodeURIComponent(confirm)}` : ''

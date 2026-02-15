@@ -16,6 +16,17 @@ export function invalidateAsyncCache(key?: string): void {
   inFlight.clear()
 }
 
+export function invalidateAsyncCacheByPrefix(prefix: string): void {
+  if (!prefix) return
+
+  for (const key of ttlCache.keys()) {
+    if (key.startsWith(prefix)) {
+      ttlCache.delete(key)
+      inFlight.delete(key)
+    }
+  }
+}
+
 export async function getOrLoadWithCache<T>(
   key: string,
   ttlMs: number,

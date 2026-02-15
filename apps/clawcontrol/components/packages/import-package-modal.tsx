@@ -184,6 +184,18 @@ export function ImportPackageModal({
                 <div>Selection: {analysis.summary.hasSelection ? 'yes' : 'no'}</div>
               </div>
 
+              {analysis.installDoc?.preview && (
+                <div className="rounded-[var(--radius-sm)] border border-bd-0 bg-bg-3 p-3 space-y-2">
+                  <div className="text-xs font-medium text-fg-0">Post-install</div>
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-[var(--radius-sm)] bg-bg-2 p-2 text-[11px] text-fg-1">
+                    {analysis.installDoc.preview}
+                  </pre>
+                  <div className="text-[11px] text-fg-2">
+                    After deploy: go to Agents → Teams and click Instantiate Agents.
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <label className="flex items-center gap-2 text-fg-1">
                   <input type="checkbox" checked={applyTemplates} onChange={(e) => setApplyTemplates(e.target.checked)} />

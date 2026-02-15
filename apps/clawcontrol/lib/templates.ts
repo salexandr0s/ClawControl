@@ -8,7 +8,7 @@
 import Ajv from 'ajv'
 import { existsSync } from 'node:fs'
 import { promises as fsp } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   AGENT_TEMPLATE_SCHEMA,
   TEMPLATE_ID_PATTERN,
@@ -140,6 +140,148 @@ export function isValidTemplatePath(path: string): boolean {
  */
 export function getTemplateDir(templateId: string): string {
   return `${TEMPLATES_BASE_PATH}/${templateId}`
+}
+
+// ============================================================================
+// TEMPLATE FILE MATERIALIZATION (PROVISIONING)
+// ============================================================================
+
+const AGENT_SLUG_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/
+
+export interface TemplateMaterializeResult {
+  ok: boolean
+  writtenPaths: string[]
+  skippedPaths: string[]
+  rejectedTargets: Array<{ source: string; destination: string; reason: string }>
+  error?: string
+}
+
+function isAllowedProvisionedWorkspacePath(workspacePath: string): boolean {
+  // Allowlist only the core agent files expected by the starter packs.
+  // This is intentionally strict to avoid templates writing arbitrary files in v1 provisioning.
+  const dirMatch = workspacePath.match(/^\/agents\/([^/]+)\/(SOUL|HEARTBEAT|MEMORY)\.md$/)
+  if (dirMatch) {
+    return AGENT_SLUG_PATTERN.test(dirMatch[1])
+  }
+
+  const overlayMatch = workspacePath.match(/^\/agents\/([^/]+)\.md$/)
+  if (overlayMatch) {
+    return AGENT_SLUG_PATTERN.test(overlayMatch[1])
+  }
+
+  return false
+}
+
+/**
+ * Template render targets use destinations like `workspace/agents/{{agentSlug}}/SOUL.md`.
+ * This normalizes those into validated workspace paths (e.g. `/agents/foo/SOUL.md`).
+ */
+export function normalizeTemplateDestinationToWorkspacePath(destination: string): {
+  ok: true
+  workspacePath: string
+  resolvedPath: string
+} | {
+  ok: false
+  reason: string
+} {
+  const trimmed = String(destination ?? '').trim()
+  if (!trimmed) return { ok: false, reason: 'Empty destination' }
+
+  if (!trimmed.startsWith('workspace/')) {
+    return { ok: false, reason: 'Only workspace/ destinations are allowed for provisioning' }
+  }
+
+  const workspacePath = `/${trimmed.slice('workspace/'.length)}`
+  if (!isAllowedProvisionedWorkspacePath(workspacePath)) {
+    return { ok: false, reason: `Destination not allowlisted for provisioning: ${workspacePath}` }
+  }
+
+  const validated = validateWorkspacePath(workspacePath)
+  if (!validated.valid || !validated.resolvedPath) {
+    return { ok: false, reason: validated.error || `Invalid workspace path: ${workspacePath}` }
+  }
+
+  return { ok: true, workspacePath, resolvedPath: validated.resolvedPath }
+}
+
+/**
+ * Render a template and materialize (write) the rendered workspace files.
+ *
+ * Behavior is create-if-missing (no overwrite).
+ * If any target is rejected or a write fails, any newly written files are rolled back (best-effort).
+ */
+export async function materializeTemplateFiles(
+  templateId: string,
+  params: Record<string, unknown>
+): Promise<TemplateMaterializeResult> {
+  const writtenPaths: string[] = []
+  const skippedPaths: string[] = []
+  const rejectedTargets: Array<{ source: string; destination: string; reason: string }> = []
+  const writtenResolved: string[] = []
+
+  const rendered = await previewTemplateRender(templateId, params)
+
+  for (const file of rendered) {
+    const normalized = normalizeTemplateDestinationToWorkspacePath(file.destination)
+    if (!normalized.ok) {
+      rejectedTargets.push({
+        source: file.source,
+        destination: file.destination,
+        reason: normalized.reason,
+      })
+      continue
+    }
+
+    try {
+      await fsp.mkdir(dirname(normalized.resolvedPath), { recursive: true })
+      await fsp.writeFile(normalized.resolvedPath, file.content, { encoding: 'utf8', flag: 'wx' })
+      writtenPaths.push(normalized.workspacePath)
+      writtenResolved.push(normalized.resolvedPath)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'EEXIST') {
+        skippedPaths.push(normalized.workspacePath)
+        continue
+      }
+
+      // Roll back any files written during this call.
+      for (const absPath of writtenResolved) {
+        try {
+          await fsp.rm(absPath, { force: true })
+        } catch {
+          // best-effort
+        }
+      }
+
+      return {
+        ok: false,
+        writtenPaths,
+        skippedPaths,
+        rejectedTargets,
+        error: err instanceof Error ? err.message : String(err),
+      }
+    }
+  }
+
+  if (rejectedTargets.length > 0) {
+    for (const absPath of writtenResolved) {
+      try {
+        await fsp.rm(absPath, { force: true })
+      } catch {
+        // best-effort
+      }
+    }
+
+    return {
+      ok: false,
+      writtenPaths,
+      skippedPaths,
+      rejectedTargets,
+      error: 'One or more template destinations were rejected for provisioning.',
+    }
+  }
+
+  return { ok: true, writtenPaths, skippedPaths, rejectedTargets }
 }
 
 // ============================================================================
@@ -423,6 +565,7 @@ export async function createTemplateScaffold(templateId: string, name: string, r
       targets: [
         { source: 'SOUL.md', destination: 'workspace/agents/{{agentSlug}}/SOUL.md' },
         { source: 'HEARTBEAT.md', destination: 'workspace/agents/{{agentSlug}}/HEARTBEAT.md' },
+        { source: 'MEMORY.md', destination: 'workspace/agents/{{agentSlug}}/MEMORY.md' },
         { source: 'overlay.md', destination: 'workspace/agents/{{agentSlug}}.md' },
       ],
     },
@@ -493,6 +636,19 @@ Created from ${templateId} template
 `,
       'utf8'
     )
+    await fsp.writeFile(
+      join(absDir, 'MEMORY.md'),
+      `# MEMORY.md — {{agentName}}
+
+## What I Should Remember
+- Key project-specific norms and pitfalls.
+- Anything that helps me act consistently across runs.
+
+## Output Discipline
+- Follow the exact output format requested by the workflow stage.
+`,
+      'utf8'
+    )
 
     invalidateTemplatesCache()
     return { success: true, templatePath }
@@ -544,6 +700,7 @@ export async function previewTemplateRender(
   const targets = config.render?.targets || [
     { source: 'SOUL.md', destination: 'workspace/agents/{{agentSlug}}/SOUL.md' },
     { source: 'HEARTBEAT.md', destination: 'workspace/agents/{{agentSlug}}/HEARTBEAT.md' },
+    { source: 'MEMORY.md', destination: 'workspace/agents/{{agentSlug}}/MEMORY.md' },
     { source: 'overlay.md', destination: 'workspace/agents/{{agentSlug}}.md' },
   ]
 
