@@ -26,6 +26,100 @@ function restoreEnv(key: string, value: string | undefined): void {
   process.env[key] = value
 }
 
+async function writeWorkflowFile(workspaceRoot: string, fileName: string, yamlBody: string): Promise<void> {
+  const workflowsDir = join(workspaceRoot, 'workflows')
+  await fsp.mkdir(workflowsDir, { recursive: true })
+  await fsp.writeFile(join(workflowsDir, fileName), `${yamlBody.trim()}\n`, 'utf8')
+}
+
+async function seedWorkspaceWorkflows(workspaceRoot: string): Promise<void> {
+  await writeWorkflowFile(
+    workspaceRoot,
+    'cc_bug_fix.yaml',
+    `
+id: cc_bug_fix
+description: Bug-fix workflow
+stages:
+  - ref: triage
+    agent: ops
+`
+  )
+  await writeWorkflowFile(
+    workspaceRoot,
+    'cc_content_creation.yaml',
+    `
+id: cc_content_creation
+description: Content workflow
+stages:
+  - ref: draft
+    agent: ui
+`
+  )
+  await writeWorkflowFile(
+    workspaceRoot,
+    'cc_greenfield_project.yaml',
+    `
+id: cc_greenfield_project
+description: Greenfield workflow
+stages:
+  - ref: plan
+    agent: plan
+  - ref: implement
+    agent: build
+    type: loop
+    loop:
+      over: stories
+      completion: all_done
+`
+  )
+  await writeWorkflowFile(
+    workspaceRoot,
+    'cc_ops_change.yaml',
+    `
+id: cc_ops_change
+description: Ops-change workflow
+stages:
+  - ref: plan
+    agent: ops
+`
+  )
+  await writeWorkflowFile(
+    workspaceRoot,
+    'cc_security_audit.yaml',
+    `
+id: cc_security_audit
+description: Security workflow
+stages:
+  - ref: audit
+    agent: security
+`
+  )
+
+  await fsp.writeFile(
+    join(workspaceRoot, 'workflows', 'workflow-selection.yaml'),
+    [
+      'defaultWorkflowId: cc_greenfield_project',
+      'rules:',
+      '  - id: p0_security',
+      '    workflowId: cc_security_audit',
+      '    priority: [P0]',
+      '    tagsAny: [security, vuln]',
+      '    precedes: [p0_bugfix]',
+      '',
+      '  - id: p0_bugfix',
+      '    workflowId: cc_bug_fix',
+      '    priority: [P0]',
+      '    tagsAny: [bug, incident]',
+      '',
+      '  - id: content_focus',
+      '    workflowId: cc_content_creation',
+      '    tagsAny: [content, docs]',
+      '',
+    ].join('\n'),
+    'utf8'
+  )
+}
+
 beforeEach(() => {
   tempWorkspace = join(tmpdir(), `workflow-registry-test-${randomUUID()}`)
   return fsp.mkdir(tempWorkspace, { recursive: true }).then(async () => {
@@ -37,6 +131,8 @@ beforeEach(() => {
       process.env.CLAWCONTROL_SETTINGS_PATH,
       JSON.stringify({ workspacePath: tempWorkspace, updatedAt: new Date().toISOString() })
     )
+
+    await seedWorkspaceWorkflows(tempWorkspace)
 
     invalidateWorkspaceRootCache()
     clearWorkflowRegistryCache()
@@ -60,21 +156,21 @@ afterEach(() => {
 })
 
 describe('workflow registry', () => {
-  it('loads and validates all configured workflow YAML files', async () => {
+  it('loads and validates workspace workflow YAML files', async () => {
     const workflows = await listWorkflowConfigs()
     const ids = workflows.map((workflow) => workflow.id)
 
     expect(ids).toEqual([
-      'bug_fix',
-      'content_creation',
-      'greenfield_project',
-      'ops_change',
-      'security_audit',
+      'cc_bug_fix',
+      'cc_content_creation',
+      'cc_greenfield_project',
+      'cc_ops_change',
+      'cc_security_audit',
     ])
   })
 
   it('returns workflow details by id', async () => {
-    const workflow = await getWorkflowConfig('greenfield_project')
+    const workflow = await getWorkflowConfig('cc_greenfield_project')
 
     expect(workflow).not.toBeNull()
     expect(workflow?.stages.length).toBeGreaterThan(0)
@@ -84,8 +180,19 @@ describe('workflow registry', () => {
   it('returns selection configuration in snapshot', async () => {
     const snapshot = await getWorkflowRegistrySnapshot()
 
-    expect(snapshot.selection.defaultWorkflowId).toBe('greenfield_project')
+    expect(snapshot.selectionSource).toBe('custom')
+    expect(snapshot.selection.defaultWorkflowId).toBe('cc_greenfield_project')
     expect(snapshot.selection.rules.length).toBeGreaterThan(0)
     expect(snapshot.loadedAt).toContain('T')
+  })
+
+  it('generates fallback selection when no overlay exists', async () => {
+    await fsp.unlink(join(tempWorkspace, 'workflows', 'workflow-selection.yaml'))
+    clearWorkflowRegistryCache()
+
+    const snapshot = await getWorkflowRegistrySnapshot()
+    expect(snapshot.selectionSource).toBe('custom')
+    expect(snapshot.selection.defaultWorkflowId).toBe('cc_greenfield_project')
+    expect(snapshot.selection.rules).toEqual([])
   })
 })

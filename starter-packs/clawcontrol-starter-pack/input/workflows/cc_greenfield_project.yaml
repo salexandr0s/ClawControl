@@ -1,5 +1,5 @@
-id: starter_content_creation
-description: Starter workflow (editable) for docs/marketing/content with iterative production stories and editorial review.
+id: cc_greenfield_project
+description: ClawControl workflow (editable) for greenfield projects with planning, build stories, review, and optional security/ops.
 stages:
   - ref: research
     agent: research
@@ -14,19 +14,19 @@ stages:
     loopTarget: plan
     maxIterations: 2
 
-  - ref: content_stories
-    agent: ui
+  - ref: build_stories
+    agent: build
     type: loop
     loop:
       over: stories
       completion: all_done
       verifyEach: true
-      verifyStageRef: content_review
-      maxStories: 20
+      verifyStageRef: build_review
+      maxStories: 25
 
-  - ref: content_review
-    agent: ui_review
-    loopTarget: content_stories
+  - ref: build_review
+    agent: build_review
+    loopTarget: build_stories
     maxIterations: 2
 
   - ref: security
@@ -34,5 +34,10 @@ stages:
     optional: true
     condition: security_relevant
     canVeto: true
-    loopTarget: content_stories
+    loopTarget: build_stories
     maxIterations: 1
+
+  - ref: ops
+    agent: ops
+    optional: true
+    condition: deployment_needed

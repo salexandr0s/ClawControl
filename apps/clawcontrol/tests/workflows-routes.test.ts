@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   verifyOperatorRequest: vi.fn(),
   enforceActionPolicy: vi.fn(),
   workOrderCount: vi.fn(),
+  workflowScanFindMany: vi.fn(),
 }))
 
 vi.mock('@/lib/workflows/registry', () => ({
@@ -33,6 +34,9 @@ vi.mock('@/lib/db', () => ({
     workOrder: {
       count: mocks.workOrderCount,
     },
+    artifactScanRecord: {
+      findMany: mocks.workflowScanFindMany,
+    },
   },
 }))
 
@@ -43,6 +47,7 @@ beforeEach(() => {
   mocks.verifyOperatorRequest.mockReset()
   mocks.enforceActionPolicy.mockReset()
   mocks.workOrderCount.mockReset()
+  mocks.workflowScanFindMany.mockReset()
 
   mocks.verifyOperatorRequest.mockReturnValue({
     ok: true,
@@ -58,21 +63,22 @@ beforeEach(() => {
     allowed: true,
     policy: { requiresApproval: false, confirmMode: 'CONFIRM' },
   })
+  mocks.workflowScanFindMany.mockResolvedValue([])
 })
 
 describe('workflows routes', () => {
   it('lists workflow summaries with usage counts', async () => {
     mocks.listWorkflowDefinitions.mockResolvedValue([
       {
-        id: 'greenfield_project',
-        source: 'built_in',
-        sourcePath: 'config/workflows/greenfield_project.yaml',
-        editable: false,
+        id: 'cc_greenfield_project',
+        source: 'custom',
+        sourcePath: '/workflows/cc_greenfield_project.yaml',
+        editable: true,
         stages: 4,
         loops: 1,
         updatedAt: '2026-02-12T00:00:00.000Z',
         workflow: {
-          id: 'greenfield_project',
+          id: 'cc_greenfield_project',
           description: 'Greenfield workflow',
           stages: [],
         },
@@ -83,14 +89,15 @@ describe('workflows routes', () => {
     const route = await import('@/app/api/workflows/route')
     const response = await route.GET()
     const payload = (await response.json()) as {
-      data: Array<{ id: string; inUse: number; source: string }>
+      data: Array<{ id: string; inUse: number; source: string; trustLevel: string }>
     }
 
     expect(response.status).toBe(200)
     expect(payload.data).toHaveLength(1)
-    expect(payload.data[0].id).toBe('greenfield_project')
+    expect(payload.data[0].id).toBe('cc_greenfield_project')
     expect(payload.data[0].inUse).toBe(3)
-    expect(payload.data[0].source).toBe('built_in')
+    expect(payload.data[0].source).toBe('custom')
+    expect(payload.data[0].trustLevel).toBe('unscanned')
   })
 
   it('rejects create without operator auth', async () => {

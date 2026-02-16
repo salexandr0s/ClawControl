@@ -51,6 +51,7 @@ import {
   List,
   Upload,
   RotateCcw,
+  Trash2,
   FileText,
   Sparkles,
 } from 'lucide-react'
@@ -424,6 +425,34 @@ export function AgentsClient() {
         })
         await Promise.all([fetchData(), fetchModelCatalog()])
         setCreateResult({ success: true, message: `Updated ${agent.displayName}` })
+      },
+      onError: (err) => {
+        setCreateResult({ success: false, message: err.message })
+      },
+    })
+  }
+
+  const handleDeleteAgent = (agent: AgentDTO) => {
+    const isMain = (agent.slug ?? '').trim().toLowerCase() === 'main'
+      || (agent.runtimeAgentId ?? '').trim().toLowerCase() === 'main'
+      || agent.displayName.trim().toLowerCase() === 'main'
+    if (isMain) {
+      setCreateResult({ success: false, message: 'Main agent cannot be deleted' })
+      return
+    }
+
+    triggerProtectedAction({
+      actionKind: 'agent.delete',
+      actionTitle: 'Delete Agent',
+      actionDescription: `Delete ${agent.displayName} from ClawControl and OpenClaw`,
+      entityName: agent.displayName,
+      onConfirm: async (typedConfirmText) => {
+        await agentsApi.delete(agent.id, typedConfirmText)
+        if (selectedId === agent.id) {
+          setSelectedId(undefined)
+        }
+        await fetchData()
+        setCreateResult({ success: true, message: `Deleted ${agent.displayName}` })
       },
       onError: (err) => {
         setCreateResult({ success: false, message: err.message })
@@ -835,6 +864,7 @@ export function AgentsClient() {
                   assignedOps={assignedOps}
                   onProvision={() => handleProvisionAgent(selectedAgent)}
                   onTest={() => handleTestAgent(selectedAgent)}
+                  onDelete={() => handleDeleteAgent(selectedAgent)}
                   onEdit={(patch) => handleEditAgent(selectedAgent, patch)}
                   onAvatarUpload={(file) => handleAvatarUpload(selectedAgent, file)}
                   onAvatarReset={() => handleAvatarReset(selectedAgent)}
@@ -1421,6 +1451,7 @@ function AgentDetail({
   assignedOps,
   onProvision,
   onTest,
+  onDelete,
   onEdit,
   onAvatarUpload,
   onAvatarReset,
@@ -1434,6 +1465,7 @@ function AgentDetail({
   assignedOps: OperationDTO[]
   onProvision: () => void
   onTest: () => void
+  onDelete: () => void
   onEdit: (patch: {
     displayName?: string
     role?: string
@@ -1528,6 +1560,9 @@ function AgentDetail({
     { label: `${agentSlug}.md`, path: `/agents/${agentSlug}.md` },
   ]
   const agentStationLabel = stationsById[agent.station]?.name ?? agent.station
+  const isMainAgent = (agent.slug ?? '').trim().toLowerCase() === 'main'
+    || (agent.runtimeAgentId ?? '').trim().toLowerCase() === 'main'
+    || agent.displayName.trim().toLowerCase() === 'main'
   const sortedStations = [...stations].sort((a, b) => (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name))
   const modelEntries = modelCatalog.length > 0 ? modelCatalog : DEFAULT_AGENT_MODEL_CATALOG.entries
 
@@ -1641,6 +1676,19 @@ function AgentDetail({
               >
                 <MessageSquare className="w-3.5 h-3.5" />
                 Test
+              </button>
+              <button
+                onClick={onDelete}
+                disabled={isMainAgent}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] border transition-colors',
+                  isMainAgent
+                    ? 'bg-bg-3 text-fg-3 border-bd-0 cursor-not-allowed'
+                    : 'bg-status-danger/10 text-status-danger border-status-danger/30 hover:bg-status-danger/20'
+                )}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete
               </button>
             </div>
           </PageSection>

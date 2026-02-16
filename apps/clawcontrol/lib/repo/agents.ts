@@ -70,6 +70,7 @@ export interface AgentsRepo {
   countByStatus(): Promise<Record<string, number>>
   create(input: CreateAgentInput): Promise<AgentDTO>
   update(id: string, input: UpdateAgentInput): Promise<AgentDTO | null>
+  delete(id: string): Promise<boolean>
 }
 
 // ============================================================================
@@ -218,6 +219,13 @@ export function createDbAgentsRepo(): AgentsRepo {
       })
 
       return toDTO(row as unknown as PrismaAgentRow)
+    },
+
+    async delete(id: string): Promise<boolean> {
+      const existing = await prisma.agent.findUnique({ where: { id } })
+      if (!existing) return false
+      await prisma.agent.delete({ where: { id } })
+      return true
     },
   }
 }

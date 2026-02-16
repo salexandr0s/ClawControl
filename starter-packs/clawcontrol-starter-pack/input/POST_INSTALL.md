@@ -1,9 +1,9 @@
-# Post-Install: ClawControl Starter Pack
+# Post-Install: ClawControl Core Pack
 
 This pack installs:
 - Agent templates (10)
 - Workflows
-- Starter team definition
+- Team definition
 - Workflow selection overlay
 
 This pack **does not** auto-edit your workspace `AGENTS.md`.
@@ -11,7 +11,7 @@ This pack **does not** auto-edit your workspace `AGENTS.md`.
 ## AGENTS.md snippet (copy/paste)
 
 ```md
-## ClawControl Workflow Governance (Starter Pack)
+## ClawControl Workflow Governance (Core Pack)
 
 Hard rules:
 - Workflow-only execution. Do not bypass the stage engine or gates.

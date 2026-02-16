@@ -544,6 +544,12 @@ export const agentsApi = {
     typedConfirmText: string
   }>) => apiPatch<{ data: AgentDTO }>(`/api/agents/${id}`, data),
 
+  delete: (id: string, typedConfirmText: string) =>
+    apiDeleteJson<{
+      success: true
+      data: { id: string; openclawRemoved: boolean }
+    }>(`/api/agents/${id}`, { typedConfirmText }),
+
   provision: (id: string, typedConfirmText: string) =>
     apiFetch(`/api/agents/${id}/provision`, {
       method: 'POST',
@@ -2082,6 +2088,9 @@ export interface WorkflowListItem {
   source: 'built_in' | 'custom'
   editable: boolean
   sourcePath: string
+  trustLevel: 'unscanned' | 'scanned' | 'blocked' | 'verified'
+  trustTitle: string
+  trustSubtitle: string
   stages: number
   loops: number
   inUse: number

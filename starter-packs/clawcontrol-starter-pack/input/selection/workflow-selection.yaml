@@ -1,48 +1,48 @@
-defaultWorkflowId: starter_greenfield_project
+defaultWorkflowId: cc_greenfield_project
 rules:
   - id: p0_security_tags
-    workflowId: starter_security_audit
+    workflowId: cc_security_audit
     priority: [P0]
     tagsAny: [security, audit, vuln, vulnerability, auth, permissions]
     precedes: [p0_bugfix, security_focus]
 
   - id: p0_security_title
-    workflowId: starter_security_audit
+    workflowId: cc_security_audit
     priority: [P0]
     titleKeywordsAny: [security, audit, vulnerability, auth, permissions]
     precedes: [p0_bugfix, security_focus]
 
   - id: p0_security_goal
-    workflowId: starter_security_audit
+    workflowId: cc_security_audit
     priority: [P0]
     goalKeywordsAny: [security, audit, vulnerability, auth, permissions]
     precedes: [p0_bugfix, security_focus]
 
   - id: p0_bugfix
-    workflowId: starter_bug_fix
+    workflowId: cc_bug_fix
     priority: [P0]
     precedes: [bug_tags_keywords, security_focus, ops_focus, content_focus]
 
   - id: bug_tags_keywords
-    workflowId: starter_bug_fix
+    workflowId: cc_bug_fix
     tagsAny: [bug, hotfix, incident, regression]
     titleKeywordsAny: [bug, fix, hotfix, regression]
     goalKeywordsAny: [bug, fix, regression, incident]
 
   - id: security_focus
-    workflowId: starter_security_audit
+    workflowId: cc_security_audit
     tagsAny: [security, audit, vuln, vulnerability, auth]
     titleKeywordsAny: [security, audit, vulnerability, auth, permissions]
     goalKeywordsAny: [security, audit, vulnerability, auth, permissions]
 
   - id: ops_focus
-    workflowId: starter_ops_change
+    workflowId: cc_ops_change
     tagsAny: [ops, infrastructure, infra, deploy, sre, platform]
     titleKeywordsAny: [ops, infrastructure, deploy, migration, platform]
     goalKeywordsAny: [ops, infrastructure, deploy, migration, runbook]
 
   - id: content_focus
-    workflowId: starter_content_creation
+    workflowId: cc_content_creation
     tagsAny: [content, docs, documentation, blog, marketing]
     titleKeywordsAny: [content, docs, documentation, article, blog]
     goalKeywordsAny: [content, docs, documentation, blog, article]

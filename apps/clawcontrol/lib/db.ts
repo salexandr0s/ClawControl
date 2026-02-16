@@ -97,7 +97,7 @@ const RESERVED_WORK_ORDERS: ReservedWorkOrderSeed[] = [
     state: 'active',
     priority: 'P3',
     owner: 'system',
-    workflowId: 'ops_change',
+    workflowId: null,
   },
   {
     id: 'console',
@@ -107,7 +107,7 @@ const RESERVED_WORK_ORDERS: ReservedWorkOrderSeed[] = [
     state: 'active',
     priority: 'P3',
     owner: 'system',
-    workflowId: 'ops_change',
+    workflowId: null,
   },
 ]
 
@@ -135,7 +135,9 @@ export async function ensureReservedWorkOrders(): Promise<void> {
         workflowId: wo.workflowId ?? null,
         currentStage: 0,
       },
-      update: {},
+      update: {
+        workflowId: wo.workflowId ?? null,
+      },
     })
   }
 }

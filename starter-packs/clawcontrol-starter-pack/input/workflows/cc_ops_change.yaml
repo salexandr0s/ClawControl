@@ -1,5 +1,5 @@
-id: starter_ops_change
-description: Starter workflow (editable) for ops/infra/deploy changes with plan gate, iterative ops stories, security veto, and finalize.
+id: cc_ops_change
+description: ClawControl workflow (editable) for ops/infra/deploy changes with plan gate, iterative ops stories, security veto, and finalize.
 stages:
   - ref: plan
     agent: plan

@@ -1,5 +1,5 @@
-id: security_audit
-description: Security-first audit workflow for vulnerability and risk assessment.
+id: cc_security_audit
+description: ClawControl workflow (editable) for security audits and risk assessment, with optional supporting code review.
 stages:
   - ref: security
     agent: security

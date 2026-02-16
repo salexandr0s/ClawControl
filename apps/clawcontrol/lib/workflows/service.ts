@@ -146,15 +146,6 @@ export async function updateCustomWorkflow(workflowId: string, workflow: unknown
     throw new WorkflowServiceError('Workflow not found', 'WORKFLOW_NOT_FOUND', 404, { workflowId })
   }
 
-  if (existing.source === 'built_in') {
-    throw new WorkflowServiceError(
-      `Built-in workflow is read-only: ${workflowId}`,
-      'WORKFLOW_BUILTIN_READONLY',
-      403,
-      { workflowId }
-    )
-  }
-
   const parsed = validateWorkflowInput(workflow, 'request.body.workflow')
   if (parsed.id !== workflowId) {
     throw new WorkflowServiceError(
@@ -174,15 +165,6 @@ export async function deleteCustomWorkflow(workflowId: string): Promise<void> {
   const existing = await getWorkflowDefinition(workflowId, { forceReload: true })
   if (!existing) {
     throw new WorkflowServiceError('Workflow not found', 'WORKFLOW_NOT_FOUND', 404, { workflowId })
-  }
-
-  if (existing.source === 'built_in') {
-    throw new WorkflowServiceError(
-      `Built-in workflow is read-only: ${workflowId}`,
-      'WORKFLOW_BUILTIN_READONLY',
-      403,
-      { workflowId }
-    )
   }
 
   const usage = await getWorkflowUsageStats(workflowId)

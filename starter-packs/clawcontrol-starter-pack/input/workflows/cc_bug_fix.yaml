@@ -1,5 +1,5 @@
-id: starter_bug_fix
-description: Starter workflow (editable) for bug fixes with plan gate, iterative fix stories, and verification.
+id: cc_bug_fix
+description: ClawControl workflow (editable) for bug fixes with plan gate, iterative fix stories, and verification.
 stages:
   - ref: research
     agent: research

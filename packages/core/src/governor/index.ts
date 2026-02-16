@@ -76,6 +76,7 @@ export type ActionKind =
   | 'agent.restart'
   | 'agent.stop'
   | 'agent.edit'
+  | 'agent.delete'
   // Station actions
   | 'station.create'
   | 'station.update'
@@ -462,6 +463,12 @@ export const ACTION_POLICIES: Record<ActionKind, ActionPolicy> = {
     confirmMode: 'CONFIRM',
     requiresApproval: false,
     description: 'Edit agent configuration',
+  },
+  'agent.delete': {
+    riskLevel: 'danger',
+    confirmMode: 'CONFIRM',
+    requiresApproval: false,
+    description: 'Delete an agent',
   },
 
   // Station actions

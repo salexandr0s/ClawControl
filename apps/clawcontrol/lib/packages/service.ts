@@ -654,6 +654,47 @@ async function writeHistoryRecord(event: {
   )
 }
 
+async function recordWorkflowScanRecords(input: {
+  workflowIds: string[]
+  manifest: ClawPackageManifest
+  scan: ScanReport
+}): Promise<void> {
+  const workflowIds = [...new Set(input.workflowIds)].filter((id) => id.trim().length > 0)
+  if (workflowIds.length === 0) return
+
+  const summaryJson = JSON.stringify(input.scan.summaryCounts)
+  const findingsJson = JSON.stringify(input.scan.findings)
+
+  await prisma.$transaction(workflowIds.map((workflowId) => prisma.artifactScanRecord.upsert({
+    where: {
+      artifactType_artifactKey: {
+        artifactType: 'workflow_yaml',
+        artifactKey: workflowId,
+      },
+    },
+    create: {
+      artifactType: 'workflow_yaml',
+      artifactKey: workflowId,
+      manifestId: input.manifest.id,
+      manifestVersion: input.manifest.version,
+      outcome: input.scan.outcome,
+      blocked: input.scan.blocked,
+      scannerVersion: input.scan.scannerVersion,
+      summaryJson,
+      findingsJson,
+    },
+    update: {
+      manifestId: input.manifest.id,
+      manifestVersion: input.manifest.version,
+      outcome: input.scan.outcome,
+      blocked: input.scan.blocked,
+      scannerVersion: input.scan.scannerVersion,
+      summaryJson,
+      findingsJson,
+    },
+  })))
+}
+
 function defaultDeployOptions(kind: ClawPackageKind): Required<PackageDeployOptions> {
   switch (kind) {
     case 'agent_template':
@@ -1208,6 +1249,14 @@ export async function deployStagedPackage(input: {
       selectionApplied = true
     }
 
+    if (deployedWorkflows.length > 0) {
+      await recordWorkflowScanRecords({
+        workflowIds: deployedWorkflows,
+        manifest: parsed.manifest,
+        scan: staged.scan,
+      })
+    }
+
     await syncResolvedWorkflowSnapshots({ forceReload: true })
 
     stagedPackages.delete(input.packageId)
@@ -1224,6 +1273,8 @@ export async function deployStagedPackage(input: {
           selectionApplied,
         },
       },
+    }).catch(() => {
+      // best-effort history write; do not fail deploy
     })
 
     await cleanupTemplateBackups(templateWrites).catch(() => {

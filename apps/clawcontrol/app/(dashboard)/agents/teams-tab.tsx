@@ -1,12 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState, TypedConfirmModal, Button, SelectDropdown } from '@clawcontrol/ui'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { RightDrawer } from '@/components/shell/right-drawer'
 import { Modal } from '@/components/ui/modal'
 import { ImportPackageModal } from '@/components/packages/import-package-modal'
 import {
+  agentsApi,
   agentTeamsApi,
   packagesApi,
   templatesApi,
@@ -17,6 +18,7 @@ import {
   type TemplateSummary,
   type WorkflowListItem,
 } from '@/lib/http'
+import type { AgentDTO } from '@/lib/repo'
 import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
 import { useSettings } from '@/lib/settings-context'
 import { Download, Info, Loader2, Plus, Trash2, Upload, X } from 'lucide-react'
@@ -205,6 +207,413 @@ function validateHierarchyDraft(
   }
 
   return errors
+}
+
+type TeamHierarchyChartNodeKind = 'operator' | 'main' | 'team'
+
+interface TeamHierarchyChartNode {
+  id: string
+  kind: TeamHierarchyChartNodeKind
+  title: string
+  subtitle: string
+  status: string
+  templateId: string | null
+  materialized: boolean
+}
+
+interface TeamHierarchyChartEdge {
+  id: string
+  from: string
+  to: string
+}
+
+interface TeamHierarchyChartData {
+  nodes: TeamHierarchyChartNode[]
+  edges: TeamHierarchyChartEdge[]
+  levels: string[][]
+}
+
+interface TeamHierarchyChartLayout {
+  width: number
+  height: number
+  nodeWidth: number
+  nodeHeight: number
+  positions: Map<string, { x: number; y: number }>
+}
+
+function humanizeTemplateId(templateId: string): string {
+  const normalized = templateId
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!normalized) return templateId
+  return normalized.replace(/\b[a-z]/g, (match) => match.toUpperCase())
+}
+
+function buildTeamHierarchyChartData(
+  team: AgentTeamSummary,
+  hierarchy: TeamHierarchyConfig | null,
+  mainAgent: AgentDTO | null
+): TeamHierarchyChartData {
+  const operatorNodeId = 'operator:user'
+  const mainNodeId = 'agent:main'
+
+  const templateIds = dedupe(team.templateIds).sort((left, right) => left.localeCompare(right))
+  const templateSet = new Set(templateIds)
+
+  const membersByTemplateId = new Map<string, AgentTeamSummary['members'][number]>()
+  for (const member of team.members) {
+    if (member.templateId && templateSet.has(member.templateId)) {
+      membersByTemplateId.set(member.templateId, member)
+      continue
+    }
+    if (templateSet.has(member.slug) && !membersByTemplateId.has(member.slug)) {
+      membersByTemplateId.set(member.slug, member)
+    }
+  }
+
+  const nodes: TeamHierarchyChartNode[] = [
+    {
+      id: operatorNodeId,
+      kind: 'operator',
+      title: 'You',
+      subtitle: 'Human Operator',
+      status: 'online',
+      templateId: null,
+      materialized: true,
+    },
+    {
+      id: mainNodeId,
+      kind: 'main',
+      title: mainAgent?.displayName?.trim() || 'Main Agent',
+      subtitle: mainAgent ? `${mainAgent.role} · ${mainAgent.station}` : 'Core CEO Agent',
+      status: mainAgent?.status ?? 'core',
+      templateId: null,
+      materialized: Boolean(mainAgent),
+    },
+  ]
+
+  const edges: TeamHierarchyChartEdge[] = [
+    {
+      id: `${operatorNodeId}->${mainNodeId}`,
+      from: operatorNodeId,
+      to: mainNodeId,
+    },
+  ]
+
+  for (const templateId of templateIds) {
+    const runtimeMember = membersByTemplateId.get(templateId)
+    nodes.push({
+      id: `template:${templateId}`,
+      kind: 'team',
+      title: runtimeMember?.displayName?.trim() || humanizeTemplateId(templateId),
+      subtitle: runtimeMember
+        ? `${templateId} · ${runtimeMember.role}`
+        : `${templateId} template`,
+      status: runtimeMember?.status ?? 'template',
+      templateId,
+      materialized: Boolean(runtimeMember),
+    })
+  }
+
+  for (const templateId of templateIds) {
+    const parentTemplateId = hierarchy?.members?.[templateId]?.reportsTo
+    const parentId = parentTemplateId && templateSet.has(parentTemplateId)
+      ? `template:${parentTemplateId}`
+      : mainNodeId
+
+    edges.push({
+      id: `${parentId}->template:${templateId}`,
+      from: parentId,
+      to: `template:${templateId}`,
+    })
+  }
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node] as const))
+  const childrenByParent = new Map<string, string[]>()
+  for (const edge of edges) {
+    const bucket = childrenByParent.get(edge.from) ?? []
+    bucket.push(edge.to)
+    childrenByParent.set(edge.from, bucket)
+  }
+  for (const [parentId, childIds] of childrenByParent.entries()) {
+    childIds.sort((left, right) => {
+      const leftNode = nodeById.get(left)
+      const rightNode = nodeById.get(right)
+      if (!leftNode || !rightNode) return left.localeCompare(right)
+      return leftNode.title.localeCompare(rightNode.title)
+    })
+    childrenByParent.set(parentId, childIds)
+  }
+
+  const levels: string[][] = []
+  const visited = new Set<string>()
+  let frontier = [operatorNodeId]
+
+  while (frontier.length > 0) {
+    levels.push(frontier)
+    const next = new Set<string>()
+    for (const nodeId of frontier) {
+      visited.add(nodeId)
+      for (const childId of childrenByParent.get(nodeId) ?? []) {
+        if (!visited.has(childId)) next.add(childId)
+      }
+    }
+    frontier = Array.from(next)
+  }
+
+  const leftovers = nodes
+    .map((node) => node.id)
+    .filter((nodeId) => !visited.has(nodeId))
+    .sort((left, right) => {
+      const leftNode = nodeById.get(left)
+      const rightNode = nodeById.get(right)
+      if (!leftNode || !rightNode) return left.localeCompare(right)
+      return leftNode.title.localeCompare(rightNode.title)
+    })
+
+  if (leftovers.length > 0) {
+    levels.push(leftovers)
+  }
+
+  return { nodes, edges, levels }
+}
+
+function buildTeamHierarchyChartLayout(
+  levels: string[][],
+  viewportWidth: number
+): TeamHierarchyChartLayout {
+  const nodeHeight = 74
+  const minNodeWidth = 124
+  const maxNodeWidth = 180
+  const horizontalGap = 12
+  const verticalGap = 24
+  const padding = 16
+  const safeViewport = Math.max(360, viewportWidth || 840)
+
+  const maxColumns = Math.max(
+    1,
+    Math.min(
+      6,
+      Math.floor((safeViewport - (padding * 2) + horizontalGap) / (minNodeWidth + horizontalGap))
+    )
+  )
+
+  const visualLevels: string[][] = []
+  for (const level of levels) {
+    if (level.length === 0) continue
+    for (let offset = 0; offset < level.length; offset += maxColumns) {
+      visualLevels.push(level.slice(offset, offset + maxColumns))
+    }
+  }
+
+  if (visualLevels.length === 0) {
+    visualLevels.push([])
+  }
+
+  const widestRowSize = Math.max(1, ...visualLevels.map((row) => row.length))
+  const autoWidth = Math.floor(
+    (safeViewport - (padding * 2) - (widestRowSize - 1) * horizontalGap) / widestRowSize
+  )
+  const nodeWidth = Math.max(minNodeWidth, Math.min(maxNodeWidth, autoWidth))
+  const width = Math.max(
+    safeViewport,
+    (padding * 2) + (widestRowSize * nodeWidth) + ((widestRowSize - 1) * horizontalGap)
+  )
+  const height = Math.max(
+    180,
+    (padding * 2) + (visualLevels.length * nodeHeight) + Math.max(0, visualLevels.length - 1) * verticalGap
+  )
+
+  const positions = new Map<string, { x: number; y: number }>()
+  visualLevels.forEach((row, rowIndex) => {
+    const rowWidth = row.length === 0
+      ? 0
+      : (row.length * nodeWidth) + ((row.length - 1) * horizontalGap)
+    const rowStartX = row.length === 0
+      ? width / 2
+      : (width - rowWidth) / 2 + (nodeWidth / 2)
+    const y = padding + (nodeHeight / 2) + rowIndex * (nodeHeight + verticalGap)
+
+    row.forEach((nodeId, colIndex) => {
+      const x = rowStartX + colIndex * (nodeWidth + horizontalGap)
+      positions.set(nodeId, { x, y })
+    })
+  })
+
+  return { width, height, nodeWidth, nodeHeight, positions }
+}
+
+function TeamHierarchyOrgChart({
+  team,
+  hierarchy,
+  mainAgent,
+}: {
+  team: AgentTeamSummary
+  hierarchy: TeamHierarchyConfig | null
+  mainAgent: AgentDTO | null
+}) {
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const [viewportWidth, setViewportWidth] = useState(840)
+
+  useEffect(() => {
+    const element = viewportRef.current
+    if (!element) return
+
+    const updateViewportWidth = () => {
+      setViewportWidth(Math.max(360, Math.floor(element.clientWidth)))
+    }
+    updateViewportWidth()
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateViewportWidth)
+      return () => window.removeEventListener('resize', updateViewportWidth)
+    }
+
+    const observer = new ResizeObserver(() => updateViewportWidth())
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  const chartData = useMemo(
+    () => buildTeamHierarchyChartData(team, hierarchy, mainAgent),
+    [team, hierarchy, mainAgent]
+  )
+
+  const layout = useMemo(
+    () => buildTeamHierarchyChartLayout(chartData.levels, viewportWidth),
+    [chartData.levels, viewportWidth]
+  )
+
+  const statusClassName = (status: string) => {
+    if (status === 'active') return 'bg-status-success/15 text-status-success'
+    if (status === 'idle') return 'bg-bg-3 text-fg-2'
+    if (status === 'blocked' || status === 'error') return 'bg-status-danger/15 text-status-danger'
+    if (status === 'template') return 'bg-status-warning/15 text-status-warning'
+    if (status === 'online') return 'bg-status-progress/15 text-status-progress'
+    return 'bg-bg-3 text-fg-2'
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-fg-2">Corporate Structure</div>
+        <div className="text-[11px] text-fg-3">{team.templateIds.length} team positions</div>
+      </div>
+
+      <div ref={viewportRef} className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-2/80 p-2">
+        <div className="overflow-x-auto overflow-y-hidden">
+          <div style={{ width: layout.width, height: layout.height }} className="relative mx-auto">
+            <svg className="absolute inset-0" width={layout.width} height={layout.height}>
+              <defs>
+                <marker
+                  id="team-hierarchy-arrow"
+                  markerWidth="7"
+                  markerHeight="5"
+                  refX="6"
+                  refY="2.5"
+                  orient="auto"
+                >
+                  <path d="M0,0 L7,2.5 L0,5 Z" fill="#64748b" />
+                </marker>
+              </defs>
+
+              {chartData.edges.map((edge) => {
+                const from = layout.positions.get(edge.from)
+                const to = layout.positions.get(edge.to)
+                if (!from || !to) return null
+
+                const startX = from.x
+                const startY = from.y + layout.nodeHeight / 2
+                const endX = to.x
+                const endY = to.y - layout.nodeHeight / 2
+                const bend = Math.max(18, Math.abs(endY - startY) * 0.45)
+                const c1x = startX
+                const c1y = startY + bend
+                const c2x = endX
+                const c2y = endY - bend
+
+                return (
+                  <path
+                    key={edge.id}
+                    d={`M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`}
+                    fill="none"
+                    stroke="#64748b"
+                    strokeOpacity={0.85}
+                    strokeWidth={1.8}
+                    markerEnd="url(#team-hierarchy-arrow)"
+                  />
+                )
+              })}
+            </svg>
+
+            {chartData.nodes.map((node) => {
+              const position = layout.positions.get(node.id)
+              if (!position) return null
+
+              const nodeTypeLabel = node.kind === 'operator'
+                ? 'User'
+                : node.kind === 'main'
+                  ? 'Main Agent'
+                  : 'Team Agent'
+
+              const baseClassName = node.kind === 'operator'
+                ? 'border-status-progress/40 bg-status-progress/10'
+                : node.kind === 'main'
+                  ? 'border-status-warning/45 bg-status-warning/10'
+                  : node.materialized
+                    ? 'border-bd-0 bg-bg-1'
+                    : 'border-bd-0 border-dashed bg-bg-1/80'
+
+              return (
+                <div
+                  key={node.id}
+                  className={`absolute rounded-[var(--radius-md)] border p-2 shadow-sm ${baseClassName}`}
+                  style={{
+                    width: layout.nodeWidth,
+                    minHeight: layout.nodeHeight,
+                    left: position.x - layout.nodeWidth / 2,
+                    top: position.y - layout.nodeHeight / 2,
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] uppercase tracking-wide text-fg-3">{nodeTypeLabel}</span>
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${statusClassName(node.status)}`}>
+                      {node.status}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs font-semibold text-fg-0 truncate">{node.title}</div>
+                  <div className="text-[10px] text-fg-2 truncate">{node.subtitle}</div>
+                  {node.templateId && (
+                    <div className="mt-1 text-[10px] font-mono text-fg-3 truncate">
+                      {node.templateId}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="text-[11px] text-fg-3">
+        Reporting lines use each member&apos;s <span className="font-mono">reportsTo</span> relation.
+        You dispatch through the Main Agent, which orchestrates this team.
+      </div>
+
+      {chartData.nodes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-[10px] text-fg-3">
+          <span className="rounded px-1.5 py-0.5 border border-status-progress/40 bg-status-progress/10">User</span>
+          <span className="rounded px-1.5 py-0.5 border border-status-warning/45 bg-status-warning/10">Main Agent</span>
+          <span className="rounded px-1.5 py-0.5 border border-bd-0 bg-bg-1">Materialized Team Agent</span>
+          <span className="rounded px-1.5 py-0.5 border border-bd-0 border-dashed bg-bg-1/80">Template Position</span>
+          <span className="rounded px-1.5 py-0.5 border border-bd-0 bg-bg-1">
+            Nodes: {chartData.nodes.length} · Links: {chartData.edges.length}
+          </span>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function toDraft(team: AgentTeamSummary | null): TeamEditorDraft {
@@ -465,6 +874,7 @@ export function TeamsTab() {
   const [showPackageImport, setShowPackageImport] = useState(false)
   const [hierarchyDraft, setHierarchyDraft] = useState<TeamHierarchyConfig | null>(null)
   const [isSavingHierarchy, setIsSavingHierarchy] = useState(false)
+  const [mainAgent, setMainAgent] = useState<AgentDTO | null>(null)
 
   const fetchTeams = useCallback(async () => {
     setLoading(true)
@@ -483,6 +893,34 @@ export function TeamsTab() {
   useEffect(() => {
     void fetchTeams()
   }, [fetchTeams])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const fetchMainAgent = async () => {
+      try {
+        const result = await agentsApi.list({
+          mode: 'light',
+          syncSessions: false,
+          includeSessionOverlay: false,
+          includeModelOverlay: false,
+        })
+        if (cancelled) return
+
+        const detectedMainAgent = result.data.find((agent) => agent.slug === 'main')
+          ?? result.data.find((agent) => agent.kind === 'ceo')
+          ?? null
+        setMainAgent(detectedMainAgent)
+      } catch {
+        if (!cancelled) setMainAgent(null)
+      }
+    }
+
+    void fetchMainAgent()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     setDeployResult(null)
@@ -884,9 +1322,15 @@ export function TeamsTab() {
               </div>
             </div>
 
+            <TeamHierarchyOrgChart
+              team={selected}
+              hierarchy={hierarchyDraft}
+              mainAgent={mainAgent}
+            />
+
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <div className="text-xs text-fg-2">Hierarchy</div>
+                <div className="text-xs text-fg-2">Hierarchy Editor</div>
                 <div className="flex items-center gap-2">
                   <Button
                     type="button"

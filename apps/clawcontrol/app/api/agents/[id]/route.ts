@@ -1,11 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRepos } from '@/lib/repo'
 import { enforceActionPolicy } from '@/lib/with-governor'
-import { upsertAgentToOpenClaw } from '@/lib/services/openclaw-config'
+import { asAuthErrorResponse, verifyOperatorRequest } from '@/lib/auth/operator-auth'
+import { extractAgentIdFromSessionKey } from '@/lib/agent-identity'
+import { removeAgentFromOpenClaw, upsertAgentToOpenClaw } from '@/lib/services/openclaw-config'
 import { isCanonicalStationId, normalizeStationId, type ActionKind } from '@clawcontrol/core'
 
 interface RouteContext {
   params: Promise<{ id: string }>
+}
+
+function isMainAgent(agent: {
+  slug?: string | null
+  runtimeAgentId?: string | null
+  displayName?: string | null
+  name?: string | null
+  sessionKey?: string | null
+}): boolean {
+  const slug = (agent.slug ?? '').trim().toLowerCase()
+  const runtime = (agent.runtimeAgentId ?? '').trim().toLowerCase()
+  const display = (agent.displayName ?? agent.name ?? '').trim().toLowerCase()
+  const sessionAgentId = extractAgentIdFromSessionKey(agent.sessionKey ?? '')?.trim().toLowerCase() ?? ''
+  return slug === 'main' || runtime === 'main' || display === 'main' || sessionAgentId === 'main'
 }
 
 /**
@@ -215,6 +231,103 @@ export async function PATCH(
     console.error('[api/agents/:id] PATCH error:', error)
     return NextResponse.json(
       { error: 'Failed to update agent' },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * DELETE /api/agents/:id
+ *
+ * Delete an agent (except main).
+ */
+export async function DELETE(
+  request: NextRequest,
+  context: RouteContext
+) {
+  const auth = verifyOperatorRequest(request, { requireCsrf: true })
+  if (!auth.ok) {
+    return NextResponse.json(asAuthErrorResponse(auth), { status: auth.status })
+  }
+
+  const { id } = await context.params
+
+  try {
+    const body = (await request.json().catch(() => ({}))) as { typedConfirmText?: string }
+    const repos = getRepos()
+    const currentAgent = await repos.agents.getById(id)
+
+    if (!currentAgent) {
+      return NextResponse.json(
+        { error: 'Agent not found' },
+        { status: 404 }
+      )
+    }
+
+    if (isMainAgent(currentAgent)) {
+      return NextResponse.json(
+        { error: 'Main agent cannot be deleted', code: 'AGENT_MAIN_PROTECTED' },
+        { status: 409 }
+      )
+    }
+
+    const enforcement = await enforceActionPolicy({
+      actionKind: 'agent.delete',
+      typedConfirmText: body.typedConfirmText,
+    })
+
+    if (!enforcement.allowed) {
+      return NextResponse.json(
+        {
+          error: enforcement.errorType,
+          policy: enforcement.policy,
+        },
+        { status: enforcement.status ?? 403 }
+      )
+    }
+
+    const deleted = await repos.agents.delete(id)
+    if (!deleted) {
+      return NextResponse.json(
+        { error: 'Agent not found' },
+        { status: 404 }
+      )
+    }
+
+    const removeResult = await removeAgentFromOpenClaw(
+      currentAgent.runtimeAgentId
+      || extractAgentIdFromSessionKey(currentAgent.sessionKey)
+      || currentAgent.slug
+      || null
+    )
+    if (!removeResult.ok) {
+      console.warn('[api/agents/:id] OpenClaw remove warning:', removeResult.error)
+    }
+
+    await repos.activities.create({
+      type: 'agent.deleted',
+      actor: 'user',
+      entityType: 'agent',
+      entityId: id,
+      summary: `Deleted agent ${currentAgent.displayName}`,
+      riskLevel: 'danger',
+      payloadJson: {
+        previous: currentAgent,
+        openclawRemoved: removeResult.removed ?? false,
+      },
+    })
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        id,
+        openclawRemoved: removeResult.removed ?? false,
+      },
+    })
+  } catch (error) {
+    console.error('[api/agents/:id] DELETE error:', error)
+    return NextResponse.json(
+      { error: 'Failed to delete agent' },
       { status: 500 }
     )
   }

@@ -8,6 +8,14 @@ import {
   type WorkflowServiceError,
 } from '@/lib/workflows/service'
 
+type WorkflowTrustLevel = 'unscanned' | 'scanned' | 'blocked' | 'verified'
+
+interface WorkflowTrustMeta {
+  level: WorkflowTrustLevel
+  title: string
+  subtitle: string
+}
+
 function asWorkflowError(error: unknown): WorkflowServiceError | null {
   if (error instanceof Error && error.name === 'WorkflowServiceError') {
     return error as WorkflowServiceError
@@ -26,13 +34,68 @@ async function buildUsageMap(ids: string[]): Promise<Map<string, number>> {
   return usageMap
 }
 
+function trustFromOutcome(outcome: string, scannerVersion: string): WorkflowTrustMeta {
+  if (outcome === 'pass') {
+    return {
+      level: 'verified',
+      title: 'Verified',
+      subtitle: `Security scan passed (${scannerVersion})`,
+    }
+  }
+
+  if (outcome === 'warn') {
+    return {
+      level: 'scanned',
+      title: 'Scanned',
+      subtitle: `Security scan completed with warnings (${scannerVersion})`,
+    }
+  }
+
+  if (outcome === 'block') {
+    return {
+      level: 'blocked',
+      title: 'Blocked',
+      subtitle: `Security scan flagged dangerous findings (${scannerVersion})`,
+    }
+  }
+
+  return {
+    level: 'unscanned',
+    title: 'Unscanned',
+    subtitle: 'No scan metadata available',
+  }
+}
+
+async function buildTrustMap(ids: string[]): Promise<Map<string, WorkflowTrustMeta>> {
+  const trustMap = new Map<string, WorkflowTrustMeta>()
+  if (ids.length === 0) return trustMap
+
+  const records = await prisma.artifactScanRecord.findMany({
+    where: {
+      artifactType: 'workflow_yaml',
+      artifactKey: { in: ids },
+    },
+  })
+
+  for (const record of records) {
+    trustMap.set(record.artifactKey, trustFromOutcome(record.outcome, record.scannerVersion))
+  }
+
+  return trustMap
+}
+
 /**
  * GET /api/workflows
- * List available workflows (built-in + custom)
+ * List available workflows from workspace and imported packages.
  */
 export async function GET() {
   const definitions = await listWorkflowDefinitions()
-  const usage = await buildUsageMap(definitions.map((item) => item.id))
+  const workflowIds = definitions.map((item) => item.id)
+
+  const [usage, trustMap] = await Promise.all([
+    buildUsageMap(workflowIds),
+    buildTrustMap(workflowIds),
+  ])
 
   return NextResponse.json({
     data: definitions.map((item) => ({
@@ -41,6 +104,9 @@ export async function GET() {
       source: item.source,
       editable: item.editable,
       sourcePath: item.sourcePath,
+      trustLevel: trustMap.get(item.id)?.level ?? 'unscanned',
+      trustTitle: trustMap.get(item.id)?.title ?? 'Unscanned',
+      trustSubtitle: trustMap.get(item.id)?.subtitle ?? 'Workflow has no scan metadata',
       stages: item.stages,
       loops: item.loops,
       inUse: usage.get(item.id) ?? 0,

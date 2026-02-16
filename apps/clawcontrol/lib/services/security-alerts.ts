@@ -13,6 +13,7 @@ function formatFindingLine(finding: { severity: string; title: string; path?: st
 async function pickSecurityWorkflowId(): Promise<string | null> {
   const snapshot = await getWorkflowRegistrySnapshot({ forceReload: true })
   const ids = new Set(snapshot.definitions.map((d) => d.id))
+  if (ids.has('cc_security_audit')) return 'cc_security_audit'
   if (ids.has('security_audit')) return 'security_audit'
   if (ids.has('starter_security_audit')) return 'starter_security_audit'
   return null
@@ -112,4 +113,3 @@ export async function ensureBlockedScanWorkOrder(input: {
 
   return { workOrderId: wo.id, created: true }
 }
-

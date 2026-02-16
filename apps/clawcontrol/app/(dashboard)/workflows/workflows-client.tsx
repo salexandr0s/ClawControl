@@ -64,9 +64,9 @@ const workflowColumns: Column<WorkflowListItem>[] = [
     width: '140px',
     render: (row) => (
       <TrustBadge
-        level={row.source === 'built_in' ? 'verified' : 'unscanned'}
-        title={row.source === 'built_in' ? 'Verified' : 'Unscanned'}
-        subtitle={row.source === 'built_in' ? 'Built-in workflow' : 'Custom workflow (no scan metadata)'}
+        level={row.trustLevel}
+        title={row.trustTitle}
+        subtitle={row.trustSubtitle}
       />
     ),
   },

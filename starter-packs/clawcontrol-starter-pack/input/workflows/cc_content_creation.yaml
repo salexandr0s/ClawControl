@@ -1,5 +1,5 @@
-id: bug_fix
-description: Bug-fix workflow with iterative implementation stories and verification.
+id: cc_content_creation
+description: ClawControl workflow (editable) for docs/marketing/content with iterative production stories and editorial review.
 stages:
   - ref: research
     agent: research
@@ -12,21 +12,21 @@ stages:
   - ref: plan_review
     agent: plan_review
     loopTarget: plan
-    maxIterations: 1
+    maxIterations: 2
 
-  - ref: build_stories
-    agent: build
+  - ref: content_stories
+    agent: ui
     type: loop
     loop:
       over: stories
       completion: all_done
       verifyEach: true
-      verifyStageRef: build_review
-      maxStories: 15
+      verifyStageRef: content_review
+      maxStories: 20
 
-  - ref: build_review
-    agent: build_review
-    loopTarget: build_stories
+  - ref: content_review
+    agent: ui_review
+    loopTarget: content_stories
     maxIterations: 2
 
   - ref: security
@@ -34,5 +34,5 @@ stages:
     optional: true
     condition: security_relevant
     canVeto: true
-    loopTarget: build_stories
+    loopTarget: content_stories
     maxIterations: 1

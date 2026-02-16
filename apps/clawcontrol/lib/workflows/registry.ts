@@ -1,8 +1,5 @@
 import 'server-only'
 
-import { readFile, readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
-import yaml from 'js-yaml'
 import type {
   WorkflowConfig,
   WorkflowSelectionConfig,
@@ -10,12 +7,8 @@ import type {
 } from '@clawcontrol/core'
 import { getWorkspaceRoot } from '@/lib/fs/path-policy'
 import {
-  formatAjvErrors,
   orderSelectionRulesByPrecedence,
-  validateSelectionSchema,
   validateSelectionSemantics,
-  validateWorkflowSchema,
-  validateWorkflowSemantics,
 } from './validation'
 import {
   loadWorkspaceWorkflowConfigs,
@@ -23,16 +16,7 @@ import {
   writeResolvedWorkflowSnapshots,
 } from './storage'
 
-const WORKFLOW_CONFIG_DIR = 'workflows'
-const WORKFLOW_SELECTION_FILE = 'workflow-selection.yaml'
 const CACHE_TTL_MS = 30_000
-
-interface BuiltInWorkflowFile {
-  absolutePath: string
-  sourcePath: string
-  updatedAtMs: number
-  size: number
-}
 
 export interface WorkflowSelectionInput {
   requestedWorkflowId?: string | null
@@ -70,7 +54,6 @@ export interface WorkflowRegistrySnapshot {
 }
 
 interface RegistryCache {
-  builtInRoot: string
   workspaceRoot: string
   versionKey: string
   loadedAtMs: number
@@ -139,117 +122,53 @@ function matchRule(input: WorkflowSelectionInput, rule: WorkflowSelectionRule): 
   return true
 }
 
-async function fileVersion(path: string): Promise<string> {
-  const info = await stat(path)
-  return `${path}:${info.mtimeMs}:${info.size}`
-}
-
-async function resolveBuiltInConfigRoot(): Promise<string> {
-  const candidates = [
-    join(process.cwd(), 'config'),
-    join(process.cwd(), 'apps', 'clawcontrol', 'config'),
-  ]
-
-  for (const root of candidates) {
-    try {
-      const workflowDir = join(root, WORKFLOW_CONFIG_DIR)
-      await stat(workflowDir)
-      await stat(join(root, WORKFLOW_SELECTION_FILE))
-      return root
-    } catch {
-      // Continue scanning.
-    }
-  }
-
-  throw new Error('Workflow config directory not found')
-}
-
-async function listBuiltInWorkflowFiles(root: string): Promise<BuiltInWorkflowFile[]> {
-  const workflowDir = join(root, WORKFLOW_CONFIG_DIR)
-  const entries = await readdir(workflowDir, { withFileTypes: true })
-
-  const files: BuiltInWorkflowFile[] = []
-
-  for (const entry of entries) {
-    if (!entry.isFile()) continue
-    if (!entry.name.match(/\.ya?ml$/i)) continue
-
-    const absolutePath = join(workflowDir, entry.name)
-    const st = await stat(absolutePath)
-    files.push({
-      absolutePath,
-      sourcePath: `config/workflows/${entry.name}`,
-      updatedAtMs: st.mtimeMs,
-      size: st.size,
-    })
-  }
-
-  files.sort((left, right) => left.sourcePath.localeCompare(right.sourcePath))
-  return files
-}
-
-async function parseWorkflowFromFile(path: string, sourcePath: string): Promise<WorkflowConfig> {
-  const raw = await readFile(path, 'utf8')
-  const parsed = yaml.load(raw)
-
-  const valid = validateWorkflowSchema(parsed)
-  if (!valid) {
-    throw new Error(`Workflow YAML invalid (${sourcePath}): ${formatAjvErrors(validateWorkflowSchema.errors)}`)
-  }
-
-  const workflow = parsed as WorkflowConfig
-  validateWorkflowSemantics(workflow, sourcePath)
-  return workflow
-}
-
-async function parseSelectionFromFile(path: string, sourcePath: string): Promise<WorkflowSelectionConfig> {
-  const raw = await readFile(path, 'utf8')
-  const parsed = yaml.load(raw)
-
-  const valid = validateSelectionSchema(parsed)
-  if (!valid) {
-    throw new Error(
-      `Workflow selection YAML invalid (${sourcePath}): ${formatAjvErrors(validateSelectionSchema.errors)}`
-    )
-  }
-
-  return parsed as WorkflowSelectionConfig
-}
-
 function countLoopStages(workflow: WorkflowConfig): number {
   return workflow.stages.filter((stage) => stage.type === 'loop').length
 }
 
-async function buildRegistry(builtInRoot: string, versionKey: string): Promise<RegistryCache> {
+function pickDefaultWorkflowId(workflowIds: Set<string>): string {
+  if (workflowIds.has('cc_greenfield_project')) return 'cc_greenfield_project'
+  if (workflowIds.has('greenfield_project')) return 'greenfield_project'
+
+  const sorted = [...workflowIds].sort((left, right) => left.localeCompare(right))
+  const fallback = sorted[0]
+  if (fallback) return fallback
+
+  throw new Error('No workflows configured')
+}
+
+function normalizeSelectionForWorkflows(
+  selection: WorkflowSelectionConfig,
+  workflowIds: Set<string>
+): WorkflowSelectionConfig {
+  const defaultWorkflowId = workflowIds.has(selection.defaultWorkflowId)
+    ? selection.defaultWorkflowId
+    : pickDefaultWorkflowId(workflowIds)
+
+  const keptRules = selection.rules.filter((rule) => workflowIds.has(rule.workflowId))
+  const keptRuleIds = new Set(keptRules.map((rule) => rule.id))
+
+  const normalizedRules = keptRules.map((rule) => ({
+    ...rule,
+    precedes: rule.precedes?.filter((targetRuleId) => keptRuleIds.has(targetRuleId)),
+  }))
+
+  return {
+    ...selection,
+    defaultWorkflowId,
+    rules: orderSelectionRulesByPrecedence(normalizedRules),
+  }
+}
+
+function emptySelection(): WorkflowSelectionConfig {
+  // Used only for UI snapshots when no workflow has been installed yet.
+  return { defaultWorkflowId: '', rules: [] } as WorkflowSelectionConfig
+}
+
+async function buildRegistry(workspaceRoot: string, versionKey: string): Promise<RegistryCache> {
   const definitions: WorkflowDefinitionRecord[] = []
   const definitionsById = new Map<string, WorkflowDefinitionRecord>()
   const workflowsById = new Map<string, WorkflowConfig>()
-
-  const builtInFiles = await listBuiltInWorkflowFiles(builtInRoot)
-  for (const file of builtInFiles) {
-    const workflow = await parseWorkflowFromFile(file.absolutePath, file.sourcePath)
-    if (definitionsById.has(workflow.id)) {
-      const existing = definitionsById.get(workflow.id) as WorkflowDefinitionRecord
-      throw new Error(
-        `Duplicate workflow id "${workflow.id}" in ${file.sourcePath}; already defined in ${existing.sourcePath}`
-      )
-    }
-
-    const record: WorkflowDefinitionRecord = {
-      id: workflow.id,
-      source: 'built_in',
-      sourcePath: file.sourcePath,
-      updatedAt: new Date(file.updatedAtMs).toISOString(),
-      editable: false,
-      stages: workflow.stages.length,
-      loops: countLoopStages(workflow),
-      workflow,
-    }
-
-    definitions.push(record)
-    definitionsById.set(workflow.id, record)
-    workflowsById.set(workflow.id, workflow)
-  }
 
   const workspaceEntries = await loadWorkspaceWorkflowConfigs()
   for (const entry of workspaceEntries) {
@@ -277,33 +196,34 @@ async function buildRegistry(builtInRoot: string, versionKey: string): Promise<R
     workflowsById.set(workflow.id, workflow)
   }
 
-  if (workflowsById.size === 0) {
-    throw new Error('No workflow YAML files found')
-  }
-
-  const builtInSelectionPath = join(builtInRoot, WORKFLOW_SELECTION_FILE)
-  const builtInSelection = await parseSelectionFromFile(
-    builtInSelectionPath,
-    `config/${WORKFLOW_SELECTION_FILE}`
-  )
-
   const selectionOverlay = await readWorkspaceSelectionOverlay()
-  const rawSelection = selectionOverlay?.selection ?? builtInSelection
-  const selectionSource: WorkflowSource = selectionOverlay ? 'custom' : 'built_in'
+  const workflowIds = new Set(workflowsById.keys())
+  const selectionSource: WorkflowSource = 'custom'
 
-  validateSelectionSemantics(rawSelection, new Set(workflowsById.keys()))
+  let selection: WorkflowSelectionConfig
+  if (workflowIds.size === 0) {
+    selection = emptySelection()
+  } else {
+    const rawSelection = selectionOverlay
+      ? normalizeSelectionForWorkflows(selectionOverlay.selection, workflowIds)
+      : {
+        defaultWorkflowId: pickDefaultWorkflowId(workflowIds),
+        rules: [],
+      }
 
-  const selection: WorkflowSelectionConfig = {
-    ...rawSelection,
-    rules: orderSelectionRulesByPrecedence(rawSelection.rules),
+    validateSelectionSemantics(rawSelection, workflowIds)
+
+    selection = {
+      ...rawSelection,
+      rules: orderSelectionRulesByPrecedence(rawSelection.rules),
+    }
   }
 
   const workflows = [...workflowsById.values()].sort((a, b) => a.id.localeCompare(b.id))
   definitions.sort((a, b) => a.id.localeCompare(b.id))
 
   return {
-    builtInRoot,
-    workspaceRoot: getWorkspaceRoot(),
+    workspaceRoot,
     versionKey,
     loadedAtMs: Date.now(),
     workflows,
@@ -315,15 +235,7 @@ async function buildRegistry(builtInRoot: string, versionKey: string): Promise<R
   }
 }
 
-async function currentVersionKey(builtInRoot: string): Promise<string> {
-  const builtInFiles = await listBuiltInWorkflowFiles(builtInRoot)
-  const builtInVersions = await Promise.all(
-    builtInFiles.map((file) => fileVersion(file.absolutePath))
-  )
-
-  const selectionPath = join(builtInRoot, WORKFLOW_SELECTION_FILE)
-  const selectionVersion = await fileVersion(selectionPath)
-
+async function currentVersionKey(): Promise<string> {
   const workspaceEntries = await loadWorkspaceWorkflowConfigs()
   const workspaceVersions = workspaceEntries.map((entry) => {
     return `${entry.file.absolutePath}:${entry.file.updatedAtMs}:${entry.file.size}`
@@ -334,29 +246,26 @@ async function currentVersionKey(builtInRoot: string): Promise<string> {
     ? `${overlay.absolutePath}:${overlay.updatedAtMs}:${overlay.size}`
     : 'overlay:none'
 
-  return [...builtInVersions, selectionVersion, ...workspaceVersions, overlayVersion].sort().join('|')
+  return [...workspaceVersions, overlayVersion].sort().join('|')
 }
 
 async function loadRegistry(force = false): Promise<RegistryCache> {
-  const builtInRoot = await resolveBuiltInConfigRoot()
   const workspaceRoot = getWorkspaceRoot()
   const now = Date.now()
 
   if (
     !force
     && cache
-    && cache.builtInRoot === builtInRoot
     && cache.workspaceRoot === workspaceRoot
     && now - cache.loadedAtMs < CACHE_TTL_MS
   ) {
     return cache
   }
 
-  const versionKey = await currentVersionKey(builtInRoot)
+  const versionKey = await currentVersionKey()
   if (
     !force
     && cache
-    && cache.builtInRoot === builtInRoot
     && cache.workspaceRoot === workspaceRoot
     && cache.versionKey === versionKey
   ) {
@@ -367,7 +276,7 @@ async function loadRegistry(force = false): Promise<RegistryCache> {
     return cache
   }
 
-  const next = await buildRegistry(builtInRoot, versionKey)
+  const next = await buildRegistry(workspaceRoot, versionKey)
   cache = next
   return next
 }
@@ -428,6 +337,10 @@ export async function selectWorkflowForWorkOrder(
 ): Promise<WorkflowSelectionResult> {
   const registry = await loadRegistry(Boolean(options?.forceReload))
 
+  if (registry.workflowsById.size === 0) {
+    throw new Error('No workflows configured. Import a package or create a workflow first.')
+  }
+
   const requestedWorkflowId = normalizeText(input.requestedWorkflowId)
   if (requestedWorkflowId) {
     if (!registry.workflowsById.has(requestedWorkflowId)) {
@@ -462,7 +375,7 @@ export async function isBuiltInWorkflow(
 ): Promise<boolean> {
   const definition = await getWorkflowDefinition(workflowId, options)
   if (!definition) return false
-  return definition.source === 'built_in'
+  return false
 }
 
 export async function syncResolvedWorkflowSnapshots(options?: {
