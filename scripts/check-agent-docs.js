@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-/* eslint-disable no-console */
+ 
 
-const fsp = require('node:fs/promises');
-const path = require('node:path');
+import fsp from 'node:fs/promises';
+import path from 'node:path';
 
 const ROLES = [
   'build',
