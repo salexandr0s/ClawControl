@@ -53,5 +53,5 @@ npm run check:agent-docs -- --max-context-age-days 14 --fail-on-stale
 ## Notes
 
 - `ACCESS.md` and `CONTEXT.md` include required metadata fields (`Last Updated`, `Updated By`, `Source of Truth`).
-- The generator uses role defaults from `scripts/init-agents.js`; override via manifest where needed.
+- The generator uses role defaults from `scripts/init-agents.mjs`; override via manifest where needed.
 - This template is intentionally opinionated. Tune constraints, tool policies, and output formats after generation.

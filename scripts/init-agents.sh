@@ -3,4 +3,4 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-node "$SCRIPT_DIR/init-agents.js" "$@"
+node "$SCRIPT_DIR/init-agents.mjs" "$@"
