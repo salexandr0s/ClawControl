@@ -132,6 +132,16 @@ export interface StreamingCommandOptions {
   onChunk?: (chunk: CommandOutput) => void | Promise<void>
 }
 
+function buildSpawnEnv(overrides?: Record<string, string>): NodeJS.ProcessEnv {
+  // Prevent parent shell secrets from unexpectedly overriding local gateway auth.
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  delete env.OPENCLAW_GATEWAY_TOKEN
+  delete env.CLAWDBOT_GATEWAY_TOKEN
+  delete env.OPENCLAW_GATEWAY_PASSWORD
+  delete env.CLAWDBOT_GATEWAY_PASSWORD
+  return { ...env, ...(overrides ?? {}) }
+}
+
 // ============================================================================
 // COMMAND RUNNER
 // ============================================================================
@@ -222,7 +232,7 @@ export async function* executeCommand(
   try {
     child = spawn(openClawBin, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: buildSpawnEnv(options.env),
       timeout,
     })
 
@@ -770,7 +780,7 @@ export async function runDynamicCommandJson<T = unknown>(
   try {
     const child = spawn(openClawBin, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: buildSpawnEnv(options.env),
       timeout,
     })
 
@@ -945,7 +955,7 @@ export async function runDynamicCommand(
   try {
     const child = spawn(openClawBin, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: buildSpawnEnv(options.env),
       timeout,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
