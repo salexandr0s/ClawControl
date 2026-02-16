@@ -49,7 +49,8 @@ const REQUIRED_COLUMNS_BY_TABLE: Record<string, readonly string[]> = {
     'acceptance_criteria_json',
     'status',
   ],
-  agents: ['dispatch_eligible', 'name_source', 'is_stale', 'stale_at', 'team_id'],
+  agents: ['dispatch_eligible', 'name_source', 'is_stale', 'stale_at', 'team_id', 'template_id'],
+  agent_teams: ['workflow_ids', 'template_ids', 'hierarchy_json', 'health_status'],
 }
 
 let lastStatus: DbInitStatus = {

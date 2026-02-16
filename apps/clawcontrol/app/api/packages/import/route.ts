@@ -5,6 +5,12 @@ import { analyzePackageImport, PackageServiceError } from '@/lib/packages/servic
 
 export const runtime = 'nodejs'
 
+type UploadFile = {
+  arrayBuffer: () => Promise<ArrayBuffer>
+  name: string
+  type: string
+}
+
 function extractMultipartBoundary(contentType: string): string | null {
   const match = contentType.match(/boundary=([^;]+)/i)
   if (!match) return null
@@ -29,8 +35,46 @@ function parseContentDisposition(value: string): { name?: string; filename?: str
   return out
 }
 
-async function parseMultipartFallback(request: NextRequest): Promise<{ file: File | null; typedConfirmText?: string }> {
-  const contentType = (request.headers.get('content-type') || '').toLowerCase()
+function isFileLike(value: unknown): value is {
+  arrayBuffer: () => Promise<ArrayBuffer>
+  type?: string
+  name?: string
+} {
+  if (!value || typeof value !== 'object') return false
+  return typeof (value as { arrayBuffer?: unknown }).arrayBuffer === 'function'
+}
+
+function resolveUploadNameType(value: { name?: string; type?: string }): { name: string; type: string } {
+  const name = typeof value.name === 'string' && value.name.trim().length > 0
+    ? value.name
+    : 'package.zip'
+  const type = typeof value.type === 'string' && value.type.trim().length > 0
+    ? value.type
+    : 'application/octet-stream'
+  return { name, type }
+}
+
+async function normalizeUploadedFile(value: unknown): Promise<UploadFile | null> {
+  if (typeof File !== 'undefined' && value instanceof File) {
+    const nameType = resolveUploadNameType(value)
+    return {
+      arrayBuffer: () => value.arrayBuffer(),
+      name: nameType.name,
+      type: nameType.type,
+    }
+  }
+  if (!isFileLike(value)) return null
+
+  const nameType = resolveUploadNameType(value)
+  return {
+    arrayBuffer: () => value.arrayBuffer(),
+    name: nameType.name,
+    type: nameType.type,
+  }
+}
+
+async function parseMultipartFallback(request: NextRequest): Promise<{ file: UploadFile | null; typedConfirmText?: string }> {
+  const contentType = request.headers.get('content-type') || ''
   const boundary = extractMultipartBoundary(contentType)
   if (!boundary) {
     return { file: null }
@@ -43,7 +87,7 @@ async function parseMultipartFallback(request: NextRequest): Promise<{ file: Fil
   let pos = rawBytes.indexOf(boundaryLine)
   if (pos === -1) return { file: null }
 
-  let file: File | null = null
+  let file: UploadFile | null = null
   let typedConfirmText: string | undefined
 
   while (pos !== -1) {
@@ -85,7 +129,12 @@ async function parseMultipartFallback(request: NextRequest): Promise<{ file: Fil
     if (fieldName === 'file') {
       const filename = disp.filename || 'package.zip'
       const partType = headers.get('content-type')?.trim() || 'application/octet-stream'
-      file = new File([content], filename, { type: partType })
+      const bytes = Uint8Array.from(content)
+      file = {
+        name: filename,
+        type: partType,
+        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      }
     }
 
     if (nextMarker === -1) break
@@ -110,22 +159,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'multipart/form-data is required' }, { status: 400 })
   }
 
-  let file: unknown = null
-  let typedConfirmText: string | undefined
+  // Parse raw multipart directly for runtime consistency in Electron/Node.
+  const parsed = await parseMultipartFallback(request)
+  const normalizedFile = await normalizeUploadedFile(parsed.file)
+  const typedConfirmText = parsed.typedConfirmText
 
-  try {
-    const formData = await request.clone().formData()
-    file = formData.get('file')
-    typedConfirmText = typeof formData.get('typedConfirmText') === 'string'
-      ? String(formData.get('typedConfirmText'))
-      : undefined
-  } catch {
-    const parsed = await parseMultipartFallback(request)
-    file = parsed.file
-    typedConfirmText = parsed.typedConfirmText
-  }
-
-  if (!(file instanceof File)) {
+  if (!normalizedFile) {
     return NextResponse.json({ error: 'Package file is required' }, { status: 400 })
   }
 
@@ -145,7 +184,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const analysis = await analyzePackageImport(file)
+    const analysis = await analyzePackageImport(normalizedFile)
     return NextResponse.json({ data: analysis }, { status: 201 })
   } catch (error) {
     if (error instanceof PackageServiceError) {

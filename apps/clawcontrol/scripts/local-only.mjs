@@ -20,6 +20,11 @@ if (hostEnv && !allowed.has(hostEnv)) {
 process.env.HOSTNAME = '127.0.0.1'
 process.env.HOST = '127.0.0.1'
 
+// Local default: if DATABASE_URL is unset, use the bundled SQLite path.
+if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim().length === 0) {
+  process.env.DATABASE_URL = 'file:../data/clawcontrol.db'
+}
+
 // Pass-through: `node scripts/local-only.mjs <cmd> <args...>`
 const [cmd, ...args] = process.argv.slice(2)
 if (!cmd) fail('No command provided. Usage: node scripts/local-only.mjs next dev ...')

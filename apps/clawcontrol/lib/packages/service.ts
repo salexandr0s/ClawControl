@@ -50,6 +50,11 @@ import {
   validateWorkflowSchema,
   validateWorkflowSemantics,
 } from '@/lib/workflows/validation'
+import {
+  assertValidTeamHierarchy,
+  TeamHierarchyValidationError,
+} from '@/lib/services/team-hierarchy'
+import type { TeamHierarchyConfig } from '@/lib/repo/types'
 
 const STAGED_PACKAGE_TTL_MS = 30 * 60 * 1000
 const PACKAGE_HISTORY_DIR = '/workflow-packages/history'
@@ -79,6 +84,7 @@ interface PackageTeamArtifact {
   source?: 'builtin' | 'custom' | 'imported'
   workflowIds?: string[]
   templateIds?: string[]
+  hierarchy: TeamHierarchyConfig
   memberAgentIds?: string[]
   healthStatus?: 'healthy' | 'warning' | 'degraded' | 'unknown'
 }
@@ -167,6 +173,12 @@ export interface PackageDeployResult {
     teams: string[]
     selectionApplied: boolean
   }
+}
+
+export interface UploadedPackageFileLike {
+  arrayBuffer(): Promise<ArrayBuffer>
+  name: string
+  type: string
 }
 
 export class PackageServiceError extends Error {
@@ -266,7 +278,7 @@ function asStringArray(value: unknown): string[] | undefined {
   return out
 }
 
-function parseTeamArtifact(raw: unknown, defaultId: string): PackageTeamArtifact {
+function parseTeamArtifact(raw: unknown, defaultId: string, kind: ClawPackageKind): PackageTeamArtifact {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new PackageServiceError('Team definition must be an object', 'PACKAGE_VALIDATION_FAILED', 400)
   }
@@ -286,6 +298,32 @@ function parseTeamArtifact(raw: unknown, defaultId: string): PackageTeamArtifact
   const normalizedHealth = health === 'healthy' || health === 'warning' || health === 'degraded' || health === 'unknown'
     ? health
     : 'unknown'
+  const templateIds = asStringArray(record.templateIds) ?? []
+  const requiresHierarchy = kind === 'agent_team' || kind === 'team_with_workflows'
+  const rawHierarchy = record.hierarchy
+  if (requiresHierarchy && rawHierarchy === undefined) {
+    throw new PackageServiceError(
+      'Team definition missing required hierarchy block',
+      'PACKAGE_VALIDATION_FAILED',
+      400,
+      { field: 'hierarchy', id: defaultId, slug: record.slug }
+    )
+  }
+
+  let hierarchy: TeamHierarchyConfig
+  try {
+    hierarchy = assertValidTeamHierarchy(rawHierarchy, templateIds)
+  } catch (error) {
+    if (error instanceof TeamHierarchyValidationError) {
+      throw new PackageServiceError(
+        'Invalid team hierarchy configuration',
+        'PACKAGE_VALIDATION_FAILED',
+        400,
+        { id: defaultId, issues: error.details }
+      )
+    }
+    throw error
+  }
 
   return {
     id: typeof record.id === 'string' && record.id.trim() ? record.id.trim() : defaultId,
@@ -294,7 +332,8 @@ function parseTeamArtifact(raw: unknown, defaultId: string): PackageTeamArtifact
     description: typeof record.description === 'string' ? record.description : null,
     source: normalizedSource,
     workflowIds: asStringArray(record.workflowIds),
-    templateIds: asStringArray(record.templateIds),
+    templateIds,
+    hierarchy,
     memberAgentIds: asStringArray(record.memberAgentIds),
     healthStatus: normalizedHealth,
   }
@@ -489,7 +528,7 @@ async function parsePackageBuffer(buffer: Buffer): Promise<ParsedPackage> {
       const raw = rawText ?? ''
       const parsed = parseYamlObject(raw, path)
       const teamId = path.split('/').at(-1)?.replace(/\.ya?ml$/i, '') || `team_${teams.length + 1}`
-      teams.push(parseTeamArtifact(parsed, teamId))
+      teams.push(parseTeamArtifact(parsed, teamId, manifest.kind))
       continue
     }
 
@@ -710,7 +749,7 @@ function buildMarketplaceListing(manifest: ClawPackageManifest): PackageListingM
   }
 }
 
-export async function analyzePackageImport(file: File): Promise<PackageAnalysis> {
+export async function analyzePackageImport(file: UploadedPackageFileLike): Promise<PackageAnalysis> {
   cleanupStagedPackages()
 
   if (!file.name.toLowerCase().endsWith('.zip')) {
@@ -1077,6 +1116,7 @@ export async function deployStagedPackage(input: {
       description: string | null
       workflowIds: string[]
       templateIds: string[]
+      hierarchy: TeamHierarchyConfig
       healthStatus: 'healthy' | 'warning' | 'degraded' | 'unknown'
     }
   }> = []
@@ -1117,6 +1157,7 @@ export async function deployStagedPackage(input: {
                 description: existing.description,
                 workflowIds: existing.workflowIds,
                 templateIds: existing.templateIds,
+                hierarchy: existing.hierarchy,
                 healthStatus: existing.healthStatus,
               },
             })
@@ -1126,6 +1167,7 @@ export async function deployStagedPackage(input: {
               description: team.description ?? null,
               workflowIds: team.workflowIds,
               templateIds: team.templateIds,
+              hierarchy: team.hierarchy,
               healthStatus: team.healthStatus,
               // Keep existing membership stable on update.
             })
@@ -1142,6 +1184,7 @@ export async function deployStagedPackage(input: {
           source: team.source ?? 'imported',
           workflowIds: team.workflowIds,
           templateIds: team.templateIds,
+          hierarchy: team.hierarchy,
           memberAgentIds: team.memberAgentIds,
           healthStatus: team.healthStatus,
         })
@@ -1325,6 +1368,7 @@ export async function buildPackageExport(input: {
       source: team.source,
       workflowIds: team.workflowIds,
       templateIds: team.templateIds,
+      hierarchy: team.hierarchy,
       memberAgentIds: team.members.map((member) => member.id),
       healthStatus: team.healthStatus,
     }, {

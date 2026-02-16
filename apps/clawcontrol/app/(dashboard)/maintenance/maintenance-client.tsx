@@ -57,6 +57,7 @@ type MaintenanceAction =
   | 'doctor-fix'
   | 'cache-clear'
   | 'sessions-reset'
+  | 'greenfield-reset'
   | 'gateway-restart'
   | 'security-audit-fix'
   | 'recover'
@@ -96,6 +97,12 @@ const ACTION_CONFIG: Record<MaintenanceAction, {
     description: 'Disconnect all agents and reset sessions',
     actionKind: 'maintenance.sessions_reset',
     icon: RotateCcw,
+  },
+  'greenfield-reset': {
+    title: 'Greenfield Reset',
+    description: 'Delete teams, non-main agents, workflows, and operational records',
+    actionKind: 'maintenance.greenfield_reset',
+    icon: Trash2,
   },
   'gateway-restart': {
     title: 'Restart Gateway',
@@ -407,6 +414,15 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
             if (success) {
               await refreshStatus()
             }
+          } else if (action === 'greenfield-reset') {
+            const result = await maintenanceApi.greenfieldReset(typedConfirmText)
+            setLastResult({
+              action,
+              success: true,
+              message: `Greenfield reset complete (teams ${result.data.teamsDeleted}, agents ${result.data.agentsDeleted})`,
+              receiptId: result.receiptId,
+            })
+            await refreshStatus()
           } else {
             const result = await maintenanceApi.runAction(action, typedConfirmText)
             const success = result.data.exitCode === 0
@@ -696,7 +712,7 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
               onClick={() => handleAction('doctor')}
             />
           </div>
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
             <LiveActionCard
               action="doctor-fix"
               config={ACTION_CONFIG['doctor-fix']}
@@ -719,6 +735,14 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
               isRunning={runningAction === 'sessions-reset'}
               disabled={runningAction !== null}
               onClick={() => handleAction('sessions-reset')}
+              danger
+            />
+            <LiveActionCard
+              action="greenfield-reset"
+              config={ACTION_CONFIG['greenfield-reset']}
+              isRunning={runningAction === 'greenfield-reset'}
+              disabled={runningAction !== null || blockCriticalActions}
+              onClick={() => handleAction('greenfield-reset')}
               danger
             />
           </div>

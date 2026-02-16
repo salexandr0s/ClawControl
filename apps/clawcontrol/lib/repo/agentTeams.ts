@@ -1,6 +1,14 @@
 import { prisma } from '@/lib/db'
 import { slugifyDisplayName } from '@/lib/agent-identity'
-import type { AgentTeamDTO, AgentTeamMemberDTO } from './types'
+import {
+  assertValidTeamHierarchy,
+  createDefaultTeamHierarchy,
+} from '@/lib/services/team-hierarchy'
+import type {
+  AgentTeamDTO,
+  AgentTeamMemberDTO,
+  TeamHierarchyConfig,
+} from './types'
 
 export interface CreateAgentTeamInput {
   name: string
@@ -9,6 +17,7 @@ export interface CreateAgentTeamInput {
   source?: AgentTeamDTO['source']
   workflowIds?: string[]
   templateIds?: string[]
+  hierarchy?: TeamHierarchyConfig
   healthStatus?: AgentTeamDTO['healthStatus']
   memberAgentIds?: string[]
 }
@@ -18,6 +27,7 @@ export interface UpdateAgentTeamInput {
   description?: string | null
   workflowIds?: string[]
   templateIds?: string[]
+  hierarchy?: TeamHierarchyConfig
   healthStatus?: AgentTeamDTO['healthStatus']
   memberAgentIds?: string[]
 }
@@ -39,6 +49,7 @@ type TeamRow = {
   source: string
   workflowIds: string
   templateIds: string
+  hierarchyJson: string
   healthStatus: string
   createdAt: Date
   updatedAt: Date
@@ -62,7 +73,7 @@ function dedupe(values: string[] | undefined): string[] {
     if (!trimmed) continue
     out.add(trimmed)
   }
-  return Array.from(out)
+  return Array.from(out).sort((left, right) => left.localeCompare(right))
 }
 
 function normalizeTeamMember(row: {
@@ -70,6 +81,7 @@ function normalizeTeamMember(row: {
   displayName: string | null
   name: string
   slug: string | null
+  templateId: string | null
   role: string
   station: string
   status: string
@@ -79,15 +91,28 @@ function normalizeTeamMember(row: {
     id: row.id,
     displayName,
     slug: row.slug?.trim() || slugifyDisplayName(displayName),
+    templateId: row.templateId ?? null,
     role: row.role,
     station: row.station,
     status: (row.status as AgentTeamMemberDTO['status']) ?? 'idle',
   }
 }
 
+function parseTeamHierarchy(value: string, templateIds: string[]): TeamHierarchyConfig {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return assertValidTeamHierarchy(parsed, templateIds)
+  } catch {
+    return createDefaultTeamHierarchy(templateIds)
+  }
+}
+
 function normalizeTeam(row: TeamRow, members: AgentTeamMemberDTO[]): AgentTeamDTO {
   const source = row.source as AgentTeamDTO['source']
   const healthStatus = row.healthStatus as AgentTeamDTO['healthStatus']
+
+  const templateIds = safeParseStringArray(row.templateIds)
+  const hierarchy = parseTeamHierarchy(row.hierarchyJson, templateIds)
 
   return {
     id: row.id,
@@ -96,7 +121,8 @@ function normalizeTeam(row: TeamRow, members: AgentTeamMemberDTO[]): AgentTeamDT
     description: row.description,
     source: source === 'imported' || source === 'builtin' ? source : 'custom',
     workflowIds: safeParseStringArray(row.workflowIds),
-    templateIds: safeParseStringArray(row.templateIds),
+    templateIds,
+    hierarchy,
     healthStatus: (
       healthStatus === 'healthy'
       || healthStatus === 'warning'
@@ -120,6 +146,7 @@ async function buildTeamDTO(row: TeamRow): Promise<AgentTeamDTO> {
       displayName: true,
       name: true,
       slug: true,
+      templateId: true,
       role: true,
       station: true,
       status: true,
@@ -196,6 +223,9 @@ export function createDbAgentTeamsRepo(): AgentTeamsRepo {
       const slug = await ensureUniqueSlug(baseSlug)
       const workflowIds = dedupe(input.workflowIds)
       const templateIds = dedupe(input.templateIds)
+      const hierarchy = input.hierarchy
+        ? assertValidTeamHierarchy(input.hierarchy, templateIds)
+        : createDefaultTeamHierarchy(templateIds)
 
       const row = await prisma.agentTeam.create({
         data: {
@@ -205,6 +235,7 @@ export function createDbAgentTeamsRepo(): AgentTeamsRepo {
           source: input.source ?? 'custom',
           workflowIds: JSON.stringify(workflowIds),
           templateIds: JSON.stringify(templateIds),
+          hierarchyJson: JSON.stringify(hierarchy),
           healthStatus: input.healthStatus ?? 'healthy',
         },
       })
@@ -227,6 +258,18 @@ export function createDbAgentTeamsRepo(): AgentTeamsRepo {
       const nextTemplateIds = input.templateIds !== undefined
         ? JSON.stringify(dedupe(input.templateIds))
         : undefined
+      const resolvedTemplateIds = input.templateIds !== undefined
+        ? dedupe(input.templateIds)
+        : safeParseStringArray(existing.templateIds)
+      const existingHierarchy = parseTeamHierarchy(
+        (existing as unknown as TeamRow).hierarchyJson ?? '{"version":1,"members":{}}',
+        safeParseStringArray(existing.templateIds)
+      )
+      const nextHierarchy = input.hierarchy !== undefined
+        ? assertValidTeamHierarchy(input.hierarchy, resolvedTemplateIds)
+        : input.templateIds !== undefined
+          ? assertValidTeamHierarchy(existingHierarchy, resolvedTemplateIds)
+          : undefined
 
       const row = await prisma.agentTeam.update({
         where: { id },
@@ -235,6 +278,7 @@ export function createDbAgentTeamsRepo(): AgentTeamsRepo {
           ...(input.description !== undefined ? { description: input.description } : {}),
           ...(nextWorkflowIds !== undefined ? { workflowIds: nextWorkflowIds } : {}),
           ...(nextTemplateIds !== undefined ? { templateIds: nextTemplateIds } : {}),
+          ...(nextHierarchy !== undefined ? { hierarchyJson: JSON.stringify(nextHierarchy) } : {}),
           ...(input.healthStatus !== undefined ? { healthStatus: input.healthStatus } : {}),
         },
       })

@@ -83,4 +83,61 @@ describe('packages import route', () => {
     expect(payload.data.sha256).toBe('sha256_test')
     expect(payload.data.scan.outcome).toBe('pass')
   })
+
+  it('falls back to raw multipart parsing when formData has no file', async () => {
+    mocks.analyzePackageImport.mockResolvedValue({
+      packageId: 'pkg_fallback',
+      fileName: 'x.clawpack.zip',
+      sha256: 'sha256_fallback',
+      manifest: { id: 'x', name: 'X', version: '1.0.0', kind: 'workflow' },
+      scan: {
+        outcome: 'pass',
+        blocked: false,
+        summaryCounts: { danger: 0, warning: 0, info: 0 },
+        findings: [],
+        scannerVersion: 'v1',
+      },
+      blockedByScan: false,
+      alertWorkOrderId: null,
+      summary: { templates: 0, workflows: 1, teams: 0, hasSelection: false },
+      conflicts: { templates: [], workflows: [], teams: [] },
+      installDoc: null,
+      stagedUntil: new Date().toISOString(),
+    })
+
+    const boundary = '----ClawControl-Test-Boundary'
+    const multipart = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="x.clawpack.zip"',
+      'Content-Type: application/zip',
+      '',
+      'zip-bytes',
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="typedConfirmText"',
+      '',
+      'CONFIRM',
+      `--${boundary}--`,
+      '',
+    ].join('\r\n')
+    const body = new TextEncoder().encode(multipart)
+
+    const route = await import('@/app/api/packages/import/route')
+    const request = {
+      headers: new Headers({
+        'content-type': `multipart/form-data; boundary=${boundary}`,
+      }),
+      clone: () => ({
+        formData: async () => new FormData(),
+        arrayBuffer: async () => body.buffer,
+      }),
+      arrayBuffer: async () => body.buffer,
+    } as unknown as Request
+
+    const response = await route.POST(request as never)
+    const payload = (await response.json()) as { data: { sha256: string } }
+
+    expect(response.status).toBe(201)
+    expect(payload.data.sha256).toBe('sha256_fallback')
+    expect(mocks.analyzePackageImport).toHaveBeenCalledOnce()
+  })
 })

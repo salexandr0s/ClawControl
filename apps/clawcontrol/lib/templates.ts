@@ -101,6 +101,69 @@ export function validateTemplateConfig(
         }
       }
     }
+
+    // Validate team hierarchy defaults
+    if (cfg.teamDefaults) {
+      const toUnique = (value: string[] | undefined): string[] => {
+        if (!value) return []
+        return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean)))
+      }
+
+      const reportsTo = typeof cfg.teamDefaults.reportsTo === 'string'
+        ? cfg.teamDefaults.reportsTo.trim()
+        : null
+      const delegatesTo = toUnique(cfg.teamDefaults.delegatesTo)
+      const receivesFrom = toUnique(cfg.teamDefaults.receivesFrom)
+      const canMessage = toUnique(cfg.teamDefaults.canMessage)
+
+      if (reportsTo && reportsTo === cfg.id) {
+        errors.push({
+          path: '/teamDefaults/reportsTo',
+          message: 'teamDefaults.reportsTo cannot reference the template itself',
+          code: 'TEAM_DEFAULTS_SELF_REPORT',
+        })
+      }
+
+      if (delegatesTo.includes(cfg.id)) {
+        errors.push({
+          path: '/teamDefaults/delegatesTo',
+          message: 'teamDefaults.delegatesTo cannot include the template itself',
+          code: 'TEAM_DEFAULTS_SELF_DELEGATE',
+        })
+      }
+
+      if (receivesFrom.includes(cfg.id)) {
+        errors.push({
+          path: '/teamDefaults/receivesFrom',
+          message: 'teamDefaults.receivesFrom cannot include the template itself',
+          code: 'TEAM_DEFAULTS_SELF_RECEIVE',
+        })
+      }
+
+      if (canMessage.includes(cfg.id)) {
+        errors.push({
+          path: '/teamDefaults/canMessage',
+          message: 'teamDefaults.canMessage cannot include the template itself',
+          code: 'TEAM_DEFAULTS_SELF_MESSAGE',
+        })
+      }
+
+      if (cfg.teamDefaults.capabilities?.canDelegate === false && delegatesTo.length > 0) {
+        errors.push({
+          path: '/teamDefaults/delegatesTo',
+          message: 'teamDefaults.capabilities.canDelegate=false requires delegatesTo to be empty',
+          code: 'TEAM_DEFAULTS_DELEGATE_CAP_CONFLICT',
+        })
+      }
+
+      if (cfg.teamDefaults.capabilities?.canSendMessages === false && canMessage.length > 0) {
+        errors.push({
+          path: '/teamDefaults/canMessage',
+          message: 'teamDefaults.capabilities.canSendMessages=false requires canMessage to be empty',
+          code: 'TEAM_DEFAULTS_MESSAGE_CAP_CONFLICT',
+        })
+      }
+    }
   }
 
   return {

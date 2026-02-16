@@ -36,5 +36,19 @@
   "tags": [
     "clawcontrol",
     "default"
-  ]
+  ],
+  "teamDefaults": {
+    "reportsTo": "manager",
+    "delegatesTo": [],
+    "receivesFrom": [
+      "manager"
+    ],
+    "canMessage": [
+      "manager"
+    ],
+    "capabilities": {
+      "canDelegate": false,
+      "canSendMessages": true
+    }
+  }
 }

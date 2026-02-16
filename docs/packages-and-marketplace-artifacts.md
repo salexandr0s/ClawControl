@@ -1,6 +1,6 @@
 # Packages and Marketplace Artifacts
 
-Last updated: 2026-02-13
+Last updated: 2026-02-16
 
 ClawControl supports portable package artifacts for import/deploy/export flows.
 
@@ -49,12 +49,39 @@ Analyze reports:
 - conflict detection (templates/workflows/teams)
 - temporary stage id for deployment
 
+For package kinds `agent_team` and `team_with_workflows`, each `teams/*.yaml` must include a required `hierarchy` block:
+
+```yaml
+hierarchy:
+  version: 1
+  members:
+    <templateId>:
+      reportsTo: <templateId|null>
+      delegatesTo: [<templateId>, ...]
+      receivesFrom: [<templateId>, ...]
+      canMessage: [<templateId>, ...]
+      capabilities:
+        canDelegate: <boolean?>
+        canSendMessages: <boolean?>
+        canExecuteCode: <boolean?>
+        canModifyFiles: <boolean?>
+        canWebSearch: <boolean?>
+```
+
+Analyze/deploy fails if hierarchy is missing or invalid.
+
 Deploy supports scoped application toggles:
 
 - templates
 - workflows
 - teams
 - selection
+
+Team deploy semantics:
+
+- create path: creates new team with provided hierarchy snapshot
+- overwrite path: updates existing team by slug and replaces hierarchy snapshot
+- instantiate/deploy action reconciles existing team agents and applies hierarchy capability overrides
 
 ## 4. Rollback Behavior
 
@@ -77,6 +104,7 @@ Exported packages include:
 
 - `clawcontrol-package.yaml` (runtime manifest)
 - `marketplace/listing.yaml` (optional marketplace sidecar metadata)
+- `teams/*.yaml` hierarchy blocks for team package kinds
 
 ## 6. Security and Governance
 

@@ -7,7 +7,7 @@ import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
 import { useSettings } from '@/lib/settings-context'
 import { packagesApi, type PackageImportAnalysis } from '@/lib/http'
 import { cn } from '@/lib/utils'
-import { CheckCircle, FileArchive, Upload, AlertTriangle, Rocket, RotateCcw } from 'lucide-react'
+import { CheckCircle, FileArchive, Upload, AlertTriangle, Rocket, RotateCcw, Download } from 'lucide-react'
 import { TrustBadge } from '@/components/trust/trust-badge'
 
 interface ImportPackageModalProps {
@@ -63,15 +63,36 @@ export function ImportPackageModal({
     )
   }, [analysis])
 
+  const hasTemplateConflicts = (analysis?.conflicts.templates.length ?? 0) > 0
+  const hasWorkflowConflicts = (analysis?.conflicts.workflows.length ?? 0) > 0
+  const hasTeamConflicts = (analysis?.conflicts.teams.length ?? 0) > 0
+
+  useEffect(() => {
+    if (!hasTemplateConflicts) setOverwriteTemplates(false)
+    if (!hasWorkflowConflicts) setOverwriteWorkflows(false)
+    if (!hasTeamConflicts) setOverwriteTeams(false)
+  }, [hasTemplateConflicts, hasWorkflowConflicts, hasTeamConflicts])
+
   const deployOptions = useMemo(() => ({
     applyTemplates,
     applyWorkflows,
     applyTeams,
     applySelection,
-    overwriteTemplates: overwriteTemplates && applyTemplates,
-    overwriteWorkflows: overwriteWorkflows && applyWorkflows,
-    overwriteTeams: overwriteTeams && applyTeams,
-  }), [applyTemplates, applyWorkflows, applyTeams, applySelection, overwriteTemplates, overwriteWorkflows, overwriteTeams])
+    overwriteTemplates: overwriteTemplates && applyTemplates && hasTemplateConflicts,
+    overwriteWorkflows: overwriteWorkflows && applyWorkflows && hasWorkflowConflicts,
+    overwriteTeams: overwriteTeams && applyTeams && hasTeamConflicts,
+  }), [
+    applyTemplates,
+    applyWorkflows,
+    applyTeams,
+    applySelection,
+    overwriteTemplates,
+    overwriteWorkflows,
+    overwriteTeams,
+    hasTemplateConflicts,
+    hasWorkflowConflicts,
+    hasTeamConflicts,
+  ])
 
   const handleAnalyze = () => {
     if (!file) return
@@ -139,6 +160,23 @@ export function ImportPackageModal({
     })
   }
 
+  const handleDownloadInstallDoc = () => {
+    if (!analysis?.installDoc?.preview) return
+
+    const rawName = analysis.installDoc.path?.trim() || 'POST_INSTALL.md'
+    const fileName = rawName.toLowerCase().endsWith('.md') ? rawName : `${rawName}.md`
+
+    const blob = new Blob([analysis.installDoc.preview], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = fileName
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <>
       <Modal
@@ -200,13 +238,33 @@ export function ImportPackageModal({
               </div>
 
               {analysis.installDoc?.preview && (
-                <div className="rounded-[var(--radius-sm)] border border-bd-0 bg-bg-3 p-3 space-y-2">
-                  <div className="text-xs font-medium text-fg-0">Post-install</div>
+                <div className="rounded-[var(--radius-sm)] border border-status-warning/40 bg-status-warning/10 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-status-warning">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>IMPORTANT: Post-Install Instructions</span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleDownloadInstallDoc}
+                      disabled={isWorking}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Download .md
+                    </Button>
+                  </div>
+                  {analysis.installDoc.path && (
+                    <div className="text-[11px] text-fg-2">
+                      Source file: {analysis.installDoc.path}
+                    </div>
+                  )}
                   <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-[var(--radius-sm)] bg-bg-2 p-2 text-[11px] text-fg-1">
                     {analysis.installDoc.preview}
                   </pre>
-                  <div className="text-[11px] text-fg-2">
-                    After deploy: go to Agents → Teams and click Instantiate Agents.
+                  <div className="text-[11px] text-fg-1">
+                    After deploy: go to Agents → Teams and click Deploy.
                   </div>
                 </div>
               )}
@@ -248,33 +306,39 @@ export function ImportPackageModal({
 
                   <div className="pt-2 space-y-1 text-fg-1">
                     <div className="text-[11px] text-fg-2">Update options (overwrite existing)</div>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={overwriteTemplates}
-                        onChange={(e) => setOverwriteTemplates(e.target.checked)}
-                        disabled={!applyTemplates || analysis.conflicts.templates.length === 0}
-                      />
-                      Overwrite templates
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={overwriteWorkflows}
-                        onChange={(e) => setOverwriteWorkflows(e.target.checked)}
-                        disabled={!applyWorkflows || analysis.conflicts.workflows.length === 0}
-                      />
-                      Overwrite workflows
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={overwriteTeams}
-                        onChange={(e) => setOverwriteTeams(e.target.checked)}
-                        disabled={!applyTeams || analysis.conflicts.teams.length === 0}
-                      />
-                      Update teams by slug
-                    </label>
+                    {hasTemplateConflicts && (
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={overwriteTemplates}
+                          onChange={(e) => setOverwriteTemplates(e.target.checked)}
+                          disabled={!applyTemplates}
+                        />
+                        Overwrite templates
+                      </label>
+                    )}
+                    {hasWorkflowConflicts && (
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={overwriteWorkflows}
+                          onChange={(e) => setOverwriteWorkflows(e.target.checked)}
+                          disabled={!applyWorkflows}
+                        />
+                        Overwrite workflows
+                      </label>
+                    )}
+                    {hasTeamConflicts && (
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={overwriteTeams}
+                          onChange={(e) => setOverwriteTeams(e.target.checked)}
+                          disabled={!applyTeams}
+                        />
+                        Update teams by slug
+                      </label>
+                    )}
                   </div>
                 </div>
               )}

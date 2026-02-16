@@ -92,6 +92,25 @@ async function loadRouteModule(): Promise<{ route: RouteModule; repos: MockRepos
         source: 'imported',
         workflowIds: [],
         templateIds: ['build', 'security'],
+        hierarchy: {
+          version: 1,
+          members: {
+            build: {
+              reportsTo: 'security',
+              delegatesTo: [],
+              receivesFrom: ['security'],
+              canMessage: ['security'],
+              capabilities: { canDelegate: false, canSendMessages: true },
+            },
+            security: {
+              reportsTo: null,
+              delegatesTo: ['build'],
+              receivesFrom: ['build'],
+              canMessage: ['build'],
+              capabilities: { canDelegate: true, canSendMessages: true },
+            },
+          },
+        },
         healthStatus: 'unknown',
         memberCount: 0,
         members: [],
@@ -114,6 +133,7 @@ async function loadRouteModule(): Promise<{ route: RouteModule; repos: MockRepos
           role: input.role,
           station: input.station,
           teamId: input.teamId ?? null,
+          templateId: input.templateId ?? null,
           status: 'idle',
           sessionKey: input.sessionKey,
           capabilities: input.capabilities ?? {},
@@ -244,4 +264,3 @@ describe('POST /api/agent-teams/:id/instantiate', () => {
     expect(agentsMd).toBe('UNCHANGED\n')
   })
 })
-

@@ -20,4 +20,132 @@ templateIds:
   - ui_review
   - security
   - ops
+hierarchy:
+  version: 1
+  members:
+    manager:
+      reportsTo: null
+      delegatesTo:
+        - build
+        - build_review
+        - ops
+        - plan
+        - plan_review
+        - research
+        - security
+        - ui
+        - ui_review
+      receivesFrom:
+        - build
+        - build_review
+        - ops
+        - plan
+        - plan_review
+        - research
+        - security
+        - ui
+        - ui_review
+      canMessage:
+        - build
+        - build_review
+        - ops
+        - plan
+        - plan_review
+        - research
+        - security
+        - ui
+        - ui_review
+      capabilities:
+        canDelegate: true
+        canSendMessages: true
+    research:
+      reportsTo: manager
+      delegatesTo: []
+      receivesFrom:
+        - manager
+      canMessage:
+        - manager
+      capabilities:
+        canDelegate: false
+        canSendMessages: true
+    plan:
+      reportsTo: manager
+      delegatesTo: []
+      receivesFrom:
+        - manager
+      canMessage:
+        - manager
+      capabilities:
+        canDelegate: false
+        canSendMessages: true
+    plan_review:
+      reportsTo: manager
+      delegatesTo: []
+      receivesFrom:
+        - manager
+      canMessage:
+        - manager
+      capabilities:
+        canDelegate: false
+        canSendMessages: true
+    build:
+      reportsTo: manager
+      delegatesTo: []
+      receivesFrom:
+        - manager
+      canMessage:
+        - manager
+      capabilities:
+        canDelegate: false
+        canSendMessages: true
+    build_review:
+      reportsTo: manager
+      delegatesTo: []
+      receivesFrom:
+        - manager
+      canMessage:
+        - manager
+      capabilities:
+        canDelegate: false
+        canSendMessages: true
+    ui:
+      reportsTo: manager
+      delegatesTo: []
+      receivesFrom:
+        - manager
+      canMessage:
+        - manager
+      capabilities:
+        canDelegate: false
+        canSendMessages: true
+    ui_review:
+      reportsTo: manager
+      delegatesTo: []
+      receivesFrom:
+        - manager
+      canMessage:
+        - manager
+      capabilities:
+        canDelegate: false
+        canSendMessages: true
+    security:
+      reportsTo: manager
+      delegatesTo: []
+      receivesFrom:
+        - manager
+      canMessage:
+        - manager
+      capabilities:
+        canDelegate: false
+        canSendMessages: true
+    ops:
+      reportsTo: manager
+      delegatesTo: []
+      receivesFrom:
+        - manager
+      canMessage:
+        - manager
+      capabilities:
+        canDelegate: false
+        canSendMessages: true
 healthStatus: healthy

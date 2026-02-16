@@ -67,6 +67,7 @@ export type ActionKind =
   | 'maintenance.cache_clear'
   | 'maintenance.sessions_reset'
   | 'maintenance.recover_gateway'
+  | 'maintenance.greenfield_reset'
   // Agent actions
   | 'agent.create'
   | 'agent.create_from_template'
@@ -410,6 +411,14 @@ export const ACTION_POLICIES: Record<ActionKind, ActionPolicy> = {
     approvalType: 'risky_action',
     description: 'Run gateway recovery playbook',
   },
+  'maintenance.greenfield_reset': {
+    riskLevel: 'danger',
+    confirmMode: 'CONFIRM',
+    confirmText: 'RESET_GREENFIELD',
+    requiresApproval: true,
+    approvalType: 'risky_action',
+    description: 'Destructively reset workspace to greenfield state',
+  },
 
   // Agent actions
   'agent.create': {
@@ -585,8 +594,7 @@ export const ACTION_POLICIES: Record<ActionKind, ActionPolicy> = {
   'team.delete': {
     riskLevel: 'danger',
     confirmMode: 'CONFIRM',
-    requiresApproval: true,
-    approvalType: 'risky_action',
+    requiresApproval: false,
     description: 'Delete agent team',
   },
   'team.import': {
@@ -620,15 +628,13 @@ export const ACTION_POLICIES: Record<ActionKind, ActionPolicy> = {
   'package.import': {
     riskLevel: 'danger',
     confirmMode: 'CONFIRM',
-    requiresApproval: true,
-    approvalType: 'external_side_effect',
+    requiresApproval: false,
     description: 'Import claw package archive',
   },
   'package.deploy': {
     riskLevel: 'danger',
     confirmMode: 'CONFIRM',
-    requiresApproval: true,
-    approvalType: 'scope_change',
+    requiresApproval: false,
     description: 'Deploy imported claw package',
   },
   'package.deploy.override_scan_block': {

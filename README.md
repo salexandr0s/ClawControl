@@ -14,6 +14,7 @@ ClawControl is a dashboard + orchestration layer for running governed multi-agen
 - Streams real-time system and run activity.
 - Manages agents, agent templates, teams, workflows, skills, plugins, and workspace files from one UI.
 - Supports import/deploy/export package artifacts (`.clawpack.zip`) for workflows, templates, teams, and bundles.
+- Enforces editable team hierarchy policies for workflow dispatch and agent-to-agent orchestration.
 - Exports optional marketplace sidecar metadata (`marketplace/listing.yaml`) so artifacts are directly ingestible by the marketplace hard-cut contract.
 
 ## Workflow Example
@@ -106,6 +107,7 @@ Workflows reference specialist agents only; the CEO is not represented inside wo
 - UI action standards (buttons/toggles/dropdowns): [docs/ui-buttons-and-toggles.md](docs/ui-buttons-and-toggles.md)
 - Workflows guide: [docs/workflows.md](docs/workflows.md)
 - Packages and marketplace artifacts: [docs/packages-and-marketplace-artifacts.md](docs/packages-and-marketplace-artifacts.md)
+- Team hierarchy: [docs/team-hierarchy.md](docs/team-hierarchy.md)
 - Marketplace canonical implementation: `../Market_ClawControl`
 - Agent starter contract: [docs/AGENT_STARTER_TEMPLATE.md](docs/AGENT_STARTER_TEMPLATE.md)
 - Remote tunnel access: [docs/REMOTE_TAILSCALE.md](docs/REMOTE_TAILSCALE.md)

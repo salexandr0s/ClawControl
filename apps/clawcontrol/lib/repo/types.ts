@@ -114,6 +114,7 @@ export interface AgentDTO {
   displayName: string
   slug: string
   runtimeAgentId: string
+  templateId: string | null
   kind: AgentKind
   dispatchEligible: boolean
   nameSource: AgentNameSource
@@ -122,7 +123,7 @@ export interface AgentDTO {
   teamId: string | null
   status: 'idle' | 'active' | 'blocked' | 'error'
   sessionKey: string
-  capabilities: Record<string, boolean>
+  capabilities: Record<string, unknown>
   wipLimit: number
   avatarPath: string | null
   model: string | null
@@ -139,9 +140,31 @@ export interface AgentTeamMemberDTO {
   id: string
   displayName: string
   slug: string
+  templateId: string | null
   role: string
   station: string
   status: 'idle' | 'active' | 'blocked' | 'error'
+}
+
+export interface TeamCapabilityConfig {
+  canDelegate?: boolean
+  canSendMessages?: boolean
+  canExecuteCode?: boolean
+  canModifyFiles?: boolean
+  canWebSearch?: boolean
+}
+
+export interface TeamHierarchyMemberConfig {
+  reportsTo: string | null
+  delegatesTo: string[]
+  receivesFrom: string[]
+  canMessage: string[]
+  capabilities: TeamCapabilityConfig
+}
+
+export interface TeamHierarchyConfig {
+  version: 1
+  members: Record<string, TeamHierarchyMemberConfig>
 }
 
 export interface AgentTeamDTO {
@@ -152,6 +175,7 @@ export interface AgentTeamDTO {
   source: 'custom' | 'imported' | 'builtin'
   workflowIds: string[]
   templateIds: string[]
+  hierarchy: TeamHierarchyConfig
   healthStatus: 'healthy' | 'warning' | 'degraded' | 'unknown'
   memberCount: number
   members: AgentTeamMemberDTO[]

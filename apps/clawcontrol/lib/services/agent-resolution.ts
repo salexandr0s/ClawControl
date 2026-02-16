@@ -15,6 +15,8 @@ interface AgentRecord {
   dispatchEligible: boolean
   role: string
   station: string
+  teamId: string | null
+  templateId: string | null
   status: string
   sessionKey: string
   capabilities: string
@@ -31,6 +33,8 @@ export interface ResolvedAgent {
   dispatchEligible: boolean
   role: string
   station: string
+  teamId: string | null
+  templateId: string | null
   status: string
   sessionKey: string
   capabilities: string
@@ -160,6 +164,8 @@ function toResolvedAgent(agent: AgentRecord, load: number, hasActiveSession: boo
     dispatchEligible: Boolean(agent.dispatchEligible),
     role: agent.role,
     station: agent.station,
+    teamId: agent.teamId ?? null,
+    templateId: agent.templateId ?? null,
     status: agent.status,
     sessionKey: agent.sessionKey,
     capabilities: agent.capabilities,
@@ -219,6 +225,8 @@ async function listAgents(client: AgentQueryClient): Promise<AgentRecord[]> {
       dispatchEligible: true,
       role: true,
       station: true,
+      teamId: true,
+      templateId: true,
       status: true,
       sessionKey: true,
       capabilities: true,
@@ -338,6 +346,8 @@ export async function resolveAgentRef(
       dispatchEligible: true,
       role: true,
       station: true,
+      teamId: true,
+      templateId: true,
       status: true,
       sessionKey: true,
       capabilities: true,

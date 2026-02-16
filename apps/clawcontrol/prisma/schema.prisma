@@ -166,6 +166,7 @@ model Agent {
   role            String
   station         String
   teamId          String?   @map("team_id")
+  templateId      String?   @map("template_id")
   status          String    @default("idle") // idle|active|blocked|error
   sessionKey      String    @unique @map("session_key")
   capabilities    String    @default("{}") @map("capabilities") // JSON object
@@ -186,6 +187,7 @@ model Agent {
   @@index([status])
   @@index([station])
   @@index([teamId])
+  @@index([templateId])
   @@index([displayName])
   @@index([kind])
   @@index([dispatchEligible])
@@ -204,6 +206,7 @@ model AgentTeam {
   source       String   @default("custom") // custom|imported|builtin
   workflowIds  String   @default("[]") @map("workflow_ids") // JSON array
   templateIds  String   @default("[]") @map("template_ids") // JSON array
+  hierarchyJson String  @default("{\"version\":1,\"members\":{}}") @map("hierarchy_json")
   healthStatus String   @default("healthy") @map("health_status") // healthy|warning|degraded|unknown
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")

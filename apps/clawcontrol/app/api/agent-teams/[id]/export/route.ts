@@ -49,9 +49,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     source: team.source,
     workflowIds: team.workflowIds,
     templateIds: team.templateIds,
+    hierarchy: team.hierarchy,
     members: team.members.map((member) => ({
       id: member.id,
       slug: member.slug,
+      templateId: member.templateId,
       displayName: member.displayName,
       role: member.role,
       station: member.station,

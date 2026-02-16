@@ -22,7 +22,8 @@ export interface UpdateAgentInput {
   role?: string
   station?: string
   teamId?: string | null
-  capabilities?: Record<string, boolean>
+  templateId?: string | null
+  capabilities?: Record<string, unknown>
   wipLimit?: number
   sessionKey?: string
   avatarPath?: string | null
@@ -50,8 +51,9 @@ export interface CreateAgentInput {
   role: string
   station: string
   teamId?: string | null
+  templateId?: string | null
   sessionKey: string
-  capabilities: Record<string, boolean>
+  capabilities: Record<string, unknown>
   wipLimit?: number
   model?: string | null
   fallbacks?: string | null
@@ -141,6 +143,7 @@ export function createDbAgentsRepo(): AgentsRepo {
           role: input.role,
           station: input.station,
           ...(input.teamId !== undefined ? { teamId: input.teamId } : {}),
+          ...(input.templateId !== undefined ? { templateId: input.templateId } : {}),
           status: 'idle',
           sessionKey: input.sessionKey,
           capabilities: JSON.stringify(input.capabilities),
@@ -170,6 +173,7 @@ export function createDbAgentsRepo(): AgentsRepo {
       if (input.role !== undefined) updateData.role = input.role
       if (input.station !== undefined) updateData.station = input.station
       if (input.teamId !== undefined) updateData.teamId = input.teamId
+      if (input.templateId !== undefined) updateData.templateId = input.templateId
       if (input.capabilities !== undefined) updateData.capabilities = JSON.stringify(input.capabilities)
       if (input.wipLimit !== undefined) updateData.wipLimit = input.wipLimit
       if (input.sessionKey !== undefined) updateData.sessionKey = input.sessionKey
@@ -272,13 +276,11 @@ async function resolveUniqueSlug(base: string, currentAgentId?: string): Promise
   return buildUniqueSlug(normalizedBase, used)
 }
 
-function safeParseObject(value: string): Record<string, boolean> {
+function safeParseObject(value: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).map(([key, enabled]) => [key, Boolean(enabled)])
-    )
+    return parsed as Record<string, unknown>
   } catch {
     return {}
   }
@@ -307,6 +309,7 @@ interface PrismaAgentRow {
   role: string
   station: string
   teamId?: string | null
+  templateId?: string | null
   status: string
   sessionKey: string
   capabilities: string
@@ -339,6 +342,7 @@ function toDTO(row: PrismaAgentRow): AgentDTO {
     role: row.role,
     station: row.station,
     teamId: row.teamId ?? null,
+    templateId: row.templateId ?? null,
     status: row.status as AgentDTO['status'],
     sessionKey: row.sessionKey,
     capabilities: safeParseObject(row.capabilities),

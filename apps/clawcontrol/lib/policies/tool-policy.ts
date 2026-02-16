@@ -2,6 +2,10 @@ import 'server-only'
 
 import { prisma } from '../db'
 import { getRepos } from '../repo'
+import {
+  teamHierarchyPolicyService,
+  TeamHierarchyPolicyViolation,
+} from '@/lib/services/team-hierarchy-policy'
 
 export interface ToolRequest {
   agentId?: string
@@ -69,6 +73,89 @@ async function findAgent(request: ToolRequest) {
   }
 
   return null
+}
+
+async function findAgentByToken(token: string) {
+  const trimmed = token.trim()
+  if (!trimmed) return null
+
+  return prisma.agent.findFirst({
+    where: {
+      OR: [
+        { id: trimmed },
+        { name: trimmed },
+        { displayName: trimmed },
+        { slug: trimmed },
+        { runtimeAgentId: trimmed },
+      ],
+    },
+  })
+}
+
+function firstStringArg(
+  args: Record<string, unknown> | undefined,
+  keys: string[]
+): string | null {
+  if (!args) return null
+  for (const key of keys) {
+    const value = args[key]
+    if (typeof value !== 'string') continue
+    const trimmed = value.trim()
+    if (trimmed) return trimmed
+  }
+  return null
+}
+
+async function enforceTargetHierarchy(
+  agentId: string,
+  request: ToolRequest
+): Promise<PolicyResult | null> {
+  if (request.tool !== 'message' && request.tool !== 'sessions_spawn' && request.tool !== 'sessions_send') {
+    return null
+  }
+
+  const targetToken = firstStringArg(request.args, [
+    'targetAgentId',
+    'toAgentId',
+    'recipientAgentId',
+    'targetAgent',
+    'to',
+    'agentId',
+    'agent',
+  ])
+  if (!targetToken) return null
+
+  const targetAgent = await findAgentByToken(targetToken)
+  if (!targetAgent) {
+    // Maintain previous behavior when a target cannot be resolved.
+    return null
+  }
+
+  try {
+    if (request.tool === 'message') {
+      await teamHierarchyPolicyService.assertCanMessage(agentId, targetAgent.id, {
+        source: 'tool_policy',
+        workOrderId: request.workOrderId,
+        operationId: request.operationId,
+      })
+    } else {
+      await teamHierarchyPolicyService.assertCanDelegate(agentId, targetAgent.id, {
+        source: 'tool_policy',
+        workOrderId: request.workOrderId,
+        operationId: request.operationId,
+      })
+    }
+    return null
+  } catch (error) {
+    if (error instanceof TeamHierarchyPolicyViolation) {
+      return {
+        allowed: false,
+        reason: error.message,
+        resolvedAgentId: agentId,
+      }
+    }
+    throw error
+  }
 }
 
 /**
@@ -160,6 +247,11 @@ export async function checkToolPolicy(request: ToolRequest): Promise<PolicyResul
         resolvedAgentName: agent.displayName ?? agent.name,
       }
     }
+  }
+
+  const hierarchyResult = await enforceTargetHierarchy(agent.id, request)
+  if (hierarchyResult) {
+    return hierarchyResult
   }
 
   return {

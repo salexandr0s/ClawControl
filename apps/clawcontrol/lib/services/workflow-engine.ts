@@ -3,6 +3,7 @@ import 'server-only'
 import { Prisma } from '@prisma/client'
 import type { Prisma as PrismaTypes } from '@prisma/client'
 import { prisma } from '@/lib/db'
+import { getRepos } from '@/lib/repo'
 import {
   getWorkflowConfig,
   selectWorkflowForWorkOrder,
@@ -14,6 +15,9 @@ import { resolveCeoSessionKey, resolveWorkflowStageAgent } from '@/lib/services/
 import { sendToSession } from '@/lib/openclaw/sessions'
 import { withIngestionLease } from '@/lib/openclaw/ingestion-lease'
 import { buildOpenClawSessionKey } from '@/lib/agent-identity'
+import {
+  TeamHierarchyPolicyViolation,
+} from '@/lib/services/team-hierarchy-policy'
 
 const MANAGER_ACTIVITY_ACTOR = 'system:manager'
 const DEFAULT_CEO_SESSION_KEY = buildOpenClawSessionKey('main')
@@ -324,6 +328,77 @@ function resolveLoopMaxStories(input: {
 async function getCeoSessionKey(): Promise<string> {
   const resolved = await resolveCeoSessionKey(prisma)
   return resolved ?? DEFAULT_CEO_SESSION_KEY
+}
+
+async function enforceWorkflowTeamHierarchy(input: {
+  operationId: string
+  workOrderId: string
+  workflowId: string
+  stageIndex: number
+  stageRef: string
+  targetAgent: {
+    id: string
+    displayName: string
+    teamId?: string | null
+    templateId?: string | null
+  }
+}): Promise<{
+  managerAgentId: string | null
+  managerTemplateId: string | null
+}> {
+  const targetTeamId = input.targetAgent.teamId ?? null
+  if (!targetTeamId) {
+    return { managerAgentId: null, managerTemplateId: null }
+  }
+
+  const team = await getRepos().agentTeams.getById(targetTeamId)
+  if (!team) {
+    return { managerAgentId: null, managerTemplateId: null }
+  }
+  const managerMember = team.hierarchy.members.manager
+  if (!managerMember) {
+    return { managerAgentId: null, managerTemplateId: null }
+  }
+
+  const targetTemplateId = input.targetAgent.templateId?.trim() || null
+  if (!targetTemplateId) {
+    throw new TeamHierarchyPolicyViolation(
+      'Workflow dispatch target is missing templateId required for hierarchy enforcement',
+      'MISSING_TEMPLATE_BINDING',
+      {
+        teamId: targetTeamId,
+        targetAgentId: input.targetAgent.id,
+        targetAgentName: input.targetAgent.displayName,
+        ...input,
+      }
+    )
+  }
+
+  if (targetTemplateId === 'manager') {
+    const managerAgent = team.members.find((member) => member.templateId === 'manager') ?? null
+    return { managerAgentId: managerAgent?.id ?? null, managerTemplateId: 'manager' }
+  }
+
+  const allowedTargets = managerMember.delegatesTo
+  const delegateEnabled = managerMember.capabilities.canDelegate !== false
+  if (!delegateEnabled || !allowedTargets.includes(targetTemplateId)) {
+    throw new TeamHierarchyPolicyViolation(
+      `Workflow dispatch blocked: manager template cannot delegate to "${targetTemplateId}"`,
+      'LINK_NOT_ALLOWED',
+      {
+        teamId: targetTeamId,
+        targetTemplateId,
+        allowedTargets,
+        canDelegate: managerMember.capabilities.canDelegate,
+        source: 'workflow_engine',
+        workOrderId: input.workOrderId,
+        operationId: input.operationId,
+      }
+    )
+  }
+
+  const managerAgent = team.members.find((member) => member.templateId === 'manager') ?? null
+  return { managerAgentId: managerAgent?.id ?? null, managerTemplateId: 'manager' }
 }
 
 async function loadInitialContext(
@@ -921,6 +996,68 @@ async function dispatchOperation(operationId: string): Promise<DispatchOperation
       agentName: null,
       sessionKey: null,
       error: `No available agent for workflow stage: ${stage.agent}`,
+    }
+  }
+
+  try {
+    await enforceWorkflowTeamHierarchy({
+      operationId: operation.id,
+      workOrderId: operation.workOrderId,
+      workflowId,
+      stageIndex,
+      stageRef: stage.ref,
+      targetAgent: {
+        id: agent.id,
+        displayName: agent.displayName,
+        teamId: (agent as { teamId?: string | null }).teamId ?? null,
+        templateId: (agent as { templateId?: string | null }).templateId ?? null,
+      },
+    })
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Hierarchy policy blocked dispatch'
+    const details = error instanceof TeamHierarchyPolicyViolation ? error.details : null
+
+    await prisma.operation.update({
+      where: { id: operation.id },
+      data: {
+        status: 'blocked',
+        blockedReason: reason,
+        claimedBy: null,
+        claimExpiresAt: null,
+      },
+    })
+
+    await prisma.activity.create({
+      data: {
+        type: 'workflow.dispatch_blocked_hierarchy',
+        actor: MANAGER_ACTIVITY_ACTOR,
+        actorType: 'system',
+        actorAgentId: null,
+        entityType: 'operation',
+        entityId: operation.id,
+        summary: `Dispatch blocked by team hierarchy for ${agent.displayName}`,
+        payloadJson: JSON.stringify({
+          workflowId,
+          stageIndex,
+          stageRef: stage.ref,
+          targetAgentId: agent.id,
+          targetAgentName: agent.displayName,
+          reason,
+          details,
+        }),
+      },
+    })
+
+    return {
+      dispatched: false,
+      workflowId,
+      stageIndex,
+      operationId: operation.id,
+      workOrderId: operation.workOrderId,
+      agentId: agent.id,
+      agentName: agent.displayName,
+      sessionKey: null,
+      error: reason,
     }
   }
 

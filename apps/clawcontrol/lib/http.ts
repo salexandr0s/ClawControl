@@ -1679,6 +1679,22 @@ export interface RecoveryState {
   finalStatus: 'healthy' | 'recovered' | 'needs_manual_intervention' | 'failed' | null
 }
 
+export interface GreenfieldResetResult {
+  teamsDeleted: number
+  agentsDeleted: number
+  workflowsDeleted: number
+  selectionOverlayDeleted: boolean
+  agentWorkspaceEntriesDeleted: number
+  workOrdersDeleted: number
+  operationsDeleted: number
+  operationStoriesDeleted: number
+  approvalsDeleted: number
+  receiptsDeleted: number
+  messagesDeleted: number
+  activitiesDeleted: number
+  artifactsDeleted: number
+}
+
 export interface MaintenanceErrorSuggestedAction {
   id: string
   label: string
@@ -1795,6 +1811,26 @@ export const maintenanceApi = {
       )
     }
     return res.json() as Promise<{ data: RecoveryState; receiptId: string }>
+  }),
+
+  greenfieldReset: (typedConfirmText: string) => apiFetch('/api/maintenance/greenfield-reset', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ typedConfirmText }),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const errorData = await res.json()
+      throw new HttpError(
+        errorData.error,
+        res.status,
+        errorData.error,
+        { policy: errorData.policy, details: errorData.details }
+      )
+    }
+    return res.json() as Promise<{ data: GreenfieldResetResult; receiptId: string }>
   }),
 
   getErrorSummary: (days = 14) =>
@@ -2107,9 +2143,41 @@ export interface AgentTeamMember {
   id: string
   displayName: string
   slug: string
+  templateId: string | null
   role: string
   station: string
   status: string
+}
+
+export interface TeamCapabilityConfig {
+  canDelegate?: boolean
+  canSendMessages?: boolean
+  canExecuteCode?: boolean
+  canModifyFiles?: boolean
+  canWebSearch?: boolean
+}
+
+export interface TeamHierarchyMemberConfig {
+  reportsTo: string | null
+  delegatesTo: string[]
+  receivesFrom: string[]
+  canMessage: string[]
+  capabilities: TeamCapabilityConfig
+}
+
+export interface TeamHierarchyConfig {
+  version: 1
+  members: Record<string, TeamHierarchyMemberConfig>
+}
+
+export interface TeamHierarchyValidationIssue {
+  code: string
+  message: string
+  path: string
+}
+
+export interface TeamHierarchyValidationErrorDetails {
+  issues: TeamHierarchyValidationIssue[]
 }
 
 export interface AgentTeamSummary {
@@ -2120,6 +2188,7 @@ export interface AgentTeamSummary {
   source: 'builtin' | 'custom' | 'imported'
   workflowIds: string[]
   templateIds: string[]
+  hierarchy: TeamHierarchyConfig
   healthStatus: 'healthy' | 'warning' | 'degraded' | 'unknown'
   memberCount: number
   members: AgentTeamMember[]
@@ -2129,9 +2198,10 @@ export interface AgentTeamSummary {
 
 export interface TeamInstantiateAgentsOutcome {
   templateId: string
-  status: 'created' | 'existing'
+  status: 'created' | 'existing' | 'reconciled'
   agentId: string
   agentSlug: string
+  capabilitiesChanged: boolean
   filesWritten: string[]
   filesSkipped: string[]
 }
@@ -2140,6 +2210,8 @@ export interface TeamInstantiateAgentsResult {
   teamId: string
   createdAgents: Array<{ id: string; slug: string; displayName: string }>
   existingAgents: Array<{ id: string; slug: string; displayName: string }>
+  reconciledAgents: Array<{ id: string; slug: string; displayName: string }>
+  changedCapabilities: number
   outcomes: TeamInstantiateAgentsOutcome[]
   filesWritten: string[]
   filesSkipped: string[]
@@ -2311,6 +2383,7 @@ export const agentTeamsApi = {
     source?: 'builtin' | 'custom' | 'imported'
     workflowIds?: string[]
     templateIds?: string[]
+    hierarchy?: TeamHierarchyConfig
     healthStatus?: 'healthy' | 'warning' | 'degraded' | 'unknown'
     memberAgentIds?: string[]
     typedConfirmText?: string
@@ -2321,6 +2394,8 @@ export const agentTeamsApi = {
     description?: string | null
     workflowIds?: string[]
     templateIds?: string[]
+    hierarchy?: TeamHierarchyConfig
+    regenerateHierarchyFromDefaults?: boolean
     healthStatus?: 'healthy' | 'warning' | 'degraded' | 'unknown'
     memberAgentIds?: string[]
     typedConfirmText?: string

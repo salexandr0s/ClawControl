@@ -93,6 +93,40 @@ export const AGENT_TEMPLATE_SCHEMA = {
       description: 'Default parameter values',
       additionalProperties: true,
     },
+    teamDefaults: {
+      type: 'object',
+      description: 'Default team hierarchy settings for this template',
+      properties: {
+        reportsTo: {
+          type: ['string', 'null'],
+          minLength: 1,
+        },
+        delegatesTo: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+        },
+        receivesFrom: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+        },
+        canMessage: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+        },
+        capabilities: {
+          type: 'object',
+          properties: {
+            canDelegate: { type: 'boolean' },
+            canSendMessages: { type: 'boolean' },
+            canExecuteCode: { type: 'boolean' },
+            canModifyFiles: { type: 'boolean' },
+            canWebSearch: { type: 'boolean' },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    },
     recommendations: {
       type: 'object',
       properties: {
@@ -184,6 +218,19 @@ export interface AgentTemplateConfig {
     }>
   }
   defaults?: Record<string, unknown>
+  teamDefaults?: {
+    reportsTo?: string | null
+    delegatesTo?: string[]
+    receivesFrom?: string[]
+    canMessage?: string[]
+    capabilities?: {
+      canDelegate?: boolean
+      canSendMessages?: boolean
+      canExecuteCode?: boolean
+      canModifyFiles?: boolean
+      canWebSearch?: boolean
+    }
+  }
   recommendations?: {
     skills?: Array<{
       name: string

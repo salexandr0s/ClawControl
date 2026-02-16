@@ -9,6 +9,7 @@ import { buildCapabilitiesForTemplate } from '@/lib/services/agent-provisioning'
 import { generateSessionKey, AGENT_ROLE_MAP } from '@/lib/workspace'
 import { getTemplateById, materializeTemplateFiles, previewTemplateRender, renderTemplate } from '@/lib/templates'
 import { isCanonicalStationId, normalizeStationId, type StationId } from '@clawcontrol/core'
+import type { TeamCapabilityConfig } from '@/lib/repo/types'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -32,6 +33,53 @@ async function ensureWorkspaceFilesExist(paths: string[]): Promise<{ ok: true } 
 
   if (missing.length > 0) return { ok: false, missing }
   return { ok: true }
+}
+
+function applyHierarchyCapabilityOverrides(
+  baseline: Record<string, unknown>,
+  capabilities: TeamCapabilityConfig | undefined
+): Record<string, unknown> {
+  if (!capabilities) return baseline
+
+  const merged: Record<string, unknown> = { ...baseline }
+  if (typeof capabilities.canDelegate === 'boolean') {
+    merged.can_delegate = capabilities.canDelegate
+  }
+  if (typeof capabilities.canSendMessages === 'boolean') {
+    merged.can_send_messages = capabilities.canSendMessages
+  }
+  if (typeof capabilities.canExecuteCode === 'boolean') {
+    merged.can_execute_code = capabilities.canExecuteCode
+  }
+  if (typeof capabilities.canModifyFiles === 'boolean') {
+    merged.can_modify_files = capabilities.canModifyFiles
+  }
+  if (typeof capabilities.canWebSearch === 'boolean') {
+    merged.can_web_search = capabilities.canWebSearch
+  }
+  return merged
+}
+
+function stableNormalize(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => stableNormalize(item))
+  }
+  if (!value || typeof value !== 'object') {
+    return value
+  }
+
+  const record = value as Record<string, unknown>
+  const sorted = Object.keys(record)
+    .sort((left, right) => left.localeCompare(right))
+    .reduce<Record<string, unknown>>((acc, key) => {
+      acc[key] = stableNormalize(record[key])
+      return acc
+    }, {})
+  return sorted
+}
+
+function capabilitiesEqual(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+  return JSON.stringify(stableNormalize(left)) === JSON.stringify(stableNormalize(right))
 }
 
 /**
@@ -79,11 +127,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const createdAgents: Array<{ id: string; slug: string; displayName: string }> = []
   const existingAgents: Array<{ id: string; slug: string; displayName: string }> = []
+  const reconciledAgents: Array<{ id: string; slug: string; displayName: string }> = []
+  let changedCapabilities = 0
   const outcomes: Array<{
     templateId: string
-    status: 'created' | 'existing'
+    status: 'created' | 'existing' | 'reconciled'
     agentId: string
     agentSlug: string
+    capabilitiesChanged: boolean
     filesWritten: string[]
     filesSkipped: string[]
   }> = []
@@ -115,9 +166,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
       const stationId: StationId = templateId === 'security' ? 'security' : stationResolved
 
       const existing = await repos.agents.getBySlug(templateId)
+      const hierarchyMember = team.hierarchy.members[templateId]
+      const nextCapabilities = applyHierarchyCapabilityOverrides(
+        buildCapabilitiesForTemplate({ templateId, stationId }),
+        hierarchyMember?.capabilities
+      )
 
       let agent = existing
       let created = false
+      let reconciled = false
+      let capabilitiesChanged = false
       let openClawAgentId: string | null = null
 
       if (!existing) {
@@ -132,8 +190,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
               agentSlug,
             })
           : generateSessionKey(agentSlug)
-
-        const capabilitiesObj = buildCapabilitiesForTemplate({ templateId, stationId })
 
         await repos.receipts.append(receipt.id, {
           stream: 'stdout',
@@ -163,8 +219,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
           role,
           station: stationId,
           teamId: team.id,
+          templateId,
           sessionKey,
-          capabilities: capabilitiesObj as unknown as Record<string, boolean>,
+          capabilities: nextCapabilities,
           wipLimit: 2,
         })
 
@@ -174,8 +231,29 @@ export async function POST(request: NextRequest, context: RouteContext) {
       } else {
         existingAgents.push({ id: existing.id, slug: existing.slug, displayName: existing.displayName })
 
-        if (existing.teamId !== team.id) {
-          await repos.agents.update(existing.id, { teamId: team.id })
+        capabilitiesChanged = !capabilitiesEqual(existing.capabilities, nextCapabilities)
+        if (capabilitiesChanged) {
+          changedCapabilities += 1
+        }
+
+        if (existing.teamId !== team.id || existing.templateId !== templateId || capabilitiesChanged) {
+          const updated = await repos.agents.update(existing.id, {
+            teamId: team.id,
+            templateId,
+            capabilities: nextCapabilities,
+          })
+          if (updated) {
+            agent = updated
+          }
+          reconciled = true
+        }
+
+        if (reconciled) {
+          reconciledAgents.push({
+            id: existing.id,
+            slug: existing.slug,
+            displayName: existing.displayName,
+          })
         }
       }
 
@@ -216,9 +294,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
       outcomes.push({
         templateId,
-        status: created ? 'created' : 'existing',
+        status: created ? 'created' : reconciled ? 'reconciled' : 'existing',
         agentId: agent.id,
         agentSlug: agent.slug,
+        capabilitiesChanged,
         filesWritten: materialized.writtenPaths,
         filesSkipped: materialized.skippedPaths,
       })
@@ -226,7 +305,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     await repos.receipts.append(receipt.id, {
       stream: 'stdout',
-      chunk: `Instantiated agents: created=${createdAgents.length}, existing=${existingAgents.length}\n`,
+      chunk: `Instantiated agents: created=${createdAgents.length}, existing=${existingAgents.length}, reconciled=${reconciledAgents.length}, capabilities_changed=${changedCapabilities}\n`,
     })
 
     await repos.receipts.finalize(receipt.id, {
@@ -236,6 +315,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         teamId: team.id,
         createdAgents,
         existingAgents,
+        reconciledAgents,
+        changedCapabilities,
         outcomes,
         filesWritten,
         filesSkipped,
@@ -247,6 +328,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         teamId: team.id,
         createdAgents,
         existingAgents,
+        reconciledAgents,
+        changedCapabilities,
         outcomes,
         filesWritten,
         filesSkipped,
@@ -269,6 +352,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         teamId: team.id,
         createdAgents,
         existingAgents,
+        reconciledAgents,
+        changedCapabilities,
         outcomes,
         filesWritten,
         filesSkipped,
@@ -283,6 +368,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
           teamId: team.id,
           createdAgents,
           existingAgents,
+          reconciledAgents,
+          changedCapabilities,
           outcomes,
           filesWritten,
           filesSkipped,

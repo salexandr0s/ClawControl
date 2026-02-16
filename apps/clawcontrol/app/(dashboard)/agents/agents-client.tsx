@@ -1460,13 +1460,17 @@ function AgentDetail({
   }
 
   const { stations, stationsById } = useStations()
+  const normalizeCaps = (caps: Record<string, unknown>): Record<string, boolean> =>
+    Object.fromEntries(
+      Object.entries(caps).map(([key, value]) => [key, Boolean(value)])
+    )
 
   const [editDisplayName, setEditDisplayName] = useState(agent.displayName)
   const [editRole, setEditRole] = useState(agent.role)
   const [editStation, setEditStation] = useState(agent.station)
   const [editWipLimit, setEditWipLimit] = useState<number>(agent.wipLimit)
   const [editSessionKey, setEditSessionKey] = useState(agent.sessionKey)
-  const [editCaps, setEditCaps] = useState<Record<string, boolean>>(agent.capabilities)
+  const [editCaps, setEditCaps] = useState<Record<string, boolean>>(normalizeCaps(agent.capabilities))
   const [editModel, setEditModel] = useState(agent.model || DEFAULT_MODEL)
   const [editFallbacks, setEditFallbacks] = useState<string[]>(agent.fallbacks ?? [])
   const [detailTab, setDetailTab] = useState<'overview' | 'configuration' | 'assets'>('overview')
@@ -1486,7 +1490,7 @@ function AgentDetail({
     setEditStation(agent.station)
     setEditWipLimit(agent.wipLimit)
     setEditSessionKey(agent.sessionKey)
-    setEditCaps(agent.capabilities)
+    setEditCaps(normalizeCaps(agent.capabilities))
     setEditModel(agent.model || DEFAULT_MODEL)
     setEditFallbacks((agent.fallbacks ?? []).filter((m) => m !== (agent.model || DEFAULT_MODEL)))
     setDetailTab('overview')

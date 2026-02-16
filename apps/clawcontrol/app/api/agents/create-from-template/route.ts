@@ -220,8 +220,9 @@ export async function POST(request: NextRequest) {
       nameSource: input.displayName ? 'user' : 'system',
       role,
       station: stationId,
+      templateId,
       sessionKey,
-      capabilities: capabilitiesObj as unknown as Record<string, boolean>,
+      capabilities: capabilitiesObj,
       wipLimit: 2,
     })
     createdAgentId = agent.id

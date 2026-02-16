@@ -59,17 +59,25 @@ describe('database initialization', () => {
     )
     expect(appliedMigrations.some((row) => row.id === '20260210190000_manager_engine_single_mode')).toBe(true)
     expect(appliedMigrations.some((row) => row.id === '20260212083000_workflow_team_packages')).toBe(true)
+    expect(appliedMigrations.some((row) => row.id === '20260216193000_team_hierarchy_v1')).toBe(true)
 
     const agentColumns = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
       'PRAGMA table_info("agents")'
     )
     const agentColumnNames = new Set(agentColumns.map((row) => row.name))
     expect(agentColumnNames.has('team_id')).toBe(true)
+    expect(agentColumnNames.has('template_id')).toBe(true)
 
     const agentTeamTable = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_teams' LIMIT 1"
     )
     expect(agentTeamTable.length).toBe(1)
+
+    const agentTeamColumns = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+      'PRAGMA table_info("agent_teams")'
+    )
+    const agentTeamColumnNames = new Set(agentTeamColumns.map((row) => row.name))
+    expect(agentTeamColumnNames.has('hierarchy_json')).toBe(true)
 
     await prisma.$disconnect()
 

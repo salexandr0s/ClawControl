@@ -36,5 +36,45 @@
   "tags": [
     "clawcontrol",
     "default"
-  ]
+  ],
+  "teamDefaults": {
+    "reportsTo": null,
+    "delegatesTo": [
+      "research",
+      "plan",
+      "plan_review",
+      "build",
+      "build_review",
+      "ui",
+      "ui_review",
+      "security",
+      "ops"
+    ],
+    "receivesFrom": [
+      "research",
+      "plan",
+      "plan_review",
+      "build",
+      "build_review",
+      "ui",
+      "ui_review",
+      "security",
+      "ops"
+    ],
+    "canMessage": [
+      "research",
+      "plan",
+      "plan_review",
+      "build",
+      "build_review",
+      "ui",
+      "ui_review",
+      "security",
+      "ops"
+    ],
+    "capabilities": {
+      "canDelegate": true,
+      "canSendMessages": true
+    }
+  }
 }

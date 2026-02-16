@@ -12,6 +12,7 @@ import { MetricCard } from '@/components/ui/metric-card'
 import { useGatewayStatus } from '@/lib/hooks/useGatewayStatus'
 import { cn } from '@/lib/utils'
 import { timedClientFetch, usePageReadyTiming } from '@/lib/perf/client-timing'
+import { apiPost, HttpError } from '@/lib/http'
 import {
   Activity,
   Bot,
@@ -313,14 +314,8 @@ export function Dashboard({
   useEffect(() => {
     const warmSync = async () => {
       try {
-        const syncRes = await timedClientFetch('/api/openclaw/usage/sync', { method: 'POST' }, {
-          page: 'dashboard',
-          name: 'usage.sync',
-        })
-        if (syncRes.ok) {
-          const syncJson = (await syncRes.json()) as UsageSyncApi
-          setUsageSyncMeta({ at: new Date().toISOString(), stats: syncJson })
-        }
+        const syncJson = await apiPost<UsageSyncApi>('/api/openclaw/usage/sync')
+        setUsageSyncMeta({ at: new Date().toISOString(), stats: syncJson })
         await loadUsageMetrics('warm')
       } catch {
         // Keep dashboard responsive even when sync is unavailable.
@@ -333,22 +328,16 @@ export function Dashboard({
     setUsageSyncing(true)
     setUsageError(null)
     try {
-      const syncRes = await timedClientFetch('/api/openclaw/usage/sync', { method: 'POST' }, {
-        page: 'dashboard',
-        name: 'usage.sync.manual',
-      })
-
-      if (!syncRes.ok) {
-        setUsageError(`Usage sync failed (${syncRes.status})`)
-        return
-      }
-
-      const syncJson = (await syncRes.json()) as UsageSyncApi
+      const syncJson = await apiPost<UsageSyncApi>('/api/openclaw/usage/sync')
       setUsageSyncMeta({ at: new Date().toISOString(), stats: syncJson })
 
       await loadUsageMetrics('manual')
-    } catch {
-      setUsageError('Usage sync failed')
+    } catch (error) {
+      if (error instanceof HttpError) {
+        setUsageError(`Usage sync failed (${error.status})`)
+      } else {
+        setUsageError('Usage sync failed')
+      }
     } finally {
       setUsageSyncing(false)
     }

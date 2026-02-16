@@ -12,12 +12,14 @@ import {
   templatesApi,
   workflowsApi,
   type AgentTeamSummary,
+  type TeamHierarchyConfig,
+  type TeamInstantiateAgentsResult,
   type TemplateSummary,
   type WorkflowListItem,
 } from '@/lib/http'
 import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
 import { useSettings } from '@/lib/settings-context'
-import { Download, Info, Plus, Trash2, Upload, X } from 'lucide-react'
+import { Download, Info, Loader2, Plus, Trash2, Upload, X } from 'lucide-react'
 
 const teamColumns: Column<AgentTeamSummary>[] = [
   {
@@ -69,6 +71,140 @@ interface TeamEditorDraft {
   description: string
   workflowIds: string[]
   templateIds: string[]
+}
+
+type TeamHierarchyMember = TeamHierarchyConfig['members'][string]
+
+const TEAM_CAPABILITY_KEYS = [
+  'canDelegate',
+  'canSendMessages',
+  'canExecuteCode',
+  'canModifyFiles',
+  'canWebSearch',
+] as const
+
+type TeamCapabilityKey = (typeof TEAM_CAPABILITY_KEYS)[number]
+
+function emptyHierarchyMember(): TeamHierarchyMember {
+  return {
+    reportsTo: null,
+    delegatesTo: [],
+    receivesFrom: [],
+    canMessage: [],
+    capabilities: {},
+  }
+}
+
+function dedupe(values: string[]): string[] {
+  return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)))
+}
+
+function normalizeHierarchyForTemplateIds(
+  hierarchy: TeamHierarchyConfig | null | undefined,
+  templateIds: string[]
+): TeamHierarchyConfig {
+  const ids = dedupe(templateIds).sort((left, right) => left.localeCompare(right))
+  const members: TeamHierarchyConfig['members'] = {}
+
+  for (const templateId of ids) {
+    const source = hierarchy?.members?.[templateId]
+    const next = source ? {
+      reportsTo: typeof source.reportsTo === 'string' && source.reportsTo.trim() ? source.reportsTo.trim() : null,
+      delegatesTo: dedupe(source.delegatesTo ?? []).sort((left, right) => left.localeCompare(right)),
+      receivesFrom: dedupe(source.receivesFrom ?? []).sort((left, right) => left.localeCompare(right)),
+      canMessage: dedupe(source.canMessage ?? []).sort((left, right) => left.localeCompare(right)),
+      capabilities: {
+        ...(typeof source.capabilities.canDelegate === 'boolean' ? { canDelegate: source.capabilities.canDelegate } : {}),
+        ...(typeof source.capabilities.canSendMessages === 'boolean' ? { canSendMessages: source.capabilities.canSendMessages } : {}),
+        ...(typeof source.capabilities.canExecuteCode === 'boolean' ? { canExecuteCode: source.capabilities.canExecuteCode } : {}),
+        ...(typeof source.capabilities.canModifyFiles === 'boolean' ? { canModifyFiles: source.capabilities.canModifyFiles } : {}),
+        ...(typeof source.capabilities.canWebSearch === 'boolean' ? { canWebSearch: source.capabilities.canWebSearch } : {}),
+      },
+    } : emptyHierarchyMember()
+    members[templateId] = next
+  }
+
+  return { version: 1, members }
+}
+
+function validateHierarchyDraft(
+  hierarchy: TeamHierarchyConfig,
+  templateIds: string[]
+): string[] {
+  const errors: string[] = []
+  const ids = dedupe(templateIds)
+  const idSet = new Set(ids)
+
+  for (const key of Object.keys(hierarchy.members)) {
+    if (!idSet.has(key)) {
+      errors.push(`Member "${key}" is not in templateIds`)
+    }
+  }
+
+  for (const templateId of ids) {
+    const member = hierarchy.members[templateId]
+    if (!member) {
+      errors.push(`Missing hierarchy member for "${templateId}"`)
+      continue
+    }
+
+    if (member.reportsTo && !idSet.has(member.reportsTo)) {
+      errors.push(`${templateId}: reportsTo "${member.reportsTo}" is not in templateIds`)
+    }
+    if (member.reportsTo === templateId) {
+      errors.push(`${templateId}: reportsTo cannot reference itself`)
+    }
+
+    const validateTargets = (relation: string, targets: string[]) => {
+      for (const target of targets) {
+        if (target === templateId) {
+          errors.push(`${templateId}: ${relation} cannot include itself`)
+          continue
+        }
+        if (!idSet.has(target)) {
+          errors.push(`${templateId}: ${relation} target "${target}" is not in templateIds`)
+        }
+      }
+    }
+    validateTargets('delegatesTo', member.delegatesTo)
+    validateTargets('receivesFrom', member.receivesFrom)
+    validateTargets('canMessage', member.canMessage)
+
+    if (member.capabilities.canDelegate === false && member.delegatesTo.length > 0) {
+      errors.push(`${templateId}: canDelegate=false requires delegatesTo to be empty`)
+    }
+    if (member.capabilities.canSendMessages === false && member.canMessage.length > 0) {
+      errors.push(`${templateId}: canSendMessages=false requires canMessage to be empty`)
+    }
+  }
+
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const stack: string[] = []
+
+  const visit = (templateId: string): boolean => {
+    if (visiting.has(templateId)) {
+      const idx = stack.lastIndexOf(templateId)
+      const cycle = idx === -1 ? [templateId] : stack.slice(idx).concat(templateId)
+      errors.push(`reportsTo cycle detected: ${cycle.join(' -> ')}`)
+      return true
+    }
+    if (visited.has(templateId)) return false
+    visiting.add(templateId)
+    stack.push(templateId)
+    const parent = hierarchy.members[templateId]?.reportsTo
+    if (parent && hierarchy.members[parent] && visit(parent)) return true
+    stack.pop()
+    visiting.delete(templateId)
+    visited.add(templateId)
+    return false
+  }
+
+  for (const templateId of ids) {
+    if (visit(templateId)) break
+  }
+
+  return errors
 }
 
 function toDraft(team: AgentTeamSummary | null): TeamEditorDraft {
@@ -310,6 +446,9 @@ export function TeamsTab() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [deployResult, setDeployResult] = useState<TeamInstantiateAgentsResult | null>(null)
+  const [isInstantiating, setIsInstantiating] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selected = useMemo(() => teams.find((item) => item.id === selectedId) ?? null, [teams, selectedId])
@@ -324,6 +463,8 @@ export function TeamsTab() {
   const [editorOptionsError, setEditorOptionsError] = useState<string | null>(null)
 
   const [showPackageImport, setShowPackageImport] = useState(false)
+  const [hierarchyDraft, setHierarchyDraft] = useState<TeamHierarchyConfig | null>(null)
+  const [isSavingHierarchy, setIsSavingHierarchy] = useState(false)
 
   const fetchTeams = useCallback(async () => {
     setLoading(true)
@@ -342,6 +483,23 @@ export function TeamsTab() {
   useEffect(() => {
     void fetchTeams()
   }, [fetchTeams])
+
+  useEffect(() => {
+    setDeployResult(null)
+  }, [selectedId])
+
+  useEffect(() => {
+    if (!selected) {
+      setHierarchyDraft(null)
+      return
+    }
+    setHierarchyDraft(normalizeHierarchyForTemplateIds(selected.hierarchy, selected.templateIds))
+  }, [selected])
+
+  const hierarchyErrors = useMemo(() => {
+    if (!selected || !hierarchyDraft) return []
+    return validateHierarchyDraft(hierarchyDraft, selected.templateIds)
+  }, [selected, hierarchyDraft])
 
   const loadEditorOptions = useCallback(async () => {
     setEditorOptionsLoading(true)
@@ -449,10 +607,15 @@ export function TeamsTab() {
       actionDescription: `Delete team ${selected.name}`,
       entityName: selected.name,
       onConfirm: async (typedConfirmText) => {
-        await agentTeamsApi.delete(selected.id, { typedConfirmText })
-        setSelectedId(null)
-        await fetchTeams()
-        setNotice('Team deleted')
+        setIsDeleting(true)
+        try {
+          await agentTeamsApi.delete(selected.id, { typedConfirmText })
+          setSelectedId(null)
+          await fetchTeams()
+          setNotice('Team deleted')
+        } finally {
+          setIsDeleting(false)
+        }
       },
       onError: (err) => setError(err.message),
     })
@@ -511,13 +674,124 @@ export function TeamsTab() {
 
     protectedAction.trigger({
       actionKind: 'team.instantiate_agents',
-      actionTitle: 'Instantiate Agents',
+      actionTitle: 'Deploy Team Agents',
       actionDescription: `Create missing agents and materialize workspace files for ${selected.name}`,
       entityName: selected.name,
       onConfirm: async (typedConfirmText) => {
-        const result = await agentTeamsApi.instantiateAgents(selected.id, { typedConfirmText })
-        await fetchTeams()
-        setNotice(`Agents instantiated (created ${result.data.createdAgents.length}, existing ${result.data.existingAgents.length})`)
+        setIsInstantiating(true)
+        try {
+          const result = await agentTeamsApi.instantiateAgents(selected.id, { typedConfirmText })
+          setDeployResult(result.data)
+          await fetchTeams()
+          setNotice(`Team deployed (created ${result.data.createdAgents.length}, existing ${result.data.existingAgents.length})`)
+        } finally {
+          setIsInstantiating(false)
+        }
+      },
+      onError: (err) => setError(err.message),
+    })
+  }
+
+  const updateHierarchyMember = (
+    templateId: string,
+    updater: (member: TeamHierarchyMember) => TeamHierarchyMember
+  ) => {
+    if (!selected || !hierarchyDraft) return
+    const current = hierarchyDraft.members[templateId] ?? emptyHierarchyMember()
+    setHierarchyDraft({
+      version: 1,
+      members: {
+        ...hierarchyDraft.members,
+        [templateId]: updater(current),
+      },
+    })
+  }
+
+  const setReportsTo = (templateId: string, reportsTo: string | null) => {
+    updateHierarchyMember(templateId, (member) => ({
+      ...member,
+      reportsTo,
+    }))
+  }
+
+  const toggleRelation = (
+    templateId: string,
+    relation: 'delegatesTo' | 'receivesFrom' | 'canMessage',
+    targetId: string
+  ) => {
+    updateHierarchyMember(templateId, (member) => {
+      const current = new Set(member[relation])
+      if (current.has(targetId)) {
+        current.delete(targetId)
+      } else {
+        current.add(targetId)
+      }
+      return {
+        ...member,
+        [relation]: Array.from(current).sort((left, right) => left.localeCompare(right)),
+      }
+    })
+  }
+
+  const toggleCapability = (templateId: string, capability: TeamCapabilityKey, checked: boolean) => {
+    updateHierarchyMember(templateId, (member) => ({
+      ...member,
+      capabilities: {
+        ...member.capabilities,
+        [capability]: checked,
+      },
+    }))
+  }
+
+  const saveHierarchy = () => {
+    if (!selected || !hierarchyDraft) return
+    if (hierarchyErrors.length > 0) {
+      setError('Fix hierarchy validation errors before saving')
+      return
+    }
+
+    protectedAction.trigger({
+      actionKind: 'team.edit',
+      actionTitle: 'Save Team Hierarchy',
+      actionDescription: `Update hierarchy for ${selected.name}`,
+      entityName: selected.name,
+      onConfirm: async (typedConfirmText) => {
+        setIsSavingHierarchy(true)
+        try {
+          await agentTeamsApi.update(selected.id, {
+            hierarchy: hierarchyDraft,
+            typedConfirmText,
+          })
+          await fetchTeams()
+          setNotice('Hierarchy updated')
+        } finally {
+          setIsSavingHierarchy(false)
+        }
+      },
+      onError: (err) => setError(err.message),
+    })
+  }
+
+  const regenerateHierarchyFromDefaults = () => {
+    if (!selected) return
+    protectedAction.trigger({
+      actionKind: 'team.edit',
+      actionTitle: 'Regenerate Team Hierarchy',
+      actionDescription: `Replace hierarchy for ${selected.name} with template defaults`,
+      entityName: selected.name,
+      onConfirm: async (typedConfirmText) => {
+        setIsSavingHierarchy(true)
+        try {
+          await agentTeamsApi.update(selected.id, {
+            templateIds: selected.templateIds,
+            regenerateHierarchyFromDefaults: true,
+            typedConfirmText,
+          })
+          await fetchTeams()
+          setNotice('Hierarchy regenerated from template defaults')
+        } finally {
+          setIsSavingHierarchy(false)
+        }
       },
       onError: (err) => setError(err.message),
     })
@@ -584,6 +858,8 @@ export function TeamsTab() {
         onClose={() => setSelectedId(null)}
         title={selected?.name || 'Team'}
         description={selected?.description || selected?.slug || ''}
+        width="xl"
+        className="overflow-x-hidden"
       >
         {selected && (
           <div className="space-y-3 text-sm">
@@ -596,12 +872,129 @@ export function TeamsTab() {
 
             <div className="space-y-1">
               <div className="text-xs text-fg-2">Workflow IDs</div>
-              <div className="text-xs text-fg-1 font-mono">{selected.workflowIds.join(', ') || 'none'}</div>
+              <div className="text-xs text-fg-1 font-mono break-all whitespace-pre-wrap rounded bg-bg-2 p-2">
+                {selected.workflowIds.join(', ') || 'none'}
+              </div>
             </div>
 
             <div className="space-y-1">
               <div className="text-xs text-fg-2">Template IDs</div>
-              <div className="text-xs text-fg-1 font-mono">{selected.templateIds.join(', ') || 'none'}</div>
+              <div className="text-xs text-fg-1 font-mono break-all whitespace-pre-wrap rounded bg-bg-2 p-2">
+                {selected.templateIds.join(', ') || 'none'}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-fg-2">Hierarchy</div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    onClick={regenerateHierarchyFromDefaults}
+                    variant="secondary"
+                    size="sm"
+                    disabled={isSavingHierarchy || isInstantiating || isDeleting}
+                  >
+                    Regenerate From Template Defaults
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={saveHierarchy}
+                    variant="primary"
+                    size="sm"
+                    disabled={isSavingHierarchy || isInstantiating || isDeleting}
+                  >
+                    {isSavingHierarchy ? 'Saving...' : 'Save Hierarchy'}
+                  </Button>
+                </div>
+              </div>
+
+              {hierarchyErrors.length > 0 && (
+                <div className="rounded-[var(--radius-sm)] border border-status-warning/40 bg-status-warning/10 p-2 text-xs text-status-warning">
+                  <div className="font-medium">Hierarchy validation errors</div>
+                  <ul className="mt-1 list-disc pl-4 space-y-0.5">
+                    {hierarchyErrors.slice(0, 8).map((msg, index) => (
+                      <li key={`${msg}-${index}`}>{msg}</li>
+                    ))}
+                    {hierarchyErrors.length > 8 && (
+                      <li>{hierarchyErrors.length - 8} more…</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                {selected.templateIds
+                  .slice()
+                  .sort((left, right) => left.localeCompare(right))
+                  .map((templateId) => {
+                    const member = hierarchyDraft?.members[templateId] ?? emptyHierarchyMember()
+                    const templateChoices = selected.templateIds
+                      .filter((candidate) => candidate !== templateId)
+                      .sort((left, right) => left.localeCompare(right))
+
+                    return (
+                      <div key={templateId} className="rounded-[var(--radius-sm)] border border-bd-0 bg-bg-2 p-2 space-y-2">
+                        <div className="font-mono text-xs text-fg-0">{templateId}</div>
+
+                        <label className="block text-xs text-fg-2">
+                          Reports To
+                          <select
+                            value={member.reportsTo ?? ''}
+                            onChange={(event) => setReportsTo(templateId, event.target.value || null)}
+                            className="mt-1 w-full rounded-[var(--radius-sm)] border border-bd-0 bg-bg-3 px-2 py-1 text-xs text-fg-0"
+                          >
+                            <option value="">(none)</option>
+                            {templateChoices.map((choice) => (
+                              <option key={choice} value={choice}>{choice}</option>
+                            ))}
+                          </select>
+                        </label>
+
+                        {([
+                          ['delegatesTo', 'Delegates To'],
+                          ['canMessage', 'Can Message'],
+                          ['receivesFrom', 'Receives From'],
+                        ] as const).map(([relation, label]) => (
+                          <div key={relation} className="space-y-1">
+                            <div className="text-[11px] text-fg-2">{label}</div>
+                            <div className="flex flex-wrap gap-2">
+                              {templateChoices.map((choice) => {
+                                const checked = member[relation].includes(choice)
+                                return (
+                                  <label key={choice} className="inline-flex items-center gap-1 rounded border border-bd-0 px-2 py-1 text-[11px] text-fg-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => toggleRelation(templateId, relation, choice)}
+                                    />
+                                    <span className="font-mono">{choice}</span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
+
+                        <div className="space-y-1">
+                          <div className="text-[11px] text-fg-2">Capabilities</div>
+                          <div className="flex flex-wrap gap-2">
+                            {TEAM_CAPABILITY_KEYS.map((capabilityKey) => (
+                              <label key={capabilityKey} className="inline-flex items-center gap-1 rounded border border-bd-0 px-2 py-1 text-[11px] text-fg-1">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(member.capabilities[capabilityKey])}
+                                  onChange={(event) => toggleCapability(templateId, capabilityKey, event.target.checked)}
+                                />
+                                <span className="font-mono">{capabilityKey}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+              </div>
             </div>
 
             <div className="space-y-1">
@@ -618,20 +1011,50 @@ export function TeamsTab() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button type="button" onClick={instantiateAgents} variant="primary" size="sm">Instantiate Agents</Button>
-              <Button type="button" onClick={openEdit} variant="secondary" size="sm">Edit</Button>
-              <Button type="button" onClick={exportTeam} variant="secondary" size="sm">
+            {deployResult && (
+              <div className="rounded-[var(--radius-sm)] border border-status-success/40 bg-status-success/10 text-status-success text-xs p-2">
+                Deploy complete: created {deployResult.createdAgents.length}, existing {deployResult.existingAgents.length}, files written {deployResult.filesWritten.length}, files skipped {deployResult.filesSkipped.length}.
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                onClick={instantiateAgents}
+                variant="primary"
+                size="sm"
+                disabled={isInstantiating || isDeleting}
+              >
+                {isInstantiating ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Deploying...
+                  </>
+                ) : (
+                  'Deploy'
+                )}
+              </Button>
+              <Button type="button" onClick={openEdit} variant="secondary" size="sm" disabled={isInstantiating || isDeleting}>Edit</Button>
+              <Button type="button" onClick={exportTeam} variant="secondary" size="sm" disabled={isInstantiating || isDeleting}>
                 <Download className="w-3.5 h-3.5" />
                 Export
               </Button>
-              <Button type="button" onClick={exportTeamPackage} variant="secondary" size="sm">
+              <Button type="button" onClick={exportTeamPackage} variant="secondary" size="sm" disabled={isInstantiating || isDeleting}>
                 <Download className="w-3.5 h-3.5" />
                 Export Package
               </Button>
-              <Button type="button" onClick={deleteTeam} variant="danger" size="sm">
-                <Trash2 className="w-3.5 h-3.5" />
-                Delete
+              <Button type="button" onClick={deleteTeam} variant="danger" size="sm" disabled={isInstantiating || isDeleting}>
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete
+                  </>
+                )}
               </Button>
             </div>
           </div>

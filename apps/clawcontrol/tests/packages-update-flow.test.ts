@@ -15,6 +15,16 @@ type MockTeam = {
   source: 'builtin' | 'custom' | 'imported'
   workflowIds: string[]
   templateIds: string[]
+  hierarchy: {
+    version: 1
+    members: Record<string, {
+      reportsTo: string | null
+      delegatesTo: string[]
+      receivesFrom: string[]
+      canMessage: string[]
+      capabilities: Record<string, boolean>
+    }>
+  }
   healthStatus: 'healthy' | 'warning' | 'degraded' | 'unknown'
 }
 
@@ -38,6 +48,7 @@ const repoState = vi.hoisted(() => {
         source?: MockTeam['source']
         workflowIds?: string[]
         templateIds?: string[]
+        hierarchy?: MockTeam['hierarchy']
         healthStatus?: MockTeam['healthStatus']
       }) => {
         const id = `team_${randomUUID()}`
@@ -50,6 +61,7 @@ const repoState = vi.hoisted(() => {
           source: input.source ?? 'imported',
           workflowIds: input.workflowIds ?? [],
           templateIds: input.templateIds ?? [],
+          hierarchy: input.hierarchy ?? { version: 1, members: {} },
           healthStatus: input.healthStatus ?? 'unknown',
         }
         byId.set(id, team)
@@ -70,6 +82,7 @@ const repoState = vi.hoisted(() => {
           ...(input.description !== undefined ? { description: input.description } : {}),
           ...(input.workflowIds !== undefined ? { workflowIds: input.workflowIds } : {}),
           ...(input.templateIds !== undefined ? { templateIds: input.templateIds } : {}),
+          ...(input.hierarchy !== undefined ? { hierarchy: input.hierarchy } : {}),
           ...(input.healthStatus !== undefined ? { healthStatus: input.healthStatus } : {}),
         }
         byId.set(id, next)
@@ -114,6 +127,7 @@ async function buildTestPackZip(input: {
   workflowDescription: string
   templateNotes: string
   teamName: string
+  includeHierarchy?: boolean
 }): Promise<File> {
   const zip = new JSZip()
 
@@ -144,22 +158,33 @@ async function buildTestPackZip(input: {
     ].join('\n')
   )
 
-  zip.file(
-    'teams/test-team.yaml',
-    [
-      'id: test-team',
-      'slug: test-team',
-      `name: ${input.teamName}`,
-      'description: test',
-      'source: imported',
-      'workflowIds:',
-      '  - test_flow',
-      'templateIds:',
-      '  - test_template',
-      'healthStatus: healthy',
-      '',
-    ].join('\n')
-  )
+  const teamLines = [
+    'id: test-team',
+    'slug: test-team',
+    `name: ${input.teamName}`,
+    'description: test',
+    'source: imported',
+    'workflowIds:',
+    '  - test_flow',
+    'templateIds:',
+    '  - test_template',
+  ]
+  if (input.includeHierarchy !== false) {
+    teamLines.push(
+      'hierarchy:',
+      '  version: 1',
+      '  members:',
+      '    test_template:',
+      '      reportsTo: null',
+      '      delegatesTo: []',
+      '      receivesFrom: []',
+      '      canMessage: []',
+      '      capabilities: {}',
+    )
+  }
+  teamLines.push('healthStatus: healthy', '')
+
+  zip.file('teams/test-team.yaml', teamLines.join('\n'))
 
   zip.file(
     'agent-templates/test_template/template.json',
@@ -320,5 +345,21 @@ describe('package deploy update flow', () => {
         applySelection: false,
       },
     })).rejects.toMatchObject({ status: 409 })
+  })
+
+  it('fails analysis when team hierarchy is missing', async () => {
+    const { analyzePackageImport } = await import('@/lib/packages/service')
+
+    const invalid = await buildTestPackZip({
+      workflowDescription: 'v1 workflow',
+      templateNotes: 'v1 notes',
+      teamName: 'Team v1',
+      includeHierarchy: false,
+    })
+
+    await expect(analyzePackageImport(invalid)).rejects.toMatchObject({
+      code: 'PACKAGE_VALIDATION_FAILED',
+      status: 400,
+    })
   })
 })
