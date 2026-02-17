@@ -26,12 +26,14 @@ interface WorkOrderFilters {
   state: WorkOrderState | 'all'
   priority: Priority | 'all'
   owner: string | 'all'
+  showArchive: boolean
 }
 
 const DEFAULT_FILTERS: WorkOrderFilters = {
   state: 'all',
   priority: 'all',
   owner: 'all',
+  showArchive: true,
 }
 
 const STATES: (WorkOrderState | 'all')[] = ['all', 'planned', 'active', 'blocked', 'review', 'shipped', 'cancelled']
@@ -968,6 +970,7 @@ export function WorkOrdersClient() {
             workOrders={boardWorkOrders}
             agents={agents}
             assigningWorkOrderId={assigningWorkOrderId}
+            showArchive={filters.showArchive}
             onWorkOrderClick={handleCardClick}
             onStateChange={handleStateChange}
             onAssignToAgent={handleAssignToAgent}
@@ -1060,6 +1063,23 @@ export function WorkOrdersClient() {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Board Column Toggle */}
+          <div>
+            <label className="block text-xs font-medium text-fg-1 mb-2">Board Columns</label>
+            <label className="flex items-center gap-2 px-2.5 py-2 rounded-[var(--radius-md)] border border-bd-0 bg-bg-3">
+              <input
+                type="checkbox"
+                checked={filters.showArchive}
+                onChange={(event) => setFilters((f) => ({ ...f, showArchive: event.target.checked }))}
+                className="h-3.5 w-3.5 rounded border-bd-1 bg-bg-2 accent-status-info"
+              />
+              <span className="text-xs text-fg-1">Show Archive</span>
+            </label>
+            <p className="mt-1 text-[11px] text-fg-3">
+              Archive column controls cancelled work orders in board view only.
+            </p>
           </div>
 
           {/* Clear Filters Button */}

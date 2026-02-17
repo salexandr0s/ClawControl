@@ -193,7 +193,7 @@ const agentColumns: Column<AgentDTO>[] = [
   {
     key: 'model',
     header: 'Model',
-    width: '90px',
+    width: '140px',
     render: (row) => <ModelBadge modelId={row.model} size="sm" />,
   },
   {

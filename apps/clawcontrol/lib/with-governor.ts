@@ -462,6 +462,8 @@ export async function enforceActionPolicy(params: {
   workOrderId?: string | null
   operationId?: string | null
   fallbackWorkOrderId?: string
+  /** Skip approval gate even when policy.requiresApproval is true. */
+  skipApprovalGate?: boolean
   /**
    * Override the expected typed confirmation string for CONFIRM mode.
    * Defaults to the value defined in ACTION_POLICIES (or "CONFIRM").
@@ -475,11 +477,12 @@ export async function enforceActionPolicy(params: {
     workOrderId,
     operationId,
     fallbackWorkOrderId = 'system',
+    skipApprovalGate = false,
     expectedConfirmText,
   } = params
   const policy = ACTION_POLICIES[actionKind]
 
-  if (policy.requiresApproval) {
+  if (policy.requiresApproval && !skipApprovalGate) {
     const resolvedWorkOrderId = workOrderId ?? fallbackWorkOrderId
     const result = await enforceGovernor({
       actionKind,

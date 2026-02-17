@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect } from 'react'
 import { PageHeader, PageSection, TypedConfirmModal, Button } from '@clawcontrol/ui'
 import { LoadingSpinner, LoadingState } from '@/components/ui/loading-state'
 import { StatusPill } from '@/components/ui/status-pill'
+import { ActionConfirmModal } from '@/components/ui/action-confirm-modal'
+import { Modal } from '@/components/ui/modal'
 import { RightDrawer } from '@/components/shell/right-drawer'
 import { YamlEditor } from '@/components/editors/yaml-editor'
 import { CopyButton } from '@/components/prompt-kit/code-block/copy-button'
@@ -15,12 +17,15 @@ import {
   type PlaybookRunResult,
   type MaintenanceErrorSummary,
   type MaintenanceErrorSignature,
+  type MaintenanceActionResult,
+  type RecoveryState,
+  type GreenfieldResetResult,
   HttpError,
 } from '@/lib/http'
 import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
 import { useSettings } from '@/lib/settings-context'
 import type { GatewayStatusDTO } from '@/lib/data'
-import type { ActionKind } from '@clawcontrol/core'
+import { ACTION_POLICIES, type ActionKind } from '@clawcontrol/core'
 import { cn } from '@/lib/utils'
 import {
   RefreshCw,
@@ -37,6 +42,10 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
+  Clock3,
+  ClipboardList,
+  TerminalSquare,
+  ChevronRight,
   Bot,
 } from 'lucide-react'
 
@@ -124,6 +133,32 @@ const ACTION_CONFIG: Record<MaintenanceAction, {
   },
 }
 
+type MaintenanceResultPayload =
+  | {
+      type: 'command'
+      result: MaintenanceActionResult
+    }
+  | {
+      type: 'recovery'
+      result: RecoveryState
+    }
+  | {
+      type: 'greenfield'
+      result: GreenfieldResetResult
+    }
+
+interface MaintenanceResultModalState {
+  action: MaintenanceAction
+  title: string
+  success: boolean
+  message: string
+  receiptId?: string
+  payload?: MaintenanceResultPayload
+  errorCode?: string
+  errorDetails?: Record<string, unknown>
+  completedAtIso: string
+}
+
 export function MaintenanceClient({ gateway: initialGateway, playbooks: initialPlaybooks }: Props) {
   const { skipTypedConfirm } = useSettings()
   const [gateway, setGateway] = useState(initialGateway)
@@ -142,6 +177,8 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
     receiptId?: string
     playbookResult?: PlaybookRunResult
   } | null>(null)
+  const [pendingDangerAction, setPendingDangerAction] = useState<MaintenanceAction | null>(null)
+  const [resultModalState, setResultModalState] = useState<MaintenanceResultModalState | null>(null)
   const [cliStatus, setCliStatus] = useState<{
     available: boolean
     version: string | null
@@ -382,80 +419,147 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
     })
   }, [selectedPlaybook, protectedAction])
 
+  const executeMaintenanceAction = useCallback(async (action: MaintenanceAction, typedConfirmText: string) => {
+    const config = ACTION_CONFIG[action]
+    setRunningAction(action)
+    setError(null)
+
+    try {
+      if (action === 'recover') {
+        const result = await maintenanceApi.recover(typedConfirmText)
+        const success = result.data.finalStatus === 'healthy' || result.data.finalStatus === 'recovered'
+        const message = success
+          ? 'Gateway recovered successfully'
+          : result.data.finalStatus === 'needs_manual_intervention'
+            ? 'Recovery incomplete - manual intervention required'
+            : 'Recovery failed'
+
+        setLastResult({
+          action,
+          success,
+          message,
+          receiptId: result.receiptId,
+        })
+        setResultModalState({
+          action,
+          title: config.title,
+          success,
+          message,
+          receiptId: result.receiptId,
+          payload: {
+            type: 'recovery',
+            result: result.data,
+          },
+          completedAtIso: new Date().toISOString(),
+        })
+
+        if (success) {
+          await refreshStatus()
+        }
+
+        return
+      }
+
+      if (action === 'greenfield-reset') {
+        const result = await maintenanceApi.greenfieldReset(typedConfirmText)
+        const message = `Greenfield reset complete (teams ${result.data.teamsDeleted}, agents ${result.data.agentsDeleted})`
+
+        setLastResult({
+          action,
+          success: true,
+          message,
+          receiptId: result.receiptId,
+        })
+        setResultModalState({
+          action,
+          title: config.title,
+          success: true,
+          message,
+          receiptId: result.receiptId,
+          payload: {
+            type: 'greenfield',
+            result: result.data,
+          },
+          completedAtIso: new Date().toISOString(),
+        })
+        await refreshStatus()
+        return
+      }
+
+      const result = await maintenanceApi.runAction(action, typedConfirmText)
+      const success = result.data.exitCode === 0
+      const message = success
+        ? `${config.title} completed successfully`
+        : `${config.title} failed (exit code: ${result.data.exitCode})`
+
+      setLastResult({
+        action,
+        success,
+        message,
+        receiptId: result.data.receiptId,
+      })
+      setResultModalState({
+        action,
+        title: config.title,
+        success,
+        message,
+        receiptId: result.data.receiptId,
+        payload: {
+          type: 'command',
+          result: result.data,
+        },
+        completedAtIso: new Date().toISOString(),
+      })
+
+      if (action === 'health' && success && result.data.parsedJson) {
+        const healthData = result.data.parsedJson as { status?: string }
+        setGateway((prev) => ({
+          ...prev,
+          status: (healthData.status as 'ok' | 'degraded' | 'down') || prev.status,
+          lastCheckAt: new Date(),
+        }))
+      }
+    } catch (err) {
+      console.error(`Failed to run ${action}:`, err)
+      const message = err instanceof Error ? err.message : `Failed to run ${action}`
+      const httpError = err instanceof HttpError ? err : null
+      setError(message)
+      setLastResult({
+        action,
+        success: false,
+        message,
+      })
+      setResultModalState({
+        action,
+        title: config.title,
+        success: false,
+        message,
+        errorCode: httpError?.code,
+        errorDetails: httpError?.details,
+        completedAtIso: new Date().toISOString(),
+      })
+    } finally {
+      setRunningAction(null)
+    }
+  }, [refreshStatus])
+
   // Handle maintenance action
   const handleAction = useCallback((action: MaintenanceAction) => {
     const config = ACTION_CONFIG[action]
+    const policy = ACTION_POLICIES[config.actionKind]
     setLastResult(null)
+
+    if (policy.riskLevel === 'danger') {
+      setPendingDangerAction(action)
+      return
+    }
 
     protectedAction.trigger({
       actionKind: config.actionKind,
       actionTitle: config.title,
       actionDescription: config.description,
       onConfirm: async (typedConfirmText) => {
-        setRunningAction(action)
-        setError(null)
-
-        try {
-          if (action === 'recover') {
-            const result = await maintenanceApi.recover(typedConfirmText)
-            const success = result.data.finalStatus === 'healthy' || result.data.finalStatus === 'recovered'
-            setLastResult({
-              action,
-              success,
-              message: success
-                ? 'Gateway recovered successfully'
-                : result.data.finalStatus === 'needs_manual_intervention'
-                  ? 'Recovery incomplete - manual intervention required'
-                  : 'Recovery failed',
-              receiptId: result.receiptId,
-            })
-
-            // Refresh gateway status after recovery
-            if (success) {
-              await refreshStatus()
-            }
-          } else if (action === 'greenfield-reset') {
-            const result = await maintenanceApi.greenfieldReset(typedConfirmText)
-            setLastResult({
-              action,
-              success: true,
-              message: `Greenfield reset complete (teams ${result.data.teamsDeleted}, agents ${result.data.agentsDeleted})`,
-              receiptId: result.receiptId,
-            })
-            await refreshStatus()
-          } else {
-            const result = await maintenanceApi.runAction(action, typedConfirmText)
-            const success = result.data.exitCode === 0
-            setLastResult({
-              action,
-              success,
-              message: success
-                ? `${config.title} completed successfully`
-                : `${config.title} failed (exit code: ${result.data.exitCode})`,
-              receiptId: result.data.receiptId,
-            })
-
-            // Refresh gateway status after health check
-            if (action === 'health' && success && result.data.parsedJson) {
-              const healthData = result.data.parsedJson as { status?: string }
-              setGateway((prev) => ({
-                ...prev,
-                status: (healthData.status as 'ok' | 'degraded' | 'down') || prev.status,
-                lastCheckAt: new Date(),
-              }))
-            }
-          }
-        } catch (err) {
-          console.error(`Failed to run ${action}:`, err)
-          setError(err instanceof Error ? err.message : `Failed to run ${action}`)
-          setLastResult({
-            action,
-            success: false,
-            message: err instanceof Error ? err.message : 'Action failed',
-          })
-        } finally {
-          setRunningAction(null)
-        }
+        await executeMaintenanceAction(action, typedConfirmText)
       },
       onError: (err) => {
         console.error(`Action ${action} error:`, err)
@@ -463,7 +567,16 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
         setRunningAction(null)
       },
     })
-  }, [gateway, protectedAction, refreshStatus])
+  }, [executeMaintenanceAction, protectedAction])
+
+  const handleDangerActionConfirm = useCallback(() => {
+    if (!pendingDangerAction || runningAction !== null) return
+    const action = pendingDangerAction
+    const policy = ACTION_POLICIES[ACTION_CONFIG[action].actionKind]
+    const typedConfirmText = (policy.confirmText ?? 'CONFIRM').trim() || 'CONFIRM'
+    setPendingDangerAction(null)
+    void executeMaintenanceAction(action, typedConfirmText)
+  }, [executeMaintenanceAction, pendingDangerAction, runningAction])
 
   // Handle playbook run
   const handleRunPlaybook = useCallback((playbook: { id: string; name: string; severity: 'info' | 'warn' | 'critical' }) => {
@@ -1209,6 +1322,34 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
         ) : null}
       </RightDrawer>
 
+      <ActionConfirmModal
+        open={pendingDangerAction !== null}
+        onClose={() => setPendingDangerAction(null)}
+        onConfirm={handleDangerActionConfirm}
+        title={pendingDangerAction ? ACTION_CONFIG[pendingDangerAction].title : 'Confirm Action'}
+        description={pendingDangerAction ? ACTION_CONFIG[pendingDangerAction].description : undefined}
+        notice={(
+          <span>
+            This operation will change system state. Review the impact, then click <strong>Approve &amp; Run</strong>.
+          </span>
+        )}
+        details={pendingDangerAction ? (
+          <div className="rounded-[var(--radius-md)] border border-status-danger/30 bg-status-danger/5 p-3">
+            <div className="text-xs text-status-danger">
+              Secondary approval required for dangerous maintenance actions.
+            </div>
+          </div>
+        ) : undefined}
+        confirmLabel="Approve & Run"
+        intent="danger"
+        isLoading={runningAction !== null}
+      />
+
+      <MaintenanceResultModal
+        result={resultModalState}
+        onClose={() => setResultModalState(null)}
+      />
+
       {/* Confirm Modal */}
       <TypedConfirmModal
         isOpen={protectedAction.state.isOpen}
@@ -1392,6 +1533,292 @@ function PlaybookCard({
       </div>
     </div>
   )
+}
+
+function MaintenanceResultModal({
+  result,
+  onClose,
+}: {
+  result: MaintenanceResultModalState | null
+  onClose: () => void
+}) {
+  if (!result) return null
+
+  const actionConfig = ACTION_CONFIG[result.action]
+  const commandResult = result.payload?.type === 'command' ? result.payload.result : null
+  const recoveryResult = result.payload?.type === 'recovery' ? result.payload.result : null
+  const greenfieldResult = result.payload?.type === 'greenfield' ? result.payload.result : null
+  const highlights = commandResult ? extractOutputHighlights(commandResult.stdout, commandResult.stderr) : []
+  const parsedEntries = commandResult?.parsedJson
+    ? Object.entries(commandResult.parsedJson).slice(0, 12)
+    : []
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      width="xl"
+      title={`${result.title} Results`}
+      description={formatModalTimestamp(result.completedAtIso)}
+    >
+      <div className="space-y-4">
+        <div className={cn(
+          'rounded-[var(--radius-md)] border p-3',
+          result.success
+            ? 'border-status-success/30 bg-status-success/10'
+            : 'border-status-danger/30 bg-status-danger/10'
+        )}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              {result.success ? (
+                <CheckCircle className="w-4 h-4 text-status-success mt-0.5 shrink-0" />
+              ) : (
+                <XCircle className="w-4 h-4 text-status-danger mt-0.5 shrink-0" />
+              )}
+              <div>
+                <p className={cn(
+                  'text-sm font-medium',
+                  result.success ? 'text-status-success' : 'text-status-danger'
+                )}>
+                  {result.message}
+                </p>
+                <p className="text-xs text-fg-2 mt-0.5">
+                  {actionConfig.description}
+                </p>
+              </div>
+            </div>
+            <StatusPill
+              tone={result.success ? 'success' : 'danger'}
+              label={result.success ? 'Completed' : 'Failed'}
+              icon={false}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+          <ResultStat
+            label="Action"
+            value={result.title}
+            icon={ClipboardList}
+          />
+          <ResultStat
+            label="Receipt"
+            value={result.receiptId ?? 'n/a'}
+            mono
+            icon={TerminalSquare}
+          />
+          <ResultStat
+            label="Completed"
+            value={formatModalTimestamp(result.completedAtIso)}
+            icon={Clock3}
+          />
+          {commandResult ? (
+            <ResultStat
+              label="Exit Code"
+              value={String(commandResult.exitCode)}
+              mono
+              icon={ChevronRight}
+            />
+          ) : (
+            <ResultStat
+              label="Status"
+              value={result.success ? 'success' : 'failed'}
+              mono
+              icon={ChevronRight}
+            />
+          )}
+        </div>
+
+        {(result.errorCode || result.errorDetails) && (
+          <div className="rounded-[var(--radius-md)] border border-status-danger/30 bg-status-danger/5 p-3 space-y-2">
+            {result.errorCode ? (
+              <div className="text-xs text-status-danger font-mono">Code: {result.errorCode}</div>
+            ) : null}
+            {result.errorDetails ? (
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-2/80 p-2 text-[11px] text-fg-1">
+                {JSON.stringify(result.errorDetails, null, 2)}
+              </pre>
+            ) : null}
+          </div>
+        )}
+
+        {recoveryResult && (
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-fg-1 uppercase tracking-wide">Recovery Steps</h4>
+            <div className="space-y-2">
+              {recoveryResult.steps.map((step) => (
+                <div
+                  key={step.step}
+                  className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-2/60 px-3 py-2 flex items-start justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs text-fg-0">{toTitleCase(step.step)}</div>
+                    {step.message ? (
+                      <div className="text-[11px] text-fg-2 mt-0.5">{step.message}</div>
+                    ) : null}
+                  </div>
+                  <StatusPill
+                    tone={recoveryStepTone(step.status)}
+                    label={toTitleCase(step.status)}
+                    icon={false}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="text-xs text-fg-2">
+              Final status: <span className="font-medium text-fg-1">{toTitleCase(recoveryResult.finalStatus ?? 'unknown')}</span>
+            </div>
+          </div>
+        )}
+
+        {greenfieldResult && (
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-fg-1 uppercase tracking-wide">Reset Summary</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {Object.entries(greenfieldResult).map(([key, value]) => (
+                <div
+                  key={key}
+                  className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-2/60 px-2.5 py-2"
+                >
+                  <div className="text-[11px] text-fg-2">{toTitleCase(key)}</div>
+                  <div className="text-sm text-fg-0 font-mono mt-0.5">{formatSummaryValue(value)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {parsedEntries.length > 0 && (
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-fg-1 uppercase tracking-wide">Parsed Output</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {parsedEntries.map(([key, value]) => (
+                <div
+                  key={key}
+                  className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-2/60 px-2.5 py-2"
+                >
+                  <div className="text-[11px] text-fg-2">{toTitleCase(key)}</div>
+                  <div className="text-xs text-fg-0 mt-0.5 font-mono break-all">
+                    {formatSummaryValue(value)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {highlights.length > 0 && (
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-fg-1 uppercase tracking-wide">Highlights</h4>
+            <div className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-2/60 p-3">
+              <ul className="space-y-1">
+                {highlights.map((line, index) => (
+                  <li key={`${line}-${index}`} className="text-xs text-fg-1 flex items-start gap-2">
+                    <ChevronRight className="w-3 h-3 text-fg-2 mt-0.5 shrink-0" />
+                    <span className="break-words">{line}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {commandResult && (commandResult.stdout || commandResult.stderr) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <h4 className="text-xs font-medium text-fg-1 uppercase tracking-wide">Stdout</h4>
+              <pre className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-2/70 p-3 text-[11px] text-fg-1 max-h-52 overflow-auto whitespace-pre-wrap break-words">
+                {commandResult.stdout?.trim() || 'No stdout output.'}
+              </pre>
+            </div>
+            <div className="space-y-2">
+              <h4 className="text-xs font-medium text-fg-1 uppercase tracking-wide">Stderr</h4>
+              <pre className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-2/70 p-3 text-[11px] text-fg-1 max-h-52 overflow-auto whitespace-pre-wrap break-words">
+                {commandResult.stderr?.trim() || 'No stderr output.'}
+              </pre>
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <Button onClick={onClose} variant="secondary" size="sm">
+            Close
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function ResultStat({
+  label,
+  value,
+  icon: Icon,
+  mono = false,
+}: {
+  label: string
+  value: string
+  icon: React.ComponentType<{ className?: string }>
+  mono?: boolean
+}) {
+  return (
+    <div className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-2/60 px-2.5 py-2">
+      <div className="flex items-center gap-1.5 text-[11px] text-fg-2">
+        <Icon className="w-3 h-3" />
+        <span>{label}</span>
+      </div>
+      <div className={cn('text-xs mt-1 text-fg-0 break-all', mono && 'font-mono')}>{value}</div>
+    </div>
+  )
+}
+
+function extractOutputHighlights(stdout: string, stderr: string): string[] {
+  const preferred = [stdout, stderr]
+    .flatMap((chunk) => chunk.split('\n'))
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !line.startsWith('{') && !line.startsWith('['))
+    .filter((line) => !line.startsWith('==='))
+    .slice(0, 8)
+
+  return Array.from(new Set(preferred))
+}
+
+function toTitleCase(value: string): string {
+  return value
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function formatSummaryValue(value: unknown): string {
+  if (typeof value === 'boolean') return value ? 'yes' : 'no'
+  if (value === null || value === undefined) return 'n/a'
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value)
+  if (typeof value === 'string') return value
+
+  try {
+    const serialized = JSON.stringify(value)
+    return serialized.length > 140 ? `${serialized.slice(0, 137)}...` : serialized
+  } catch {
+    return String(value)
+  }
+}
+
+function recoveryStepTone(status: RecoveryState['steps'][number]['status']) {
+  if (status === 'success') return 'success' as const
+  if (status === 'failed') return 'danger' as const
+  if (status === 'running') return 'progress' as const
+  if (status === 'pending') return 'warning' as const
+  return 'muted' as const
+}
+
+function formatModalTimestamp(isoValue: string): string {
+  const parsed = new Date(isoValue)
+  if (Number.isNaN(parsed.getTime())) return 'Unknown time'
+  return parsed.toLocaleString()
 }
 
 function formatUptime(seconds: number): string {

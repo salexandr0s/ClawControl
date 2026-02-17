@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -34,6 +34,7 @@ interface KanbanBoardProps {
   workOrders: WorkOrderWithOpsDTO[]
   agents: AgentDTO[]
   assigningWorkOrderId?: string | null
+  showArchive: boolean
   onWorkOrderClick: (wo: WorkOrderWithOpsDTO) => void
   onStateChange: (
     id: string,
@@ -47,11 +48,13 @@ export function KanbanBoard({
   workOrders,
   agents,
   assigningWorkOrderId,
+  showArchive,
   onWorkOrderClick,
   onStateChange,
   onAssignToAgent,
 }: KanbanBoardProps) {
   const triggerProtectedAction = useProtectedActionTrigger()
+  const boardRef = useRef<HTMLDivElement | null>(null)
 
   // Track active drag state
   const [activeWorkOrder, setActiveWorkOrder] = useState<WorkOrderWithOpsDTO | null>(null)
@@ -67,6 +70,11 @@ export function KanbanBoard({
     }
     return grouped
   }, [workOrders])
+
+  const visibleColumns = useMemo(() => {
+    if (showArchive) return KANBAN_COLUMNS
+    return KANBAN_COLUMNS.filter((column) => column.state !== 'cancelled')
+  }, [showArchive])
 
   // Configure drag sensors
   const sensors = useSensors(
@@ -206,6 +214,23 @@ export function KanbanBoard({
     setOverColumn(null)
   }, [])
 
+  useEffect(() => {
+    const board = boardRef.current
+    if (!board) return
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+      if (board.scrollWidth <= board.clientWidth) return
+
+      board.scrollLeft += event.deltaY
+      event.preventDefault()
+    }
+
+    board.addEventListener('wheel', handleWheel, { passive: false })
+    return () => board.removeEventListener('wheel', handleWheel)
+  }, [visibleColumns.length])
+
   return (
     <DndContext
       sensors={sensors}
@@ -216,16 +241,16 @@ export function KanbanBoard({
       onDragCancel={handleDragCancel}
     >
       <div
+        ref={boardRef}
         className={cn(
           // Fill available height (parent should set height context)
           'flex h-full min-h-0',
           // Columns fill width until min-width threshold, then scroll
           'gap-3 overflow-x-auto pb-2',
-          'snap-x snap-mandatory',
-          'scrollbar-hide'
+          'snap-x snap-mandatory'
         )}
       >
-        {KANBAN_COLUMNS.map((column) => (
+        {visibleColumns.map((column) => (
           <KanbanColumn
             key={column.state}
             id={column.state}

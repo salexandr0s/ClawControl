@@ -58,6 +58,7 @@ export async function POST(request: NextRequest) {
   const result = await enforceActionPolicy({
     actionKind: 'maintenance.recover_gateway',
     typedConfirmText,
+    skipApprovalGate: true,
   })
 
   if (!result.allowed) {

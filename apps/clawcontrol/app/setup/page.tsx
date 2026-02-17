@@ -28,6 +28,10 @@ declare global {
         title: string
         publishedAt: string | null
         highlights: string[]
+        sections?: Array<{
+          title: string
+          items: string[]
+        }>
         releaseUrl: string
       } | null>
       ackWhatsNew?: (version: string) => Promise<{ ok: boolean }>

@@ -38,7 +38,7 @@ export function ModelBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 border rounded-[var(--radius-sm)] font-medium',
+        'inline-flex items-center gap-1 border rounded-[var(--radius-sm)] font-medium whitespace-nowrap',
         size === 'sm' && 'px-1.5 py-0.5 text-[10px]',
         size === 'md' && 'px-2 py-1 text-xs',
         colorClass,
@@ -49,7 +49,7 @@ export function ModelBadge({
         <ProviderLogo
           provider={provider}
           size="sm"
-          className={cn(size === 'sm' ? 'w-3.5 h-3.5 rounded-[4px]' : 'w-4 h-4 rounded-[4px]')}
+          className={cn(size === 'sm' ? 'w-3.5 h-3.5 rounded-[4px] shrink-0' : 'w-4 h-4 rounded-[4px] shrink-0')}
         />
       )}
       {showIcon && <Cpu className={cn(size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5')} />}

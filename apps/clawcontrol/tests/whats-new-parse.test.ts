@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractReleaseHighlights } from '../../clawcontrol-desktop/electron/whats-new'
+import { extractReleaseHighlights, extractReleaseSections } from '../../clawcontrol-desktop/electron/whats-new'
 
 describe('whats-new highlight extraction', () => {
   it('prefers the Highlights section when present', () => {
@@ -46,3 +46,54 @@ Third line.
   })
 })
 
+describe('whats-new section extraction', () => {
+  it('prefers changelog-like sections and excludes installation sections', () => {
+    const body = `
+# v0.14.0
+
+## Installation
+- npm install -g clawcontrol
+- openclaw login
+
+## Changelog
+- Added adaptive usage timeline
+- Improved kanban archive filtering
+
+## Improvements
+- Better model badges in agents table
+    `.trim()
+
+    expect(extractReleaseSections(body)).toEqual([
+      {
+        title: 'Changelog',
+        items: [
+          'Added adaptive usage timeline',
+          'Improved kanban archive filtering',
+        ],
+      },
+      {
+        title: 'Improvements',
+        items: ['Better model badges in agents table'],
+      },
+    ])
+  })
+
+  it('filters installation/setup bullets from fallback extraction', () => {
+    const body = `
+- Setup: run npm install
+- Configure env vars
+- Fixed dashboard usage chart
+- Added archive toggle
+    `.trim()
+
+    expect(extractReleaseSections(body)).toEqual([
+      {
+        title: 'Highlights',
+        items: [
+          'Fixed dashboard usage chart',
+          'Added archive toggle',
+        ],
+      },
+    ])
+  })
+})

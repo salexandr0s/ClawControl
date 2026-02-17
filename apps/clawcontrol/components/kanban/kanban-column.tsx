@@ -55,6 +55,7 @@ export function KanbanColumn({
 
   const toneClasses = statusToneClasses[tone]
   const isBlockedColumn = id === 'blocked'
+  const showBlockedAccent = isBlockedColumn && workOrders.length > 0
   const isTerminalColumn = id === 'shipped' || id === 'cancelled'
 
   // Determine if column should be dimmed (during drag, can't accept)
@@ -91,8 +92,8 @@ export function KanbanColumn({
         'bg-bg-1 rounded-[var(--radius-md)]',
         'border border-bd-0',
         'transition-all duration-200',
-        // Blocked column has left accent bar
-        isBlockedColumn && 'border-l-2 border-l-status-danger',
+        // Blocked column gets a red accent only when there are blocked items.
+        showBlockedAccent && 'border-l-2 border-l-status-danger',
         // Dim columns that can't accept the dragged item
         shouldDim && 'opacity-40 scale-[0.98]',
         // Drop target styling

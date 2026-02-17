@@ -26,11 +26,17 @@ interface DesktopUpdateInfo {
   error?: string
 }
 
+interface WhatsNewSection {
+  title: string
+  items: string[]
+}
+
 interface WhatsNewPayload {
   version: string
   title: string
   publishedAt: string | null
   highlights: string[]
+  sections: WhatsNewSection[]
   releaseUrl: string
 }
 

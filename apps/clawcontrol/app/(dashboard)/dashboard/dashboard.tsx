@@ -343,27 +343,7 @@ export function Dashboard({
     }
   }
 
-  const usageDayCount = useMemo(() => {
-    if (!usageSummary) return USAGE_WINDOW_DAYS
-    return getUtcInclusiveDayCount(usageSummary.from, usageSummary.to)
-  }, [usageSummary?.from, usageSummary?.to])
-
-  const avgPerDay = useMemo(() => {
-    if (!usageSummary) return null
-    const dayCount = BigInt(Math.max(1, usageDayCount))
-    try {
-      const totalTokens = BigInt(usageSummary.totals.totalTokens)
-      const totalCostMicros = BigInt(usageSummary.totals.totalCostMicros)
-      return {
-        avgTokens: (totalTokens / dayCount).toString(),
-        avgCostMicros: (totalCostMicros / dayCount).toString(),
-      }
-    } catch {
-      return null
-    }
-  }, [usageSummary, usageDayCount])
-
-  const usageSeries = useMemo(() => {
+  const fullUsageSeries = useMemo(() => {
     if (!usageSummary) return []
     const fromDay = startOfUtcDay(new Date(usageSummary.from))
     const toDay = startOfUtcDay(new Date(usageSummary.to))
@@ -389,6 +369,39 @@ export function Dashboard({
 
     return filled
   }, [usageSummary?.from, usageSummary?.to, usageSummary?.series])
+
+  const usageSeries = useMemo(() => {
+    if (fullUsageSeries.length === 0) return []
+
+    const firstActiveDayIndex = fullUsageSeries.findIndex((point) => {
+      const value = Number(point.totalTokens)
+      return Number.isFinite(value) && value > 0
+    })
+
+    if (firstActiveDayIndex === -1) return []
+    return fullUsageSeries.slice(firstActiveDayIndex)
+  }, [fullUsageSeries])
+
+  const usageDayCount = useMemo(() => {
+    if (!usageSummary) return USAGE_WINDOW_DAYS
+    if (usageSeries.length > 0) return usageSeries.length
+    return getUtcInclusiveDayCount(usageSummary.from, usageSummary.to)
+  }, [usageSummary, usageSeries.length])
+
+  const avgPerDay = useMemo(() => {
+    if (!usageSummary) return null
+    const dayCount = BigInt(Math.max(1, usageDayCount))
+    try {
+      const totalTokens = BigInt(usageSummary.totals.totalTokens)
+      const totalCostMicros = BigInt(usageSummary.totals.totalCostMicros)
+      return {
+        avgTokens: (totalTokens / dayCount).toString(),
+        avgCostMicros: (totalCostMicros / dayCount).toString(),
+      }
+    } catch {
+      return null
+    }
+  }, [usageSummary, usageDayCount])
 
   const dailyRows = useMemo(
     () => usageSeries.slice().reverse(),
@@ -490,7 +503,7 @@ export function Dashboard({
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs text-fg-2">Daily usage (tokens, last {USAGE_WINDOW_DAYS} days)</div>
+                  <div className="text-xs text-fg-2">Daily usage (tokens, last {usageDayCount} days shown)</div>
                   <button
                     onClick={() => setShowDailyTable((prev) => !prev)}
                     className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded border border-bd-0 bg-bg-3 text-fg-2 hover:text-fg-1"
