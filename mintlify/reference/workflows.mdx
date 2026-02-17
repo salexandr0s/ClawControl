@@ -83,9 +83,36 @@ Use the **Workflows** UI surface to:
 
 See the API reference for the full list of workflow endpoints.
 
+## Strict Live Desktop Validation
+
+ClawControl ships a strict workflow harness for desktop runtime validation with real workorders and real dispatch sessions:
+
+```bash
+npm run workflow:test:desktop
+```
+
+The harness executes:
+
+- workorder-only reset on desktop DB
+- starter workflow seed
+- stage-capable agent checks
+- full workflow progression with controlled rework paths
+- strict dispatch integrity checks (`dispatch_failed=0`, non-null dispatch `sessionId`)
+
+Operational scripts:
+
+- `scripts/reset-workorders-desktop.sql`
+- `scripts/run-workflow-real-workorders.mjs`
+
+Report artifacts:
+
+- `/Users/savorgserver/OpenClaw/tmp/workflow-test-report-<timestamp>.json`
+- `/Users/savorgserver/OpenClaw/tmp/workflow-test-report-<timestamp>.md`
+- `/Users/savorgserver/OpenClaw/tmp/workflow-test-server-<timestamp>.log`
+
 ## Last updated
 
-2026-02-13
+2026-02-17
 
 ## Related pages
 

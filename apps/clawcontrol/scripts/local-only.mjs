@@ -31,7 +31,26 @@ if (!cmd) fail('No command provided. Usage: node scripts/local-only.mjs next dev
 
 const { spawn } = await import('node:child_process')
 const child = spawn(cmd, args, { stdio: 'inherit', env: process.env })
+
+let childExited = false
+
+function forwardSignal(signal) {
+  if (childExited) return
+  try {
+    child.kill(signal)
+  } catch {
+    // ignore
+  }
+}
+
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(signal, () => {
+    forwardSignal(signal)
+  })
+}
+
 child.on('exit', (code, signal) => {
+  childExited = true
   if (signal) process.exit(1)
   process.exit(code ?? 1)
 })

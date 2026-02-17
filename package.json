@@ -17,6 +17,7 @@
     "typecheck": "turbo typecheck --concurrency=1",
     "init:agents": "bash ./scripts/init-agents.sh",
     "check:agent-docs": "node ./scripts/check-agent-docs.mjs",
+    "workflow:test:desktop": "node ./scripts/run-workflow-real-workorders.mjs",
     "db:migrate": "npm run db:migrate --workspace=clawcontrol",
     "db:push": "npm run db:push --workspace=clawcontrol",
     "db:studio": "npm run db:studio --workspace=clawcontrol",

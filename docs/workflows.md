@@ -1,6 +1,6 @@
 # ClawControl Workflows
 
-Last updated: 2026-02-13
+Last updated: 2026-02-17
 
 This document describes how workflows work in ClawControl and how users manage them.
 
@@ -89,3 +89,45 @@ Main endpoints:
 - `PUT /api/workflows/selection`
 
 Mutating routes require operator session + CSRF and governor policy enforcement.
+
+## 8. Dispatch Compatibility (OpenClaw CLI)
+
+Workflow stage dispatch uses OpenClaw with compatibility modes controlled by:
+
+- `CLAWCONTROL_OPENCLAW_DISPATCH_MODE=auto` (default): try `openclaw run`, fallback to `openclaw agent --local` when `run` is unavailable.
+- `CLAWCONTROL_OPENCLAW_DISPATCH_MODE=run`: force the `run` command path.
+- `CLAWCONTROL_OPENCLAW_DISPATCH_MODE=agent_local`: force `agent --local` dispatch.
+
+For `agent_local`, ClawControl sends a deterministic `--session-id` and requires a non-null session id in command output. If no session id is returned, dispatch fails and the operation is blocked.
+
+## 9. Strict Live Workflow Validation
+
+ClawControl includes a strict desktop-runtime harness that resets workorder runtime state, seeds starter workflows, runs real workorders end-to-end, and enforces dispatch/session integrity.
+
+### Commands
+
+```bash
+npm run workflow:test:desktop
+```
+
+Supporting scripts:
+
+- `scripts/reset-workorders-desktop.sql`
+- `scripts/run-workflow-real-workorders.mjs`
+
+### Strict checks
+
+- no `workflow.dispatch_failed` events
+- all `workflow.dispatched` events include non-null `sessionId`
+- each workflow has real dispatch activity
+- all runs end `work_order.state='shipped'`
+- no blocked/cancelled runs and no pending approvals
+- rework evidence for loop-capable workflows
+
+### Report artifacts
+
+The harness writes:
+
+- `/Users/savorgserver/OpenClaw/tmp/workflow-test-report-<timestamp>.json`
+- `/Users/savorgserver/OpenClaw/tmp/workflow-test-report-<timestamp>.md`
+- `/Users/savorgserver/OpenClaw/tmp/workflow-test-server-<timestamp>.log`

@@ -96,10 +96,21 @@ Workflows reference specialist agents only; the CEO is not represented inside wo
 | `npm run test` | Run test suite |
 | `npm run lint` | Lint repository |
 | `npm run typecheck` | Type-check repository |
+| `npm run workflow:test:desktop` | Strict live desktop DB workflow validation (real dispatch, no no-op fallback) |
 | `npm run db:migrate` | Apply Prisma migrations for `clawcontrol` |
 | `./start.sh --web` | Start local web runtime (requires `npm run build --workspace=clawcontrol`) |
 | `./start.sh --desktop` | Start desktop mode (requires `npm run build --workspace=clawcontrol`) |
 | `./stop.sh` | Stop local processes |
+
+## Dispatch Compatibility
+
+Workflow dispatch supports mixed OpenClaw CLI environments via:
+
+- `CLAWCONTROL_OPENCLAW_DISPATCH_MODE=auto` (default): try `openclaw run` first, fallback to `openclaw agent --local` only if `run` is unsupported.
+- `CLAWCONTROL_OPENCLAW_DISPATCH_MODE=run`: force legacy `run` path.
+- `CLAWCONTROL_OPENCLAW_DISPATCH_MODE=agent_local`: force current `agent --local` path.
+
+In strict workflow validation, no simulated/no-op dispatch path is used; each dispatch must produce a real `sessionId`.
 
 ## Documentation
 

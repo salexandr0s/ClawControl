@@ -47,6 +47,16 @@ Capabilities endpoint probes OpenClaw and returns feature support map. Results a
 - Dynamic command forms enforce required params.
 - Command execution results are logged in receipts.
 
+## Workflow Dispatch Compatibility
+
+Workflow stage dispatch supports mixed OpenClaw CLI variants using:
+
+- `CLAWCONTROL_OPENCLAW_DISPATCH_MODE=auto` (default): try `openclaw run` first, fallback to `openclaw agent --local` when `run` is unsupported.
+- `CLAWCONTROL_OPENCLAW_DISPATCH_MODE=run`: force `openclaw run`.
+- `CLAWCONTROL_OPENCLAW_DISPATCH_MODE=agent_local`: force `openclaw agent --local`.
+
+In `agent_local` mode, ClawControl sends a deterministic `--session-id` derived from operation identity and requires a non-null session id from command output. If no session id is returned, dispatch fails (no no-op success fallback).
+
 ## Unavailable / Degraded Behavior
 
 When OpenClaw is unavailable:
@@ -62,7 +72,7 @@ CLI-dependent API failures include additive metadata:
 
 ## Last updated
 
-2026-02-13
+2026-02-17
 
 ## Related pages
 

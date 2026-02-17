@@ -2,7 +2,7 @@ import 'server-only'
 
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { prisma } from '../db'
 import { getWsConsoleClient } from './console-client'
 import {
@@ -14,6 +14,8 @@ import {
 const execFileAsync = promisify(execFile)
 const OPENCLAW_STATUS_TIMEOUT_MS = 15_000
 const ACTIVE_SESSION_AGE_MS = 5 * 60 * 1000
+const AGENT_OUTPUT_CAPTURE_MAX_CHARS = 12_000
+const AGENT_RAW_JSON_MAX_CHARS = 48_000
 
 export interface SpawnOptions {
   agentId: string
@@ -27,6 +29,232 @@ export interface SpawnOptions {
 export interface SpawnResult {
   sessionKey: string
   sessionId: string | null
+}
+
+type DispatchMode = 'auto' | 'run' | 'agent_local'
+type EffectiveDispatchMode = Exclude<DispatchMode, 'auto'>
+type CommandRunResult = {
+  stdout: string
+  stderr: string
+}
+type DispatchAttemptResult = {
+  sessionId: string | null
+  stdout: string
+  stderr: string
+  parsed: unknown
+}
+
+let autoResolvedDispatchMode: EffectiveDispatchMode | null = null
+
+function normalizeDispatchMode(value: string | undefined): DispatchMode {
+  if (!value) return 'auto'
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'auto' || normalized === 'run' || normalized === 'agent_local') {
+    return normalized
+  }
+  return 'auto'
+}
+
+function getConfiguredDispatchMode(): DispatchMode {
+  return normalizeDispatchMode(process.env.CLAWCONTROL_OPENCLAW_DISPATCH_MODE)
+}
+
+function extractExecFailureDetails(error: unknown): string {
+  if (!error || typeof error !== 'object') return ''
+
+  const details = error as {
+    stdout?: unknown
+    stderr?: unknown
+  }
+
+  const stdout = typeof details.stdout === 'string' ? details.stdout.trim() : ''
+  const stderr = typeof details.stderr === 'string' ? details.stderr.trim() : ''
+
+  return [stdout, stderr].filter(Boolean).join('\n')
+}
+
+function shouldFallbackToAgentLocal(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes("unknown command 'run'")
+    || normalized.includes('unknown command "run"')
+    || normalized.includes('did you mean cron?')
+    || normalized.includes('enoent')
+    || normalized.includes('not found')
+  )
+}
+
+function clampText(value: string, maxChars: number): string {
+  const normalized = value.trim()
+  if (normalized.length <= maxChars) return normalized
+  return `${normalized.slice(0, maxChars)}\n...[truncated ${normalized.length - maxChars} chars]`
+}
+
+function clampJsonForStorage(payload: unknown): string {
+  const serialized = JSON.stringify(payload)
+  if (serialized.length <= AGENT_RAW_JSON_MAX_CHARS) return serialized
+
+  return JSON.stringify({
+    truncated: true,
+    originalLength: serialized.length,
+    preview: serialized.slice(0, AGENT_RAW_JSON_MAX_CHARS),
+  })
+}
+
+function makeDeterministicSessionId(label: string): string {
+  const hex = createHash('sha256').update(label).digest('hex').slice(0, 32).split('')
+  hex[12] = '4'
+  const variantNibble = Number.parseInt(hex[16] ?? '0', 16)
+  hex[16] = ((variantNibble & 0x3) | 0x8).toString(16)
+
+  return [
+    hex.slice(0, 8).join(''),
+    hex.slice(8, 12).join(''),
+    hex.slice(12, 16).join(''),
+    hex.slice(16, 20).join(''),
+    hex.slice(20, 32).join(''),
+  ].join('-')
+}
+
+function buildAgentLocalMessage(task: string, context: Record<string, unknown>, sessionKey: string): string {
+  const trimmedTask = task.trim()
+  const payload = JSON.stringify({
+    sessionKey,
+    context,
+  })
+
+  if (!trimmedTask) {
+    return `CLAWCONTROL_CONTEXT_JSON:${payload}`
+  }
+
+  return `${trimmedTask}\n\nCLAWCONTROL_CONTEXT_JSON:${payload}`
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null
+  return value as Record<string, unknown>
+}
+
+function parseSessionIdFromRun(parsed: unknown): string | null {
+  const root = asRecord(parsed)
+  if (!root) return null
+
+  if (typeof root.sessionId === 'string') return root.sessionId
+  if (typeof root.id === 'string') return root.id
+
+  return null
+}
+
+function parseSessionIdFromAgentLocal(parsed: unknown): string | null {
+  const root = asRecord(parsed)
+  if (!root) return null
+
+  const directSessionId = root.sessionId
+  if (typeof directSessionId === 'string') return directSessionId
+
+  const meta = asRecord(root.meta)
+  const metaSessionId = meta?.sessionId
+  if (typeof metaSessionId === 'string') return metaSessionId
+
+  const agentMeta = asRecord(meta?.agentMeta)
+  const agentMetaSessionId = agentMeta?.sessionId
+  if (typeof agentMetaSessionId === 'string') return agentMetaSessionId
+
+  const report = asRecord(meta?.systemPromptReport)
+  const reportSessionId = report?.sessionId
+  if (typeof reportSessionId === 'string') return reportSessionId
+
+  return null
+}
+
+async function runOpenClawCommand(args: string[], timeoutSeconds: number): Promise<CommandRunResult> {
+  const timeoutMs = Math.max(1, timeoutSeconds) * 1000
+
+  try {
+    const res = await execFileAsync(getOpenClawBin(), args, {
+      timeout: timeoutMs,
+      maxBuffer: 10 * 1024 * 1024,
+    })
+
+    return {
+      stdout: res.stdout ?? '',
+      stderr: res.stderr ?? '',
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const details = extractExecFailureDetails(err)
+    const combined = [msg, details].filter(Boolean).join('\n')
+    throw new Error(combined)
+  }
+}
+
+async function runDispatchWithRun(options: SpawnOptions): Promise<DispatchAttemptResult> {
+  const timeoutSeconds = options.timeoutSeconds ?? 300
+  const args: string[] = ['run', options.agentId, '--label', options.label, '--timeout', String(timeoutSeconds)]
+
+  if (options.model) {
+    args.push('--model', options.model)
+  }
+
+  args.push('--', JSON.stringify({ task: options.task, context: options.context ?? {} }))
+
+  const command = `openclaw ${args.join(' ')}`
+  const result = await runOpenClawCommand(args, timeoutSeconds)
+  const parsed = parseJsonFromCommandOutput(result.stdout)
+  const sessionId = parseSessionIdFromRun(parsed)
+
+  return {
+    sessionId,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    parsed: {
+      command,
+      mode: 'run',
+      parsed,
+    },
+  }
+}
+
+async function runDispatchWithAgentLocal(options: SpawnOptions): Promise<DispatchAttemptResult> {
+  const timeoutSeconds = options.timeoutSeconds ?? 300
+  const deterministicSessionId = makeDeterministicSessionId(options.label)
+  const message = buildAgentLocalMessage(options.task, options.context ?? {}, options.label)
+  const args: string[] = [
+    'agent',
+    '--local',
+    '--agent',
+    options.agentId,
+    '--session-id',
+    deterministicSessionId,
+    '--message',
+    message,
+    '--json',
+    '--timeout',
+    String(timeoutSeconds),
+  ]
+
+  const command = `openclaw ${args.join(' ')}`
+  const result = await runOpenClawCommand(args, timeoutSeconds)
+  const parsed = parseJsonFromCommandOutput(result.stdout)
+  const sessionId = parseSessionIdFromAgentLocal(parsed)
+
+  if (!sessionId) {
+    throw new Error(
+      `openclaw agent --local did not return a sessionId\nstdout=${clampText(result.stdout, AGENT_OUTPUT_CAPTURE_MAX_CHARS)}\nstderr=${clampText(result.stderr, AGENT_OUTPUT_CAPTURE_MAX_CHARS)}`
+    )
+  }
+
+  return {
+    sessionId,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    parsed: {
+      command,
+      mode: 'agent_local',
+      expectedSessionId: deterministicSessionId,
+      parsed,
+    },
+  }
 }
 
 function parseExplicitLinkage(input: {
@@ -63,44 +291,83 @@ function parseExplicitLinkage(input: {
  * Convention: include `:op:<operationId>` (and optionally `:wo:<workOrderId>`) in the label.
  */
 export async function spawnAgentSession(options: SpawnOptions): Promise<SpawnResult> {
-  const { agentId, label, task, context, model, timeoutSeconds = 300 } = options
+  const {
+    agentId,
+    label,
+    task,
+    context,
+    model,
+    timeoutSeconds = 300,
+  } = options
 
-  const args: string[] = ['run', agentId, '--label', label, '--timeout', String(timeoutSeconds)]
-
-  if (model) {
-    args.push('--model', model)
+  const spawnOptions: SpawnOptions = {
+    agentId,
+    label,
+    task,
+    context,
+    model,
+    timeoutSeconds,
   }
 
-  args.push('--', JSON.stringify({ task, context: context ?? {} }))
+  const mode = getConfiguredDispatchMode()
+  let attempt: DispatchAttemptResult
 
-  let stdout = ''
-  let stderr = ''
+  if (mode === 'run') {
+    try {
+      attempt = await runDispatchWithRun(spawnOptions)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`openclaw run failed: ${message}`)
+    }
+  } else if (mode === 'agent_local') {
+    try {
+      attempt = await runDispatchWithAgentLocal(spawnOptions)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`openclaw agent --local failed: ${message}`)
+    }
+  } else if (autoResolvedDispatchMode === 'agent_local') {
+    try {
+      attempt = await runDispatchWithAgentLocal(spawnOptions)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`openclaw agent --local failed: ${message}`)
+    }
+  } else {
+    try {
+      attempt = await runDispatchWithRun(spawnOptions)
+      autoResolvedDispatchMode = 'run'
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!shouldFallbackToAgentLocal(message)) {
+        throw new Error(`openclaw run failed: ${message}`)
+      }
 
-  try {
-    const res = await execFileAsync(getOpenClawBin(), args, {
-      timeout: timeoutSeconds * 1000,
-      maxBuffer: 10 * 1024 * 1024,
-    })
-    stdout = res.stdout ?? ''
-    stderr = res.stderr ?? ''
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    throw new Error(`openclaw run failed: ${msg}`)
+      autoResolvedDispatchMode = 'agent_local'
+      try {
+        attempt = await runDispatchWithAgentLocal(spawnOptions)
+      } catch (fallbackError) {
+        const fallbackMessage =
+          fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+        throw new Error(
+          `openclaw run unavailable; fallback agent_local failed.\nrun_error=${message}\nagent_local_error=${fallbackMessage}`
+        )
+      }
+    }
   }
 
-  let parsed: unknown = null
-  let sessionId: string | null = null
-  const parsedOutput = parseJsonFromCommandOutput(stdout)
-  if (parsedOutput && typeof parsedOutput === 'object') {
-    parsed = parsedOutput
-    const obj = parsed as { sessionId?: unknown; id?: unknown }
-    if (typeof obj.sessionId === 'string') sessionId = obj.sessionId
-    else if (typeof obj.id === 'string') sessionId = obj.id
-  }
+  const sessionId = attempt.sessionId
 
   if (sessionId) {
     const linkage = parseExplicitLinkage({ sessionKey: label })
     const now = new Date()
+    const rawJson = clampJsonForStorage({
+      spawn: {
+        stdout: clampText(attempt.stdout, AGENT_OUTPUT_CAPTURE_MAX_CHARS),
+        stderr: clampText(attempt.stderr, AGENT_OUTPUT_CAPTURE_MAX_CHARS),
+      },
+      parsed: attempt.parsed,
+    })
 
     await prisma.agentSession.upsert({
       where: { sessionId },
@@ -117,10 +384,7 @@ export async function spawnAgentSession(options: SpawnOptions): Promise<SpawnRes
         state: 'active',
         operationId: linkage.operationId ?? null,
         workOrderId: linkage.workOrderId ?? null,
-        rawJson: JSON.stringify({
-          spawn: { stdout: stdout.trim(), stderr: stderr.trim() },
-          parsed,
-        }),
+        rawJson,
       },
       update: {
         sessionKey: label,
@@ -131,10 +395,7 @@ export async function spawnAgentSession(options: SpawnOptions): Promise<SpawnRes
         state: 'active',
         operationId: linkage.operationId ?? null,
         workOrderId: linkage.workOrderId ?? null,
-        rawJson: JSON.stringify({
-          spawn: { stdout: stdout.trim(), stderr: stderr.trim() },
-          parsed,
-        }),
+        rawJson,
       },
     })
   }
