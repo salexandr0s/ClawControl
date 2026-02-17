@@ -10,13 +10,14 @@ import {
   getOpenClawBin,
   parseJsonFromCommandOutput,
 } from '@clawcontrol/adapters-openclaw'
-import { upsertAgentToOpenClaw } from '@/lib/services/openclaw-config'
+import { getAgentModelFromOpenClaw, upsertAgentToOpenClaw } from '@/lib/services/openclaw-config'
 
 const execFileAsync = promisify(execFile)
 const OPENCLAW_STATUS_TIMEOUT_MS = 15_000
 const ACTIVE_SESSION_AGE_MS = 5 * 60 * 1000
 const AGENT_OUTPUT_CAPTURE_MAX_CHARS = 12_000
 const AGENT_RAW_JSON_MAX_CHARS = 48_000
+const OPENAI_CODEX_OAUTH_MODEL = 'openai-codex/gpt-5.3-codex'
 
 export interface SpawnOptions {
   agentId: string
@@ -141,20 +142,94 @@ function formatModelSyncWarning(message: string): string {
   return `agent_local model sync warning: ${clampText(message, 300)}`
 }
 
+function normalizeModelForOpenClaw(model: string): string {
+  const trimmed = model.trim()
+  if (!trimmed) return ''
+  if (trimmed.includes('/')) return trimmed
+
+  const normalized = trimmed.toLowerCase()
+  if (
+    normalized.startsWith('claude')
+    || normalized.includes('sonnet')
+    || normalized.includes('opus')
+    || normalized.includes('haiku')
+  ) {
+    return `anthropic/${trimmed}`
+  }
+
+  if (normalized.includes('codex')) {
+    return `openai-codex/${trimmed}`
+  }
+
+  if (normalized.startsWith('gpt-')) {
+    return `openai/${trimmed}`
+  }
+
+  return trimmed
+}
+
+function hasOpenAiApiKeyConfigured(): boolean {
+  return Boolean(process.env.OPENAI_API_KEY?.trim())
+}
+
+function dedupeModels(models: string[]): string[] {
+  const seen = new Set<string>()
+  const output: string[] = []
+
+  for (const raw of models) {
+    const value = raw.trim()
+    if (!value) continue
+    const key = value.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    output.push(value)
+  }
+
+  return output
+}
+
+async function resolveAgentLocalFallbacks(
+  label: string,
+  normalizedPrimaryModel: string
+): Promise<string[] | undefined> {
+  if (hasOpenAiApiKeyConfigured()) return undefined
+  if (normalizedPrimaryModel.toLowerCase().startsWith('openai-codex/')) return undefined
+
+  const existing = await getAgentModelFromOpenClaw(label)
+  const existingFallbacks = existing?.fallbacks ?? []
+  const merged = dedupeModels([
+    OPENAI_CODEX_OAUTH_MODEL,
+    ...existingFallbacks,
+  ])
+
+  return merged.length > 0 ? merged : undefined
+}
+
 async function syncAgentLocalModel(options: SpawnOptions): Promise<string | null> {
   const model = options.model?.trim()
   if (!model) return null
+  const normalizedModel = normalizeModelForOpenClaw(model)
+  if (!normalizedModel) return null
 
   const runtimeAgentId = parseRuntimeAgentIdFromLabel(options.label) ?? options.agentId.trim()
   if (!runtimeAgentId) {
     return formatModelSyncWarning('missing runtime agent id')
   }
 
+  let fallbacks: string[] | undefined
+  try {
+    fallbacks = await resolveAgentLocalFallbacks(options.label, normalizedModel)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return formatModelSyncWarning(`could not resolve fallback models: ${message}`)
+  }
+
   try {
     const synced = await upsertAgentToOpenClaw({
       agentId: runtimeAgentId,
       runtimeAgentId,
-      model,
+      model: normalizedModel,
+      ...(fallbacks ? { fallbacks } : {}),
     })
     if (synced.ok) return null
     return formatModelSyncWarning(synced.error ?? 'unknown sync failure')
@@ -226,8 +301,9 @@ async function runDispatchWithRun(options: SpawnOptions): Promise<DispatchAttemp
   const timeoutSeconds = options.timeoutSeconds ?? 300
   const args: string[] = ['run', options.agentId, '--label', options.label, '--timeout', String(timeoutSeconds)]
 
-  if (options.model) {
-    args.push('--model', options.model)
+  const normalizedModel = options.model ? normalizeModelForOpenClaw(options.model) : ''
+  if (normalizedModel) {
+    args.push('--model', normalizedModel)
   }
 
   args.push('--', JSON.stringify({ task: options.task, context: options.context ?? {} }))

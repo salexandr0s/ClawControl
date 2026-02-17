@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
   const execFile = vi.fn()
   const upsert = vi.fn()
   const upsertAgentToOpenClaw = vi.fn()
+  const getAgentModelFromOpenClaw = vi.fn()
   const getOpenClawBin = vi.fn(() => 'openclaw')
   const parseJsonFromCommandOutput = vi.fn((stdout: string) => {
     try {
@@ -30,10 +31,12 @@ const mocks = vi.hoisted(() => {
     runCommandJson,
     chatSend,
     upsertAgentToOpenClaw,
+    getAgentModelFromOpenClaw,
     reset() {
       execFile.mockReset()
       upsert.mockReset()
       upsertAgentToOpenClaw.mockReset()
+      getAgentModelFromOpenClaw.mockReset()
       getOpenClawBin.mockReset()
       parseJsonFromCommandOutput.mockReset()
       runCommandJson.mockReset()
@@ -53,6 +56,7 @@ const mocks = vi.hoisted(() => {
         updated: true,
         restartNeeded: true,
       })
+      getAgentModelFromOpenClaw.mockResolvedValue(null)
     },
   }
 })
@@ -77,6 +81,7 @@ vi.mock('@/lib/openclaw/console-client', () => ({
 
 vi.mock('@/lib/services/openclaw-config', () => ({
   upsertAgentToOpenClaw: mocks.upsertAgentToOpenClaw,
+  getAgentModelFromOpenClaw: mocks.getAgentModelFromOpenClaw,
 }))
 
 vi.mock('@clawcontrol/adapters-openclaw', () => ({
@@ -114,6 +119,7 @@ beforeEach(() => {
   vi.resetModules()
   mocks.reset()
   delete process.env.CLAWCONTROL_OPENCLAW_DISPATCH_MODE
+  delete process.env.OPENAI_API_KEY
 })
 
 describe('spawnAgentSession dispatch modes', () => {
@@ -202,6 +208,31 @@ describe('spawnAgentSession dispatch modes', () => {
       agentId: 'wf-plan',
       runtimeAgentId: 'wf-plan',
       model: 'openai-codex/gpt-5.3-codex',
+    })
+  })
+
+  it('normalizes bare claude model and adds OAuth fallback when OPENAI_API_KEY is missing', async () => {
+    queueExecError(
+      'Command failed',
+      "error: unknown command 'run'\n(Did you mean cron?)"
+    )
+    queueExecSuccess('{"meta":{"agentMeta":{"sessionId":"sess_agent_model_normalized"}}}')
+
+    const sessions = await loadModule()
+    const result = await sessions.spawnAgentSession({
+      agentId: 'wf-research',
+      label: 'agent:wf-research:wo:wo_9:op:op_9',
+      task: 'research task',
+      model: 'claude-sonnet-4-20250514',
+      timeoutSeconds: 25,
+    })
+
+    expect(result.sessionId).toBe('sess_agent_model_normalized')
+    expect(mocks.upsertAgentToOpenClaw).toHaveBeenCalledWith({
+      agentId: 'wf-research',
+      runtimeAgentId: 'wf-research',
+      model: 'anthropic/claude-sonnet-4-20250514',
+      fallbacks: ['openai-codex/gpt-5.3-codex'],
     })
   })
 
