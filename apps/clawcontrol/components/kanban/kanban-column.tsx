@@ -56,7 +56,7 @@ export function KanbanColumn({
   const toneClasses = statusToneClasses[tone]
   const isBlockedColumn = id === 'blocked'
   const showBlockedAccent = isBlockedColumn && workOrders.length > 0
-  const isTerminalColumn = id === 'shipped' || id === 'cancelled'
+  const isTerminalColumn = id === 'shipped' || id === 'archived'
 
   // Determine if column should be dimmed (during drag, can't accept)
   const shouldDim = isDragging && canAcceptDrop === false
@@ -134,7 +134,10 @@ export function KanbanColumn({
       </header>
 
       {/* Cards container - scrollable */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2 scrollbar-hide">
+      <div
+        className="flex-1 overflow-y-auto p-2 space-y-2"
+        data-kanban-scroll-column="true"
+      >
         <SortableContext
           items={workOrders.map((wo) => wo.id)}
           strategy={verticalListSortingStrategy}
@@ -143,6 +146,7 @@ export function KanbanColumn({
             <KanbanCard
               key={workOrder.id}
               workOrder={workOrder}
+              columnState={id}
               agents={agents}
               onClick={() => onCardClick(workOrder)}
               onAssignToAgent={onAssignToAgent}

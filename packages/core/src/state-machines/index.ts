@@ -10,7 +10,8 @@ const WORK_ORDER_TRANSITIONS: Record<WorkOrderState, WorkOrderState[]> = {
   active: ['blocked', 'review', 'shipped', 'cancelled'],
   blocked: ['active', 'cancelled'],
   review: ['active', 'shipped'],
-  shipped: [], // terminal
+  shipped: ['archived'],
+  archived: [], // terminal
   cancelled: [], // terminal
 }
 
@@ -28,7 +29,7 @@ export function getValidWorkOrderTransitions(
 }
 
 export function isWorkOrderTerminal(state: WorkOrderState): boolean {
-  return state === 'shipped' || state === 'cancelled'
+  return state === 'shipped' || state === 'archived' || state === 'cancelled'
 }
 
 // Operation state machine

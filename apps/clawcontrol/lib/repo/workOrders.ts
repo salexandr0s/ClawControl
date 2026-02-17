@@ -20,6 +20,7 @@ const VALID_WORK_ORDER_STATES = new Set<WorkOrderState>([
   'blocked',
   'review',
   'shipped',
+  'archived',
   'cancelled',
 ])
 

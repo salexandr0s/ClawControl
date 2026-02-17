@@ -71,6 +71,7 @@ export function WorkOrderStatePill({
     blocked: 'danger',
     review: 'warning',
     shipped: 'success',
+    archived: 'muted',
     cancelled: 'muted',
   }
 
@@ -80,6 +81,7 @@ export function WorkOrderStatePill({
     blocked: 'Blocked',
     review: 'Review',
     shipped: 'Shipped',
+    archived: 'Archived',
     cancelled: 'Cancelled',
   }
 

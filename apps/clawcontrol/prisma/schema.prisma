@@ -24,7 +24,7 @@ model WorkOrder {
   code            String   @unique // WO-0001 format, auto-generated
   title           String
   goalMd          String   @map("goal_md")
-  state           String   @default("planned") // planned|active|blocked|review|shipped|cancelled
+  state           String   @default("planned") // planned|active|blocked|review|shipped|archived|cancelled
   priority        String   @default("P2") // P0|P1|P2|P3
   owner           String   @default("user") // legacy compatibility label (prefer ownerType/ownerAgentId)
   ownerType       String   @default("user") @map("owner_type") // user|agent|system

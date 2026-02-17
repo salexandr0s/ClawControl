@@ -20,6 +20,12 @@ function listApiRouteFiles(root: string): string[] {
 }
 
 describe('governor enforcement audit', () => {
+  it('keeps work_order.cancel as typed confirm without approval gate', () => {
+    const policy = ACTION_POLICIES['work_order.cancel']
+    expect(policy.confirmMode).toBe('WO_CODE')
+    expect(policy.requiresApproval).toBe(false)
+  })
+
   it('does not use enforceTypedConfirm in API routes', () => {
     const files = listApiRouteFiles(join(process.cwd(), 'app', 'api'))
     const offenders = files.filter((file) => readFileSync(file, 'utf8').includes('enforceTypedConfirm'))

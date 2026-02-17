@@ -24,6 +24,7 @@ import {
   validateKanbanDrop,
   getDropIndicator,
   canColumnAcceptDrop,
+  resolveDropTargetState,
   type DropIndicator,
 } from '@/lib/kanban-helpers'
 import { useProtectedActionTrigger } from '@/components/protected-action-modal'
@@ -73,7 +74,7 @@ export function KanbanBoard({
 
   const visibleColumns = useMemo(() => {
     if (showArchive) return KANBAN_COLUMNS
-    return KANBAN_COLUMNS.filter((column) => column.state !== 'cancelled')
+    return KANBAN_COLUMNS.filter((column) => column.state !== 'archived')
   }, [showArchive])
 
   // Configure drag sensors
@@ -156,24 +157,27 @@ export function KanbanBoard({
 
       // Determine target column
       const overData = over.data.current
-      let toState: WorkOrderState
+      let toColumnState: WorkOrderState
 
       if (overData?.type === 'column') {
-        toState = overData.column as WorkOrderState
+        toColumnState = overData.column as WorkOrderState
       } else if (overData?.type === 'work-order') {
-        toState = overData.column as WorkOrderState
+        toColumnState = overData.column as WorkOrderState
       } else {
         return
       }
 
       // Validate the transition
-      const validation = validateKanbanDrop(fromState, toState)
+      const validation = validateKanbanDrop(fromState, toColumnState)
 
       if (!validation.valid) {
         // Could show a toast here with validation.error
         console.warn('Invalid transition:', validation.error)
         return
       }
+
+      const toState = resolveDropTargetState(fromState, toColumnState)
+      if (!toState) return
 
       // Protected transition - show confirmation modal
       if (validation.requiresConfirmation && validation.actionKind) {
@@ -222,6 +226,19 @@ export function KanbanBoard({
       if (event.ctrlKey) return
       if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
       if (board.scrollWidth <= board.clientWidth) return
+
+      const target = event.target
+      const scrollColumn = target instanceof Element
+        ? target.closest<HTMLElement>('[data-kanban-scroll-column="true"]')
+        : null
+      if (scrollColumn) {
+        const canScrollUp = event.deltaY < 0 && scrollColumn.scrollTop > 0
+        const canScrollDown = event.deltaY > 0
+          && scrollColumn.scrollTop + scrollColumn.clientHeight < scrollColumn.scrollHeight
+        if (canScrollUp || canScrollDown) {
+          return
+        }
+      }
 
       board.scrollLeft += event.deltaY
       event.preventDefault()

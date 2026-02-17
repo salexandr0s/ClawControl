@@ -91,6 +91,7 @@ export type WorkOrderState =
   | 'blocked'
   | 'review'
   | 'shipped'
+  | 'archived'
   | 'cancelled'
 
 export type OperationStatus =
@@ -114,6 +115,7 @@ export const workOrderStateTone: Record<WorkOrderState, StatusTone> = {
   blocked: 'danger',
   review: 'warning',
   shipped: 'success',
+  archived: 'muted',
   cancelled: 'muted',
 }
 
@@ -158,6 +160,7 @@ export const workOrderStateLabel: Record<WorkOrderState, string> = {
   blocked: 'Blocked',
   review: 'Review',
   shipped: 'Shipped',
+  archived: 'Archived',
   cancelled: 'Cancelled',
 }
 

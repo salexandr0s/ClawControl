@@ -43,13 +43,32 @@ export const KANBAN_COLUMNS: KanbanColumnConfig[] = [
   { state: 'review', label: 'Review', tone: 'warning' },
   { state: 'blocked', label: 'Blocked', tone: 'danger' },
   { state: 'shipped', label: 'Shipped', tone: 'success', isDangerous: true },
-  { state: 'cancelled', label: 'Archive', tone: 'muted', isDangerous: true },
+  { state: 'archived', label: 'Archive', tone: 'muted', isDangerous: true },
 ]
 
 /**
  * All states shown on the board.
  */
 export const BOARD_STATES: WorkOrderState[] = KANBAN_COLUMNS.map((c) => c.state)
+
+/**
+ * Resolve actual transition state from a drop column.
+ *
+ * Archive column is a shared sink:
+ * - shipped -> archived
+ * - cancellable non-shipped states -> cancelled
+ */
+export function resolveDropTargetState(
+  fromState: WorkOrderState,
+  toColumnState: WorkOrderState
+): WorkOrderState | null {
+  if (toColumnState !== 'archived') return toColumnState
+  if (fromState === 'shipped') return 'archived'
+  if (fromState === 'archived' || fromState === 'cancelled') return fromState
+  if (canTransitionWorkOrder(fromState, 'cancelled')) return 'cancelled'
+  if (canTransitionWorkOrder(fromState, 'archived')) return 'archived'
+  return null
+}
 
 // ============================================================================
 // DROP VALIDATION
@@ -75,8 +94,18 @@ export interface DropValidation {
  */
 export function validateKanbanDrop(
   fromState: WorkOrderState,
-  toState: WorkOrderState
+  toColumnState: WorkOrderState
 ): DropValidation {
+  const toState = resolveDropTargetState(fromState, toColumnState)
+
+  if (!toState) {
+    return {
+      valid: false,
+      requiresConfirmation: false,
+      error: `Cannot move from ${fromState} to ${toColumnState}.`,
+    }
+  }
+
   // Same column = no-op
   if (fromState === toState) {
     return { valid: false, requiresConfirmation: false }
@@ -122,8 +151,10 @@ export function canColumnAcceptDrop(
   fromState: WorkOrderState,
   targetColumnState: WorkOrderState
 ): boolean {
-  if (fromState === targetColumnState) return false
-  return canTransitionWorkOrder(fromState, targetColumnState)
+  const targetState = resolveDropTargetState(fromState, targetColumnState)
+  if (!targetState) return false
+  if (fromState === targetState) return false
+  return canTransitionWorkOrder(fromState, targetState)
 }
 
 /**
@@ -131,7 +162,9 @@ export function canColumnAcceptDrop(
  * Used to determine which columns to dim during drag.
  */
 export function getValidTargetColumns(fromState: WorkOrderState): WorkOrderState[] {
-  return getValidWorkOrderTransitions(fromState)
+  return KANBAN_COLUMNS
+    .map((column) => column.state)
+    .filter((column) => canColumnAcceptDrop(fromState, column))
 }
 
 /**
@@ -139,9 +172,9 @@ export function getValidTargetColumns(fromState: WorkOrderState): WorkOrderState
  */
 export function getDropIndicator(
   fromState: WorkOrderState,
-  toState: WorkOrderState
+  toColumnState: WorkOrderState
 ): DropIndicator {
-  const result = validateKanbanDrop(fromState, toState)
+  const result = validateKanbanDrop(fromState, toColumnState)
   if (!result.valid) return 'invalid'
   if (result.requiresConfirmation) return 'protected'
   return 'valid'
@@ -212,13 +245,16 @@ export function groupByState<T extends { state: WorkOrderState }>(
     blocked: [],
     review: [],
     shipped: [],
+    archived: [],
     cancelled: [],
   }
 
   for (const item of items) {
-    if (groups[item.state]) {
-      groups[item.state].push(item)
+    if (item.state === 'archived' || item.state === 'cancelled') {
+      groups.archived.push(item)
+      continue
     }
+    groups[item.state].push(item)
   }
 
   return groups

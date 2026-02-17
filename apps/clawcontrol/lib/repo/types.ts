@@ -19,7 +19,7 @@ export interface WorkOrderDTO {
   code: string
   title: string
   goalMd: string
-  state: 'planned' | 'active' | 'blocked' | 'review' | 'shipped' | 'cancelled'
+  state: 'planned' | 'active' | 'blocked' | 'review' | 'shipped' | 'archived' | 'cancelled'
   priority: 'P0' | 'P1' | 'P2' | 'P3'
   owner: string // legacy compatibility label
   ownerType: OwnerType

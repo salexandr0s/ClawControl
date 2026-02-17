@@ -49,4 +49,18 @@ describe('work orders start feedback behavior', () => {
     expect(source).toContain('setDrawerOpen(true)')
     expect(source).toContain("setView('board')")
   })
+
+  it('keeps archived available in state filters', async () => {
+    const file = join(
+      process.cwd(),
+      'app',
+      '(dashboard)',
+      'work-orders',
+      'work-orders-client.tsx'
+    )
+    const source = await readFile(file, 'utf8')
+
+    expect(source).toContain("'archived'")
+    expect(source).toContain('Archive column shows archived and cancelled')
+  })
 })

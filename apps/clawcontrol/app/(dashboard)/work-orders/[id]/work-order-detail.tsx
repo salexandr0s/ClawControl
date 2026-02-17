@@ -29,6 +29,7 @@ import {
   Play,
   Ship,
   Ban,
+  Archive,
 } from 'lucide-react'
 
 type TabId = 'overview' | 'pipeline' | 'operations' | 'messages' | 'artifacts' | 'receipts' | 'activity'
@@ -81,6 +82,11 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
     status: 'running' | 'success' | 'error'
     message: string
   } | null>(null)
+  const [actionFeedback, setActionFeedback] = useState<{
+    status: 'success' | 'error'
+    message: string
+  } | null>(null)
+  const [stateMutation, setStateMutation] = useState<WorkOrderState | null>(null)
   const [tagInput, setTagInput] = useState('')
   const [savingTags, setSavingTags] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -152,6 +158,15 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
     }
   }
 
+  const refreshWorkOrderAndOperations = async () => {
+    const [woResult, opsResult] = await Promise.all([
+      workOrdersApi.get(workOrderId),
+      operationsApi.list({ workOrderId }),
+    ])
+    setWorkOrder(woResult.data)
+    setOperations(opsResult.data)
+  }
+
   if (loading) {
     return <LoadingState height="viewport" />
   }
@@ -181,10 +196,13 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
   const allowedTransitions = getValidWorkOrderTransitions(workOrder.state as WorkOrderState)
   const canShip = allowedTransitions.includes('shipped')
   const canCancel = allowedTransitions.includes('cancelled')
+  const canArchive = allowedTransitions.includes('archived')
 
   // Handle ship action
   const handleShip = () => {
     if (!workOrder) return
+    setActionFeedback(null)
+    setStateMutation('shipped')
     triggerProtectedAction({
       actionKind: 'work_order.ship',
       actionTitle: 'Ship Work Order',
@@ -193,16 +211,36 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
       entityName: workOrder.title,
       onConfirm: async (typedConfirmText: string) => {
         await workOrdersApi.update(workOrderId, { state: 'shipped', typedConfirmText })
-        setWorkOrder((prev) => prev ? { ...prev, state: 'shipped', shippedAt: new Date() } : null)
+        await refreshWorkOrderAndOperations()
+        setActionFeedback({
+          status: 'success',
+          message: 'Work order shipped successfully.',
+        })
         await refreshData()
+        setStateMutation(null)
       },
-      onError: (err) => console.error('Failed to ship work order:', err),
+      onError: async (err) => {
+        const message = err instanceof Error ? err.message : 'Failed to ship work order'
+        setActionFeedback({
+          status: 'error',
+          message: `Ship failed: ${message}`,
+        })
+        try {
+          await refreshWorkOrderAndOperations()
+          await refreshData()
+        } catch (refreshErr) {
+          console.error('Failed to refresh after ship error:', refreshErr)
+        }
+        setStateMutation(null)
+      },
     })
   }
 
   // Handle cancel action
   const handleCancel = () => {
     if (!workOrder) return
+    setActionFeedback(null)
+    setStateMutation('cancelled')
     triggerProtectedAction({
       actionKind: 'work_order.cancel',
       actionTitle: 'Cancel Work Order',
@@ -211,11 +249,57 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
       entityName: workOrder.title,
       onConfirm: async (typedConfirmText: string) => {
         await workOrdersApi.update(workOrderId, { state: 'cancelled', typedConfirmText })
-        setWorkOrder((prev) => prev ? { ...prev, state: 'cancelled' } : null)
+        await refreshWorkOrderAndOperations()
+        setActionFeedback({
+          status: 'success',
+          message: 'Work order cancelled successfully.',
+        })
         await refreshData()
+        setStateMutation(null)
       },
-      onError: (err) => console.error('Failed to cancel work order:', err),
+      onError: async (err) => {
+        const message = err instanceof Error ? err.message : 'Failed to cancel work order'
+        setActionFeedback({
+          status: 'error',
+          message: `Cancel failed: ${message}`,
+        })
+        try {
+          await refreshWorkOrderAndOperations()
+          await refreshData()
+        } catch (refreshErr) {
+          console.error('Failed to refresh after cancel error:', refreshErr)
+        }
+        setStateMutation(null)
+      },
     })
+  }
+
+  const handleArchive = async () => {
+    setActionFeedback(null)
+    setStateMutation('archived')
+    try {
+      await workOrdersApi.update(workOrderId, { state: 'archived' })
+      await refreshWorkOrderAndOperations()
+      await refreshData()
+      setActionFeedback({
+        status: 'success',
+        message: 'Work order archived successfully.',
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to archive work order'
+      setActionFeedback({
+        status: 'error',
+        message: `Archive failed: ${message}`,
+      })
+      try {
+        await refreshWorkOrderAndOperations()
+        await refreshData()
+      } catch (refreshErr) {
+        console.error('Failed to refresh after archive error:', refreshErr)
+      }
+    } finally {
+      setStateMutation(null)
+    }
   }
 
   const handleSaveTags = async () => {
@@ -234,18 +318,14 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
 
   const handleStart = async () => {
     setStarting(true)
+    setActionFeedback(null)
     setStartFeedback({
       status: 'running',
       message: 'Start requested. Waiting for manager dispatch...',
     })
     try {
       const started = await workOrdersApi.start(workOrderId)
-      const [woResult, opsResult] = await Promise.all([
-        workOrdersApi.get(workOrderId),
-        operationsApi.list({ workOrderId }),
-      ])
-      setWorkOrder(woResult.data)
-      setOperations(opsResult.data)
+      await refreshWorkOrderAndOperations()
       await refreshData()
       setStartFeedback({
         status: 'success',
@@ -259,12 +339,7 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
         message: `Start failed: ${message}`,
       })
       try {
-        const [woResult, opsResult] = await Promise.all([
-          workOrdersApi.get(workOrderId),
-          operationsApi.list({ workOrderId }),
-        ])
-        setWorkOrder(woResult.data)
-        setOperations(opsResult.data)
+        await refreshWorkOrderAndOperations()
       } catch (refreshErr) {
         console.error('Failed to refresh workflow state after start error:', refreshErr)
       }
@@ -296,7 +371,7 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
               {workOrder.state === 'planned' && (
                 <Button
                   onClick={handleStart}
-                  disabled={starting}
+                  disabled={starting || stateMutation !== null}
                   variant="primary"
                   size="sm"
                 >
@@ -307,6 +382,7 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
               {canShip && (
                 <Button
                   onClick={handleShip}
+                  disabled={stateMutation !== null}
                   variant="primary"
                   size="sm"
                 >
@@ -317,11 +393,23 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
               {canCancel && (
                 <Button
                   onClick={handleCancel}
+                  disabled={stateMutation !== null}
                   variant="danger"
                   size="sm"
                 >
                   <Ban className="w-3.5 h-3.5" />
                   Cancel
+                </Button>
+              )}
+              {canArchive && (
+                <Button
+                  onClick={handleArchive}
+                  disabled={stateMutation !== null}
+                  variant="secondary"
+                  size="sm"
+                >
+                  <Archive className="w-3.5 h-3.5" />
+                  {stateMutation === 'archived' ? 'Archiving...' : 'Archive'}
                 </Button>
               )}
             </div>
@@ -349,6 +437,21 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
             <AlertCircle className="w-4 h-4 text-status-danger shrink-0 mt-0.5" />
           )}
           <span className="text-sm text-fg-1">{startFeedback.message}</span>
+        </div>
+      )}
+
+      {actionFeedback && (
+        <div className={cn(
+          'p-3 rounded-[var(--radius-md)] border flex items-start gap-2',
+          actionFeedback.status === 'success' && 'bg-status-success/10 border-status-success/30',
+          actionFeedback.status === 'error' && 'bg-status-danger/10 border-status-danger/30'
+        )}>
+          {actionFeedback.status === 'success' ? (
+            <CheckCircle className="w-4 h-4 text-status-success shrink-0 mt-0.5" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-status-danger shrink-0 mt-0.5" />
+          )}
+          <span className="text-sm text-fg-1">{actionFeedback.message}</span>
         </div>
       )}
 

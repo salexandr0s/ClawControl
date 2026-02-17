@@ -19,6 +19,7 @@ interface KanbanCardProps {
   onClick: () => void
   onAssignToAgent: (id: string, agentId: string) => Promise<void>
   assigningWorkOrderId?: string | null
+  columnState?: WorkOrderState
 }
 
 function getOwnerTextClass(owner: string, ownerType?: string): string {
@@ -35,6 +36,7 @@ export function KanbanCard({
   onClick,
   onAssignToAgent,
   assigningWorkOrderId,
+  columnState,
 }: KanbanCardProps) {
   const {
     attributes,
@@ -48,7 +50,7 @@ export function KanbanCard({
     data: {
       type: 'work-order',
       workOrder,
-      column: workOrder.state as WorkOrderState,
+      column: columnState ?? (workOrder.state as WorkOrderState),
     },
   })
 

@@ -37,7 +37,7 @@ const DEFAULT_FILTERS: WorkOrderFilters = {
   showArchive: true,
 }
 
-const STATES: (WorkOrderState | 'all')[] = ['all', 'planned', 'active', 'blocked', 'review', 'shipped', 'cancelled']
+const STATES: (WorkOrderState | 'all')[] = ['all', 'planned', 'active', 'blocked', 'review', 'shipped', 'archived', 'cancelled']
 const PRIORITIES: (Priority | 'all')[] = ['all', 'P0', 'P1', 'P2', 'P3']
 
 // ============================================================================
@@ -76,6 +76,27 @@ function parseTagsInput(input: string): string[] {
 
 function getOwnerTextClass(owner: string, ownerType?: string): string {
   return ownerTextTone(owner, ownerType) === 'user' ? 'text-fg-1' : 'text-status-progress'
+}
+
+function getStateActionLabel(state: WorkOrderState): string {
+  switch (state) {
+    case 'archived':
+      return 'Archive'
+    case 'cancelled':
+      return 'Cancel'
+    case 'shipped':
+      return 'Ship'
+    case 'blocked':
+      return 'Block'
+    case 'review':
+      return 'Move to review'
+    case 'active':
+      return 'Activate'
+    case 'planned':
+      return 'Move to planned'
+    default:
+      return 'Update'
+  }
 }
 
 // ============================================================================
@@ -463,8 +484,11 @@ const workOrderColumns: Column<WorkOrderWithOpsDTO>[] = [
 interface WorkOrderDrawerProps {
   workOrder: WorkOrderWithOpsDTO
   onStart?: (workOrderId: string) => Promise<void>
+  onArchive?: (workOrderId: string) => Promise<void>
   startingWorkOrderId?: string | null
+  transitioningWorkOrderId?: string | null
   startFeedback?: StartFeedback | null
+  actionFeedback?: ActionFeedback | null
 }
 
 interface StartFeedback {
@@ -472,16 +496,25 @@ interface StartFeedback {
   message: string
 }
 
+interface ActionFeedback {
+  status: 'success' | 'error'
+  message: string
+}
+
 function WorkOrderDrawerContent({
   workOrder,
   onStart,
+  onArchive,
   startingWorkOrderId,
+  transitioningWorkOrderId,
   startFeedback,
+  actionFeedback,
 }: WorkOrderDrawerProps) {
   const doneOps = workOrder.operations.filter((op) => op.status === 'done').length
   const totalOps = workOrder.operations.length
   const progressPercent = totalOps > 0 ? Math.round((doneOps / totalOps) * 100) : 0
   const isStarting = startingWorkOrderId === workOrder.id
+  const isTransitioning = transitioningWorkOrderId === workOrder.id
 
   return (
     <div className="space-y-4">
@@ -550,6 +583,21 @@ function WorkOrderDrawerContent({
         </div>
       )}
 
+      {actionFeedback && (
+        <div className={cn(
+          'p-3 rounded-[var(--radius-md)] border flex items-start gap-2',
+          actionFeedback.status === 'success' && 'bg-status-success/10 border-status-success/30',
+          actionFeedback.status === 'error' && 'bg-status-danger/10 border-status-danger/30'
+        )}>
+          {actionFeedback.status === 'success' ? (
+            <CheckCircle className="w-4 h-4 text-status-success mt-0.5 shrink-0" />
+          ) : (
+            <XCircle className="w-4 h-4 text-status-danger mt-0.5 shrink-0" />
+          )}
+          <span className="text-sm text-fg-1">{actionFeedback.message}</span>
+        </div>
+      )}
+
       {/* Blocked reason */}
       <DispatchErrorCard error={workOrder.blockedReason} title="Blocked" />
 
@@ -581,12 +629,23 @@ function WorkOrderDrawerContent({
         {workOrder.state === 'planned' && (
           <Button
             onClick={() => onStart?.(workOrder.id)}
-            disabled={isStarting}
+            disabled={isStarting || isTransitioning}
             variant="primary"
             size="md"
             className="w-full"
           >
             {isStarting ? 'Starting...' : 'Start Workflow'}
+          </Button>
+        )}
+        {workOrder.state === 'shipped' && (
+          <Button
+            onClick={() => onArchive?.(workOrder.id)}
+            disabled={isTransitioning}
+            variant="secondary"
+            size="md"
+            className="w-full"
+          >
+            {isTransitioning ? 'Archiving...' : 'Archive'}
           </Button>
         )}
         <a
@@ -616,9 +675,11 @@ export function WorkOrdersClient() {
   const [workflowOptions, setWorkflowOptions] = useState<Array<{ id: string; label: string }>>([])
   const [assigningWorkOrderId, setAssigningWorkOrderId] = useState<string | null>(null)
   const [startingWorkOrderId, setStartingWorkOrderId] = useState<string | null>(null)
+  const [transitioningWorkOrderId, setTransitioningWorkOrderId] = useState<string | null>(null)
   const [queueTickMessage, setQueueTickMessage] = useState<string | null>(null)
   const [queueTickError, setQueueTickError] = useState<string | null>(null)
   const [startFeedbackByWorkOrderId, setStartFeedbackByWorkOrderId] = useState<Record<string, StartFeedback>>({})
+  const [actionFeedbackByWorkOrderId, setActionFeedbackByWorkOrderId] = useState<Record<string, ActionFeedback>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -793,9 +854,38 @@ export function WorkOrdersClient() {
   const handleStateChange = useCallback(
     async (id: string, newState: WorkOrderState, typedConfirmText?: string) => {
       const currentWorkOrder = workOrders.find((workOrder) => workOrder.id === id)
+      const actionLabel = getStateActionLabel(newState)
+      setTransitioningWorkOrderId(id)
+      setActionFeedbackByWorkOrderId((prev) => {
+        if (!prev[id]) return prev
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
       if (currentWorkOrder?.state === 'planned' && newState === 'active') {
-        await workOrdersApi.start(id)
-        await fetchWorkOrders()
+        try {
+          await workOrdersApi.start(id)
+          await fetchWorkOrders()
+          setActionFeedbackByWorkOrderId((prev) => ({
+            ...prev,
+            [id]: {
+              status: 'success',
+              message: 'Workflow started successfully.',
+            },
+          }))
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Failed to start work order'
+          await fetchWorkOrders()
+          setActionFeedbackByWorkOrderId((prev) => ({
+            ...prev,
+            [id]: {
+              status: 'error',
+              message: `Start failed: ${message}`,
+            },
+          }))
+        } finally {
+          setTransitioningWorkOrderId(null)
+        }
         return
       }
 
@@ -821,10 +911,26 @@ export function WorkOrdersClient() {
         })
         // Refresh to get server state
         await fetchWorkOrders()
+        setActionFeedbackByWorkOrderId((prev) => ({
+          ...prev,
+          [id]: {
+            status: 'success',
+            message: `${actionLabel} completed.`,
+          },
+        }))
       } catch (err) {
-        console.error('Failed to update state:', err)
+        const message = err instanceof Error ? err.message : 'Failed to update work order state'
         // Refresh to restore correct state (rollback for safe, no-op for dangerous)
         await fetchWorkOrders()
+        setActionFeedbackByWorkOrderId((prev) => ({
+          ...prev,
+          [id]: {
+            status: 'error',
+            message: `${actionLabel} failed: ${message}`,
+          },
+        }))
+      } finally {
+        setTransitioningWorkOrderId(null)
       }
     },
     [fetchWorkOrders, workOrders]
@@ -907,6 +1013,10 @@ export function WorkOrdersClient() {
       setStartingWorkOrderId(null)
     }
   }, [fetchWorkOrders])
+
+  const handleArchiveWorkOrder = useCallback(async (workOrderId: string) => {
+    await handleStateChange(workOrderId, 'archived')
+  }, [handleStateChange])
 
   // Handle card click in board view
   const handleCardClick = useCallback((wo: WorkOrderWithOpsDTO) => {
@@ -1058,8 +1168,11 @@ export function WorkOrdersClient() {
           <WorkOrderDrawerContent
             workOrder={selectedWorkOrder}
             onStart={handleStartWorkOrder}
+            onArchive={handleArchiveWorkOrder}
             startingWorkOrderId={startingWorkOrderId}
+            transitioningWorkOrderId={transitioningWorkOrderId}
             startFeedback={startFeedbackByWorkOrderId[selectedWorkOrder.id] ?? null}
+            actionFeedback={actionFeedbackByWorkOrderId[selectedWorkOrder.id] ?? null}
           />
         )}
       </RightDrawer>
@@ -1148,7 +1261,7 @@ export function WorkOrdersClient() {
               <span className="text-xs text-fg-1">Show Archive</span>
             </label>
             <p className="mt-1 text-[11px] text-fg-3">
-              Archive column controls cancelled work orders in board view only.
+              Archive column shows archived and cancelled work orders in board view.
             </p>
           </div>
 

@@ -157,8 +157,7 @@ export const ACTION_POLICIES: Record<ActionKind, ActionPolicy> = {
   'work_order.cancel': {
     riskLevel: 'caution',
     confirmMode: 'WO_CODE',
-    requiresApproval: true,
-    approvalType: 'scope_change',
+    requiresApproval: false,
     description: 'Cancel work order',
   },
   'work_order.delete': {
