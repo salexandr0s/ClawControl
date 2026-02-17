@@ -26,7 +26,7 @@ import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
 import { useSettings } from '@/lib/settings-context'
 import type { GatewayStatusDTO } from '@/lib/data'
 import { ACTION_POLICIES, type ActionKind } from '@clawcontrol/core'
-import { cn } from '@/lib/utils'
+import { cn, formatUptimeSeconds } from '@/lib/utils'
 import {
   RefreshCw,
   Database,
@@ -774,7 +774,7 @@ export function MaintenanceClient({ gateway: initialGateway, playbooks: initialP
             />
             <StatusCard
               label="Uptime"
-              value={formatUptime(gateway.uptime)}
+              value={formatUptimeSeconds(gateway.uptime)}
               icon={Play}
             />
             <StatusCard
@@ -1819,12 +1819,6 @@ function formatModalTimestamp(isoValue: string): string {
   const parsed = new Date(isoValue)
   if (Number.isNaN(parsed.getTime())) return 'Unknown time'
   return parsed.toLocaleString()
-}
-
-function formatUptime(seconds: number): string {
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  return `${days}d ${hours}h`
 }
 
 function formatRelativeTime(date: Date | string, nowMs = Date.now()): string {

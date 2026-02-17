@@ -52,3 +52,19 @@ export function formatDuration(ms: number): string {
   const remainingMin = min % 60
   return `${hour}h ${remainingMin}m`
 }
+
+/**
+ * Format uptime in seconds with useful granularity for short-lived processes.
+ */
+export function formatUptimeSeconds(seconds: number): string {
+  const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0
+  if (safeSeconds < 60) return `${safeSeconds}s`
+
+  const days = Math.floor(safeSeconds / 86_400)
+  const hours = Math.floor((safeSeconds % 86_400) / 3_600)
+  const minutes = Math.floor((safeSeconds % 3_600) / 60)
+
+  if (days > 0) return `${days}d ${hours}h`
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return `${minutes}m`
+}

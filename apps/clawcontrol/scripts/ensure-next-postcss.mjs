@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, readlinkSync, rmSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -19,27 +19,35 @@ if (!existsSync(rootPostcssDir)) {
   process.exit(0)
 }
 
-if (existsSync(nextPostcssEntrypoint)) {
-  process.exit(0)
-}
-
 mkdirSync(nextNodeModulesDir, { recursive: true })
+
+function replaceWithCopiedPackage(reason) {
+  log(`${reason}. Copying package to ${nextPostcssPath}`)
+  rmSync(nextPostcssPath, { recursive: true, force: true })
+  cpSync(rootPostcssDir, nextPostcssPath, {
+    recursive: true,
+    force: true,
+    dereference: true,
+  })
+}
 
 if (existsSync(nextPostcssPath)) {
   try {
     const stat = lstatSync(nextPostcssPath)
     if (stat.isSymbolicLink()) {
       const currentTarget = readlinkSync(nextPostcssPath)
-      log(`Replacing stale symlink: ${nextPostcssPath} -> ${currentTarget}`)
-      rmSync(nextPostcssPath, { recursive: true, force: true })
-    } else {
-      log(`Replacing stale directory at ${nextPostcssPath}`)
-      rmSync(nextPostcssPath, { recursive: true, force: true })
+      replaceWithCopiedPackage(`Replacing symlink (${currentTarget})`)
+      process.exit(0)
     }
+
+    if (!existsSync(nextPostcssEntrypoint)) {
+      replaceWithCopiedPackage('Replacing stale postcss directory missing lib/postcss.js')
+    }
+    process.exit(0)
   } catch {
-    rmSync(nextPostcssPath, { recursive: true, force: true })
+    replaceWithCopiedPackage('Replacing unreadable postcss path')
+    process.exit(0)
   }
 }
 
-symlinkSync(rootPostcssDir, nextPostcssPath, 'dir')
-log(`Linked ${nextPostcssPath} -> ${rootPostcssDir}`)
+replaceWithCopiedPackage('postcss package missing under next/node_modules')

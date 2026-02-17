@@ -41,6 +41,9 @@ jobs:
       - name: Smoke test packaged runtime
         run: node apps/clawcontrol-desktop/scripts/verify-packaged-runtime.mjs
 
+      - name: Guard packaged artifacts for absolute/broken symlinks
+        run: npm run audit:symlinks --workspace=clawcontrol-desktop
+
       - name: Generate SHA-256 checksums
         run: |
           cd apps/clawcontrol-desktop/dist/release
