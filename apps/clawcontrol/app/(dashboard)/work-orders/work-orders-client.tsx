@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { PageHeader, EmptyState, Button, buttonLikeClass, SelectDropdown } from '@clawcontrol/ui'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { WorkOrderStatePill, PriorityPill } from '@/components/ui/status-pill'
@@ -9,13 +9,14 @@ import { ViewToggle, type ViewMode } from '@/components/ui/view-toggle'
 import { LoadingSpinner, LoadingState } from '@/components/ui/loading-state'
 import { KanbanBoard } from '@/components/kanban'
 import { RightDrawer } from '@/components/shell/right-drawer'
+import { DispatchErrorCard } from '@/components/work-orders/dispatch-error-card'
 import { agentsApi, workOrdersApi } from '@/lib/http'
 import { useWorkOrderStream } from '@/lib/hooks/useWorkOrderStream'
 import type { AgentDTO, WorkOrderWithOpsDTO } from '@/lib/repo'
 import type { WorkOrderState, Priority, Owner } from '@clawcontrol/core'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { usePageReadyTiming } from '@/lib/perf/client-timing'
-import { ClipboardList, Plus, Filter, X } from 'lucide-react'
+import { ClipboardList, Plus, Filter, X, CheckCircle, AlertCircle, XCircle } from 'lucide-react'
 import { formatOwnerLabel, ownerTextTone } from '@/lib/agent-identity'
 
 // ============================================================================
@@ -463,12 +464,19 @@ interface WorkOrderDrawerProps {
   workOrder: WorkOrderWithOpsDTO
   onStart?: (workOrderId: string) => Promise<void>
   startingWorkOrderId?: string | null
+  startFeedback?: StartFeedback | null
+}
+
+interface StartFeedback {
+  status: 'running' | 'success' | 'error'
+  message: string
 }
 
 function WorkOrderDrawerContent({
   workOrder,
   onStart,
   startingWorkOrderId,
+  startFeedback,
 }: WorkOrderDrawerProps) {
   const doneOps = workOrder.operations.filter((op) => op.status === 'done').length
   const totalOps = workOrder.operations.length
@@ -524,13 +532,26 @@ function WorkOrderDrawerContent({
         </div>
       )}
 
-      {/* Blocked reason */}
-      {workOrder.blockedReason && (
-        <div className="p-3 bg-status-danger/10 border border-status-danger/20 rounded-[var(--radius-md)]">
-          <span className="text-xs font-medium text-status-danger">Blocked:</span>
-          <p className="text-sm text-fg-1 mt-1">{workOrder.blockedReason}</p>
+      {startFeedback && (
+        <div className={cn(
+          'p-3 rounded-[var(--radius-md)] border flex items-start gap-2',
+          startFeedback.status === 'running' && 'bg-status-info/10 border-status-info/30',
+          startFeedback.status === 'success' && 'bg-status-success/10 border-status-success/30',
+          startFeedback.status === 'error' && 'bg-status-danger/10 border-status-danger/30'
+        )}>
+          {startFeedback.status === 'running' ? (
+            <AlertCircle className="w-4 h-4 text-status-info mt-0.5 shrink-0" />
+          ) : startFeedback.status === 'success' ? (
+            <CheckCircle className="w-4 h-4 text-status-success mt-0.5 shrink-0" />
+          ) : (
+            <XCircle className="w-4 h-4 text-status-danger mt-0.5 shrink-0" />
+          )}
+          <span className="text-sm text-fg-1">{startFeedback.message}</span>
         </div>
       )}
+
+      {/* Blocked reason */}
+      <DispatchErrorCard error={workOrder.blockedReason} title="Blocked" />
 
       {/* Metadata */}
       <div className="pt-3 border-t border-bd-0 space-y-2">
@@ -589,6 +610,7 @@ function WorkOrderDrawerContent({
 
 export function WorkOrdersClient() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [workOrders, setWorkOrders] = useState<WorkOrderWithOpsDTO[]>([])
   const [agents, setAgents] = useState<AgentDTO[]>([])
   const [workflowOptions, setWorkflowOptions] = useState<Array<{ id: string; label: string }>>([])
@@ -596,6 +618,7 @@ export function WorkOrdersClient() {
   const [startingWorkOrderId, setStartingWorkOrderId] = useState<string | null>(null)
   const [queueTickMessage, setQueueTickMessage] = useState<string | null>(null)
   const [queueTickError, setQueueTickError] = useState<string | null>(null)
+  const [startFeedbackByWorkOrderId, setStartFeedbackByWorkOrderId] = useState<Record<string, StartFeedback>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -611,7 +634,7 @@ export function WorkOrdersClient() {
   })
 
   // Drawer state for board view
-  const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrderWithOpsDTO | null>(null)
+  const [selectedWorkOrderId, setSelectedWorkOrderId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   // Filter state
@@ -620,6 +643,7 @@ export function WorkOrdersClient() {
 
   // New work order modal state
   const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [consumedOpenWorkOrderId, setConsumedOpenWorkOrderId] = useState<string | null>(null)
 
   const ownerOptions = useMemo<{ value: Owner; label: string }[]>(() => {
     const staticValues: Array<{ value: Owner; label: string }> = [
@@ -667,6 +691,12 @@ export function WorkOrdersClient() {
       })),
     ]
   }, [agents, workOrders])
+
+  const selectedWorkOrder = useMemo(
+    () => (selectedWorkOrderId ? workOrders.find((workOrder) => workOrder.id === selectedWorkOrderId) ?? null : null),
+    [selectedWorkOrderId, workOrders]
+  )
+  const requestedOpenWorkOrderId = searchParams.get('openWorkOrderId')
 
   // Count active filters
   const activeFilterCount = Object.entries(filters).filter(
@@ -736,6 +766,21 @@ export function WorkOrdersClient() {
   useEffect(() => {
     localStorage.setItem(VIEW_STORAGE_KEY, view)
   }, [view])
+
+  useEffect(() => {
+    if (!requestedOpenWorkOrderId) return
+    if (consumedOpenWorkOrderId === requestedOpenWorkOrderId) return
+
+    const found = workOrders.find((wo) => wo.id === requestedOpenWorkOrderId)
+    if (!found) return
+
+    if (view !== 'board') {
+      setView('board')
+    }
+    setSelectedWorkOrderId(found.id)
+    setDrawerOpen(true)
+    setConsumedOpenWorkOrderId(requestedOpenWorkOrderId)
+  }, [consumedOpenWorkOrderId, requestedOpenWorkOrderId, view, workOrders])
 
   // SSE-driven refresh (with fallback polling when disconnected)
   useWorkOrderStream({
@@ -828,12 +873,36 @@ export function WorkOrdersClient() {
   const handleStartWorkOrder = useCallback(async (workOrderId: string) => {
     setStartingWorkOrderId(workOrderId)
     setQueueTickError(null)
+    setQueueTickMessage(null)
+    setStartFeedbackByWorkOrderId((prev) => ({
+      ...prev,
+      [workOrderId]: {
+        status: 'running',
+        message: 'Start requested. Waiting for manager dispatch...',
+      },
+    }))
     try {
-      await workOrdersApi.start(workOrderId)
+      const started = await workOrdersApi.start(workOrderId)
       await fetchWorkOrders()
-      setQueueTickMessage(`Started workflow for work order ${workOrderId}.`)
+      setQueueTickMessage(`Started workflow for stage ${started.stageIndex + 1}.`)
+      setStartFeedbackByWorkOrderId((prev) => ({
+        ...prev,
+        [workOrderId]: {
+          status: 'success',
+          message: 'Workflow started successfully.',
+        },
+      }))
     } catch (err) {
-      setQueueTickError(err instanceof Error ? err.message : 'Failed to start work order')
+      const message = err instanceof Error ? err.message : 'Failed to start work order'
+      await fetchWorkOrders()
+      setQueueTickError(message)
+      setStartFeedbackByWorkOrderId((prev) => ({
+        ...prev,
+        [workOrderId]: {
+          status: 'error',
+          message: `Start failed: ${message}`,
+        },
+      }))
     } finally {
       setStartingWorkOrderId(null)
     }
@@ -841,7 +910,7 @@ export function WorkOrdersClient() {
 
   // Handle card click in board view
   const handleCardClick = useCallback((wo: WorkOrderWithOpsDTO) => {
-    setSelectedWorkOrder(wo)
+    setSelectedWorkOrderId(wo.id)
     setDrawerOpen(true)
   }, [])
 
@@ -856,7 +925,7 @@ export function WorkOrdersClient() {
   // Close drawer
   const handleCloseDrawer = useCallback(() => {
     setDrawerOpen(false)
-    setSelectedWorkOrder(null)
+    setSelectedWorkOrderId(null)
   }, [])
 
   // Apply filters to work orders
@@ -932,7 +1001,7 @@ export function WorkOrdersClient() {
       />
 
       {queueTickError && (
-        <div className="p-2 rounded-[var(--radius-md)] border border-status-warning/20 bg-status-warning/10 text-status-warning text-xs">
+        <div className="p-2 rounded-[var(--radius-md)] border border-status-warning/20 bg-status-warning/10 text-status-warning text-xs break-words [overflow-wrap:anywhere]">
           Start error: {queueTickError}
         </div>
       )}
@@ -990,6 +1059,7 @@ export function WorkOrdersClient() {
             workOrder={selectedWorkOrder}
             onStart={handleStartWorkOrder}
             startingWorkOrderId={startingWorkOrderId}
+            startFeedback={startFeedbackByWorkOrderId[selectedWorkOrder.id] ?? null}
           />
         )}
       </RightDrawer>

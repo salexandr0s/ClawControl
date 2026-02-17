@@ -10,6 +10,7 @@ import {
   getOpenClawBin,
   parseJsonFromCommandOutput,
 } from '@clawcontrol/adapters-openclaw'
+import { upsertAgentToOpenClaw } from '@/lib/services/openclaw-config'
 
 const execFileAsync = promisify(execFile)
 const OPENCLAW_STATUS_TIMEOUT_MS = 15_000
@@ -130,6 +131,39 @@ function buildAgentLocalMessage(task: string, context: Record<string, unknown>, 
   return `${trimmedTask}\n\nCLAWCONTROL_CONTEXT_JSON:${payload}`
 }
 
+function parseRuntimeAgentIdFromLabel(label: string): string | null {
+  const match = label.match(/(?:^|:)agent:([^:]+)/i)
+  const runtimeAgentId = match?.[1]?.trim()
+  return runtimeAgentId || null
+}
+
+function formatModelSyncWarning(message: string): string {
+  return `agent_local model sync warning: ${clampText(message, 300)}`
+}
+
+async function syncAgentLocalModel(options: SpawnOptions): Promise<string | null> {
+  const model = options.model?.trim()
+  if (!model) return null
+
+  const runtimeAgentId = parseRuntimeAgentIdFromLabel(options.label) ?? options.agentId.trim()
+  if (!runtimeAgentId) {
+    return formatModelSyncWarning('missing runtime agent id')
+  }
+
+  try {
+    const synced = await upsertAgentToOpenClaw({
+      agentId: runtimeAgentId,
+      runtimeAgentId,
+      model,
+    })
+    if (synced.ok) return null
+    return formatModelSyncWarning(synced.error ?? 'unknown sync failure')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return formatModelSyncWarning(message)
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object') return null
   return value as Record<string, unknown>
@@ -217,6 +251,7 @@ async function runDispatchWithRun(options: SpawnOptions): Promise<DispatchAttemp
 
 async function runDispatchWithAgentLocal(options: SpawnOptions): Promise<DispatchAttemptResult> {
   const timeoutSeconds = options.timeoutSeconds ?? 300
+  const modelSyncWarning = await syncAgentLocalModel(options)
   const deterministicSessionId = makeDeterministicSessionId(options.label)
   const message = buildAgentLocalMessage(options.task, options.context ?? {}, options.label)
   const args: string[] = [
@@ -234,13 +269,24 @@ async function runDispatchWithAgentLocal(options: SpawnOptions): Promise<Dispatc
   ]
 
   const command = `openclaw ${args.join(' ')}`
-  const result = await runOpenClawCommand(args, timeoutSeconds)
+  let result: CommandRunResult
+  try {
+    result = await runOpenClawCommand(args, timeoutSeconds)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    if (modelSyncWarning) {
+      throw new Error(`${reason}\nmodel_sync_warning=${modelSyncWarning}`)
+    }
+    throw new Error(reason)
+  }
   const parsed = parseJsonFromCommandOutput(result.stdout)
   const sessionId = parseSessionIdFromAgentLocal(parsed)
 
   if (!sessionId) {
     throw new Error(
-      `openclaw agent --local did not return a sessionId\nstdout=${clampText(result.stdout, AGENT_OUTPUT_CAPTURE_MAX_CHARS)}\nstderr=${clampText(result.stderr, AGENT_OUTPUT_CAPTURE_MAX_CHARS)}`
+      `openclaw agent --local did not return a sessionId\nstdout=${clampText(result.stdout, AGENT_OUTPUT_CAPTURE_MAX_CHARS)}\nstderr=${clampText(result.stderr, AGENT_OUTPUT_CAPTURE_MAX_CHARS)}${
+        modelSyncWarning ? `\nmodel_sync_warning=${modelSyncWarning}` : ''
+      }`
     )
   }
 
@@ -252,6 +298,7 @@ async function runDispatchWithAgentLocal(options: SpawnOptions): Promise<Dispatc
       command,
       mode: 'agent_local',
       expectedSessionId: deterministicSessionId,
+      modelSyncWarning,
       parsed,
     },
   }

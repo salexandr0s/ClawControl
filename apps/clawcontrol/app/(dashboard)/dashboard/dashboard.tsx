@@ -38,6 +38,7 @@ import {
 
 interface WorkOrder {
   id: string
+  workOrderId: string
   title: string
   state: string
   priority: string
@@ -224,8 +225,7 @@ export function Dashboard({
   initialGateway,
 }: DashboardProps) {
   usePageReadyTiming('dashboard', true)
-
-  const [selectedWorkOrder, setSelectedWorkOrder] = useState<string | undefined>()
+  const router = useRouter()
   const gatewayStatus = useGatewayStatus({
     initialStatus: initialGateway.status,
     initialLatencyMs: initialGateway.latencyMs,
@@ -613,8 +613,9 @@ export function Dashboard({
                 columns={workOrderColumns}
                 rows={workOrders}
                 rowKey={(row) => row.id}
-                onRowClick={(row) => setSelectedWorkOrder(row.id)}
-                selectedKey={selectedWorkOrder}
+                onRowClick={(row) => {
+                  router.push(`/work-orders?openWorkOrderId=${encodeURIComponent(row.workOrderId)}` as Route)
+                }}
                 density="compact"
                 emptyState="No active work orders"
               />

@@ -38,6 +38,7 @@ export default async function DashboardPage() {
   // Transform work orders for display
   const transformedWorkOrders = workOrders.slice(0, 10).map((wo) => ({
     id: wo.code,
+    workOrderId: wo.id,
     title: wo.title,
     state: wo.state,
     priority: wo.priority,

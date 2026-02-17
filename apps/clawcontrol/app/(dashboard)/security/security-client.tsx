@@ -47,6 +47,8 @@ type AuditState = {
   receiptId: string | null
 }
 
+type WorkOrderActionMode = 'create' | 'create_and_start'
+
 export function SecurityClient() {
   const router = useRouter()
   const { skipTypedConfirm } = useSettings()
@@ -58,7 +60,13 @@ export function SecurityClient() {
     error: null,
     receiptId: null,
   })
-  const [isCreatingWorkOrder, setIsCreatingWorkOrder] = useState(false)
+  const [creatingWorkOrderMode, setCreatingWorkOrderMode] = useState<WorkOrderActionMode | null>(null)
+  const [workOrderActionResult, setWorkOrderActionResult] = useState<{
+    success: boolean
+    message: string
+    workOrderId: string
+    code: string
+  } | null>(null)
 
   const protectedAction = useProtectedAction({ skipTypedConfirm })
 
@@ -108,10 +116,11 @@ export function SecurityClient() {
     }
   }
 
-  const createWorkOrder = useCallback(async () => {
+  const createWorkOrder = useCallback(async (mode: WorkOrderActionMode) => {
     if (!state.report) return
 
-    setIsCreatingWorkOrder(true)
+    setCreatingWorkOrderMode(mode)
+    setWorkOrderActionResult(null)
 
     try {
       const { critical, warn, info } = state.report.summary
@@ -150,13 +159,33 @@ For automated fixes where available, run \`openclaw security audit --fix\`.
         priority,
       })
 
-      // Navigate to the new work order
-      router.push(`/work-orders/${result.data.id}`)
+      if (mode === 'create') {
+        router.push(`/work-orders/${result.data.id}`)
+        return
+      }
+
+      try {
+        const started = await workOrdersApi.start(result.data.id)
+        setWorkOrderActionResult({
+          success: true,
+          message: `Work order started successfully at stage ${started.stageIndex + 1}.`,
+          workOrderId: result.data.id,
+          code: result.data.code,
+        })
+      } catch (startErr) {
+        const startMessage = startErr instanceof Error ? startErr.message : 'Failed to start work order'
+        setWorkOrderActionResult({
+          success: false,
+          message: `Work order created, but start failed: ${startMessage}`,
+          workOrderId: result.data.id,
+          code: result.data.code,
+        })
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create work order'
       setState((prev) => ({ ...prev, error: message }))
     } finally {
-      setIsCreatingWorkOrder(false)
+      setCreatingWorkOrderMode(null)
     }
   }, [state.report, router])
 
@@ -225,6 +254,38 @@ For automated fixes where available, run \`openclaw security audit --fix\`.
           </div>
         )}
 
+        {workOrderActionResult && (
+          <div className={cn(
+            'p-3 rounded-md border flex items-start gap-2',
+            workOrderActionResult.success
+              ? 'bg-status-success/10 border-status-success/30'
+              : 'bg-status-danger/10 border-status-danger/30'
+          )}>
+            {workOrderActionResult.success ? (
+              <CheckCircle className="w-4 h-4 text-status-success shrink-0 mt-0.5" />
+            ) : (
+              <XCircle className="w-4 h-4 text-status-danger shrink-0 mt-0.5" />
+            )}
+            <div className="text-sm min-w-0">
+              <div className={cn(
+                workOrderActionResult.success ? 'text-status-success' : 'text-status-danger'
+              )}>
+                {workOrderActionResult.message}
+              </div>
+              <div className="mt-1 text-xs text-fg-2 font-mono">
+                {workOrderActionResult.code} · {workOrderActionResult.workOrderId}
+              </div>
+              <button
+                type="button"
+                onClick={() => router.push(`/work-orders/${workOrderActionResult.workOrderId}`)}
+                className="mt-1 text-xs text-status-info hover:underline"
+              >
+                Open work order
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Receipt ID */}
         {receiptId && (
           <div className="text-xs text-fg-3 font-mono">
@@ -290,22 +351,40 @@ For automated fixes where available, run \`openclaw security audit --fix\`.
                 </p>
               </div>
               <div className="ml-auto">
-                <button
-                  onClick={createWorkOrder}
-                  disabled={isCreatingWorkOrder || report.findings.length === 0}
-                  className={cn(
-                    'flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium transition-colors',
-                    'bg-bg-3 border border-bd-0 text-fg-0 hover:bg-bg-2 hover:border-bd-1',
-                    'disabled:opacity-50 disabled:cursor-not-allowed'
-                  )}
-                >
-                  {isCreatingWorkOrder ? (
-                    <LoadingSpinner size="sm" />
-                  ) : (
-                    <ClipboardList className="w-3.5 h-3.5" />
-                  )}
-                  Create Work Order
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => void createWorkOrder('create')}
+                    disabled={creatingWorkOrderMode !== null || report.findings.length === 0}
+                    className={cn(
+                      'flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium transition-colors',
+                      'bg-bg-3 border border-bd-0 text-fg-0 hover:bg-bg-2 hover:border-bd-1',
+                      'disabled:opacity-50 disabled:cursor-not-allowed'
+                    )}
+                  >
+                    {creatingWorkOrderMode === 'create' ? (
+                      <LoadingSpinner size="sm" />
+                    ) : (
+                      <ClipboardList className="w-3.5 h-3.5" />
+                    )}
+                    Create Work Order
+                  </button>
+                  <button
+                    onClick={() => void createWorkOrder('create_and_start')}
+                    disabled={creatingWorkOrderMode !== null || report.findings.length === 0}
+                    className={cn(
+                      'flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-sm)] text-sm font-medium transition-colors',
+                      'bg-status-info/10 border border-status-info/30 text-status-info hover:bg-status-info/20',
+                      'disabled:opacity-50 disabled:cursor-not-allowed'
+                    )}
+                  >
+                    {creatingWorkOrderMode === 'create_and_start' ? (
+                      <LoadingSpinner size="sm" />
+                    ) : (
+                      <ClipboardList className="w-3.5 h-3.5" />
+                    )}
+                    Create + Start
+                  </button>
+                </div>
               </div>
             </div>
 

@@ -10,6 +10,7 @@ type ExecCallback = (error: Error | null, result: ExecResult) => void
 const mocks = vi.hoisted(() => {
   const execFile = vi.fn()
   const upsert = vi.fn()
+  const upsertAgentToOpenClaw = vi.fn()
   const getOpenClawBin = vi.fn(() => 'openclaw')
   const parseJsonFromCommandOutput = vi.fn((stdout: string) => {
     try {
@@ -28,9 +29,11 @@ const mocks = vi.hoisted(() => {
     parseJsonFromCommandOutput,
     runCommandJson,
     chatSend,
+    upsertAgentToOpenClaw,
     reset() {
       execFile.mockReset()
       upsert.mockReset()
+      upsertAgentToOpenClaw.mockReset()
       getOpenClawBin.mockReset()
       parseJsonFromCommandOutput.mockReset()
       runCommandJson.mockReset()
@@ -43,6 +46,12 @@ const mocks = vi.hoisted(() => {
         } catch {
           return null
         }
+      })
+      upsertAgentToOpenClaw.mockResolvedValue({
+        ok: true,
+        created: false,
+        updated: true,
+        restartNeeded: true,
       })
     },
   }
@@ -64,6 +73,10 @@ vi.mock('@/lib/openclaw/console-client', () => ({
   getWsConsoleClient: () => ({
     chatSend: mocks.chatSend,
   }),
+}))
+
+vi.mock('@/lib/services/openclaw-config', () => ({
+  upsertAgentToOpenClaw: mocks.upsertAgentToOpenClaw,
 }))
 
 vi.mock('@clawcontrol/adapters-openclaw', () => ({
@@ -166,6 +179,87 @@ describe('spawnAgentSession dispatch modes', () => {
     const secondSessionId = readSessionIdArg(thirdArgs)
     expect(firstSessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(secondSessionId).toBe(firstSessionId)
+  })
+
+  it('syncs model before agent_local fallback when model is provided', async () => {
+    queueExecError(
+      'Command failed',
+      "error: unknown command 'run'\n(Did you mean cron?)"
+    )
+    queueExecSuccess('{"meta":{"agentMeta":{"sessionId":"sess_agent_model_synced"}}}')
+
+    const sessions = await loadModule()
+    const result = await sessions.spawnAgentSession({
+      agentId: 'wf-plan',
+      label: 'agent:wf-plan:wo:wo_6:op:op_6',
+      task: 'plan task',
+      model: 'openai-codex/gpt-5.3-codex',
+      timeoutSeconds: 25,
+    })
+
+    expect(result.sessionId).toBe('sess_agent_model_synced')
+    expect(mocks.upsertAgentToOpenClaw).toHaveBeenCalledWith({
+      agentId: 'wf-plan',
+      runtimeAgentId: 'wf-plan',
+      model: 'openai-codex/gpt-5.3-codex',
+    })
+  })
+
+  it('proceeds with agent_local fallback when model sync fails', async () => {
+    mocks.upsertAgentToOpenClaw.mockResolvedValueOnce({
+      ok: false,
+      error: 'Cannot write OpenClaw config',
+    })
+    queueExecError(
+      'Command failed',
+      "error: unknown command 'run'\n(Did you mean cron?)"
+    )
+    queueExecSuccess('{"meta":{"agentMeta":{"sessionId":"sess_agent_after_sync_warning"}}}')
+
+    const sessions = await loadModule()
+    const result = await sessions.spawnAgentSession({
+      agentId: 'wf-security',
+      label: 'agent:wf-security:wo:wo_7:op:op_7',
+      task: 'security task',
+      model: 'openai-codex/gpt-5.3-codex',
+      timeoutSeconds: 25,
+    })
+
+    expect(result.sessionId).toBe('sess_agent_after_sync_warning')
+    expect(mocks.upsertAgentToOpenClaw).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps fallback errors actionable when model sync fails', async () => {
+    mocks.upsertAgentToOpenClaw.mockResolvedValueOnce({
+      ok: false,
+      error: 'Cannot write OpenClaw config',
+    })
+    queueExecError(
+      'Command failed',
+      "error: unknown command 'run'\n(Did you mean cron?)"
+    )
+    queueExecError(
+      'Command failed',
+      'FailoverError: No API key found for provider "openai".'
+    )
+
+    const sessions = await loadModule()
+
+    let thrownMessage = ''
+    try {
+      await sessions.spawnAgentSession({
+        agentId: 'wf-research',
+        label: 'agent:wf-research:wo:wo_8:op:op_8',
+        task: 'research task',
+        model: 'openai-codex/gpt-5.3-codex',
+        timeoutSeconds: 15,
+      })
+    } catch (error) {
+      thrownMessage = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(thrownMessage).toContain('openclaw run unavailable; fallback agent_local failed')
+    expect(thrownMessage).toContain('model_sync_warning=')
   })
 
   it('uses agent_local mode and accepts nested sessionId locations', async () => {

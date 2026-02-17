@@ -11,6 +11,7 @@ import type { WorkOrderWithOpsDTO, OperationDTO, ActivityDTO, ApprovalDTO, Recei
 import { cn } from '@/lib/utils'
 import { useProtectedActionTrigger } from '@/components/protected-action-modal'
 import { StationIcon } from '@/components/station-icon'
+import { DispatchErrorCard } from '@/components/work-orders/dispatch-error-card'
 import { getValidWorkOrderTransitions, type WorkOrderState } from '@clawcontrol/core'
 import { formatOwnerLabel, ownerTextTone } from '@/lib/agent-identity'
 import {
@@ -76,6 +77,10 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
   const [approvals, setApprovals] = useState<ApprovalDTO[]>([])
   const [receipts, setReceipts] = useState<ReceiptDTO[]>([])
   const [starting, setStarting] = useState(false)
+  const [startFeedback, setStartFeedback] = useState<{
+    status: 'running' | 'success' | 'error'
+    message: string
+  } | null>(null)
   const [tagInput, setTagInput] = useState('')
   const [savingTags, setSavingTags] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -229,8 +234,12 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
 
   const handleStart = async () => {
     setStarting(true)
+    setStartFeedback({
+      status: 'running',
+      message: 'Start requested. Waiting for manager dispatch...',
+    })
     try {
-      await workOrdersApi.start(workOrderId)
+      const started = await workOrdersApi.start(workOrderId)
       const [woResult, opsResult] = await Promise.all([
         workOrdersApi.get(workOrderId),
         operationsApi.list({ workOrderId }),
@@ -238,8 +247,28 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
       setWorkOrder(woResult.data)
       setOperations(opsResult.data)
       await refreshData()
+      setStartFeedback({
+        status: 'success',
+        message: `Workflow started successfully at stage ${started.stageIndex + 1}.`,
+      })
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to start workflow'
       console.error('Failed to start workflow:', err)
+      setStartFeedback({
+        status: 'error',
+        message: `Start failed: ${message}`,
+      })
+      try {
+        const [woResult, opsResult] = await Promise.all([
+          workOrdersApi.get(workOrderId),
+          operationsApi.list({ workOrderId }),
+        ])
+        setWorkOrder(woResult.data)
+        setOperations(opsResult.data)
+      } catch (refreshErr) {
+        console.error('Failed to refresh workflow state after start error:', refreshErr)
+      }
+      await refreshData()
     } finally {
       setStarting(false)
     }
@@ -304,6 +333,24 @@ export function WorkOrderDetail({ workOrderId }: WorkOrderDetailProps) {
           </div>
         }
       />
+
+      {startFeedback && (
+        <div className={cn(
+          'p-3 rounded-[var(--radius-md)] border flex items-start gap-2',
+          startFeedback.status === 'running' && 'bg-status-info/10 border-status-info/30',
+          startFeedback.status === 'success' && 'bg-status-success/10 border-status-success/30',
+          startFeedback.status === 'error' && 'bg-status-danger/10 border-status-danger/30'
+        )}>
+          {startFeedback.status === 'running' ? (
+            <Clock className="w-4 h-4 text-status-info shrink-0 mt-0.5" />
+          ) : startFeedback.status === 'success' ? (
+            <CheckCircle className="w-4 h-4 text-status-success shrink-0 mt-0.5" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-status-danger shrink-0 mt-0.5" />
+          )}
+          <span className="text-sm text-fg-1">{startFeedback.message}</span>
+        </div>
+      )}
 
       {/* Pending Approvals Banner */}
       {pendingApprovals.length > 0 && (
@@ -517,15 +564,7 @@ function OverviewTab({
       </div>
 
       {/* Blocked Reason */}
-      {workOrder.blockedReason && (
-        <div className="p-4 bg-status-danger/10 border border-status-danger/30 rounded-[var(--radius-md)]">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertCircle className="w-4 h-4 text-status-danger" />
-            <span className="text-sm font-medium text-status-danger">Blocked</span>
-          </div>
-          <p className="text-sm text-fg-1">{workOrder.blockedReason}</p>
-        </div>
-      )}
+      <DispatchErrorCard error={workOrder.blockedReason} title="Blocked" className="p-4" />
 
       {/* Goal (Markdown) */}
       <PageSection title="Goal">
