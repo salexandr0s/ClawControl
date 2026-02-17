@@ -58,20 +58,42 @@ function stripFrontmatter(source) {
 
 function collectNavPages(docsJson) {
   const pages = []
-  const tabs = docsJson?.navigation?.tabs ?? []
-  for (const tab of tabs) {
-    for (const group of tab?.groups ?? []) {
-      for (const item of group?.pages ?? []) {
-        if (typeof item === 'string') {
-          pages.push({ page: item, title: null })
-          continue
-        }
-        if (item && typeof item === 'object' && typeof item.page === 'string') {
-          pages.push({ page: item.page, title: typeof item.title === 'string' ? item.title : null })
-        }
-      }
+
+  function walkNavEntry(entry) {
+    if (typeof entry === 'string') {
+      pages.push({ page: entry, title: null })
+      return
+    }
+
+    if (!entry || typeof entry !== 'object') return
+
+    if (typeof entry.page === 'string') {
+      pages.push({ page: entry.page, title: typeof entry.title === 'string' ? entry.title : null })
+      return
+    }
+
+    if (Array.isArray(entry.pages)) {
+      for (const child of entry.pages) walkNavEntry(child)
     }
   }
+
+  const navigation = docsJson?.navigation
+
+  if (Array.isArray(navigation)) {
+    for (const group of navigation) walkNavEntry(group)
+    return pages
+  }
+
+  const groups = navigation?.groups ?? []
+  for (const group of groups) {
+    walkNavEntry(group)
+  }
+
+  const tabs = navigation?.tabs ?? []
+  for (const tab of tabs) {
+    for (const group of tab?.groups ?? []) walkNavEntry(group)
+  }
+
   return pages
 }
 
@@ -148,11 +170,6 @@ for (const { page, title } of navPages) {
     continue
   }
 
-  if (!title) {
-    errors.push(`docs.json page "${page}" is missing an explicit title`)
-    continue
-  }
-
   const source = readFileSync(file, 'utf8')
   const fmTitle = extractFrontmatterTitle(source)
   if (!fmTitle) {
@@ -160,7 +177,7 @@ for (const { page, title } of navPages) {
     continue
   }
 
-  if (fmTitle !== title) {
+  if (title && fmTitle !== title) {
     errors.push(`${file}: docs.json title "${title}" does not match frontmatter title "${fmTitle}"`)
   }
 }

@@ -3,9 +3,9 @@
   "theme": "mint",
   "name": "ClawControl Docs",
   "colors": {
-    "primary": "#0E7490",
-    "light": "#22D3EE",
-    "dark": "#0E7490"
+    "primary": "#C2410C",
+    "light": "#FDBA74",
+    "dark": "#C2410C"
   },
   "favicon": "/images/logo-icon.png",
   "logo": {
@@ -13,301 +13,129 @@
     "dark": "/images/logo-icon.png"
   },
   "navigation": {
-    "tabs": [
+    "groups": [
       {
-        "tab": "Documentation",
-        "groups": [
-          {
-            "group": "Home",
-            "pages": [
-              {
-                "page": "index",
-                "title": "ClawControl"
-              }
-            ]
-          },
-          {
-            "group": "Product",
-            "pages": [
-              {
-                "page": "product/overview",
-                "title": "Overview"
-              },
-              {
-                "page": "product/core-concepts",
-                "title": "Core Concepts"
-              },
-              {
-                "page": "product/architecture",
-                "title": "Architecture"
-              },
-              {
-                "page": "product/data-flow",
-                "title": "Data Flow"
-              },
-              {
-                "page": "product/local-process-model",
-                "title": "Process Model"
-              }
-            ]
-          },
-          {
-            "group": "Getting Started",
-            "pages": [
-              {
-                "page": "quickstart/web-only",
-                "title": "Run in Web Mode"
-              },
-              {
-                "page": "quickstart/desktop-app",
-                "title": "Run the Desktop App"
-              },
-              {
-                "page": "quickstart/release-install",
-                "title": "Install From GitHub Releases"
-              },
-              {
-                "page": "quickstart/first-run-setup",
-                "title": "First-run Setup"
-              }
-            ]
-          },
-          {
-            "group": "Guides",
-            "pages": [
-              {
-                "page": "features/dashboard",
-                "title": "Dashboard"
-              },
-              {
-                "page": "features/work-orders-operations",
-                "title": "Work Orders and Operations"
-              },
-              {
-                "page": "features/agents-hierarchy-templates",
-                "title": "Agents, Teams, and Templates"
-              },
-              {
-                "page": "features/workflows-packages-teams",
-                "title": "Workflows, Teams, and Packages"
-              },
-              {
-                "page": "features/skills",
-                "title": "Skills"
-              },
-              {
-                "page": "features/plugins",
-                "title": "Plugins"
-              },
-              {
-                "page": "features/models",
-                "title": "Models"
-              },
-              {
-                "page": "features/live-now-console",
-                "title": "Live Console and Sessions"
-              },
-              {
-                "page": "features/approvals-governor",
-                "title": "Approvals and Governance"
-              },
-              {
-                "page": "features/workspace-browser-editing",
-                "title": "Workspace Browser and Editing"
-              },
-              {
-                "page": "features/maintenance-recovery",
-                "title": "Maintenance and Recovery"
-              },
-              {
-                "page": "features/settings-remote-access",
-                "title": "Settings and Remote Access"
-              }
-            ]
-          },
-          {
-            "group": "Integration",
-            "pages": [
-              {
-                "page": "integration/openclaw-integration",
-                "title": "OpenClaw Integration"
-              }
-            ]
-          },
-          {
-            "group": "Security & Networking",
-            "pages": [
-              {
-                "page": "security/networking-local-only",
-                "title": "Local-only Networking Enforcement"
-              },
-              {
-                "page": "security/path-safety-allowlist",
-                "title": "Workspace Path Safety"
-              },
-              {
-                "page": "security/approvals-typed-confirm",
-                "title": "Approval and Typed Confirm Model"
-              },
-              {
-                "page": "security/forbidden-exposure-paths",
-                "title": "Forbidden Exposure Patterns"
-              }
-            ]
-          },
-          {
-            "group": "Remote Access",
-            "pages": [
-              {
-                "page": "remote/tailscale-ssh-tunnel-only",
-                "title": "Tailscale Tunnel (SSH Port Forwarding)"
-              }
-            ]
-          },
-          {
-            "group": "Data",
-            "pages": [
-              {
-                "page": "data/persistence-and-migrations",
-                "title": "Persistence and Migrations"
-              }
-            ]
-          },
-          {
-            "group": "Reference",
-            "pages": [
-              {
-                "page": "reference/workflows",
-                "title": "Workflows"
-              },
-              {
-                "page": "reference/packages",
-                "title": "Package Artifacts"
-              },
-              {
-                "page": "reference/agent-templates",
-                "title": "Agent Templates"
-              },
-              {
-                "page": "reference/workspace-files",
-                "title": "Workspace Files (AGENTS.md and Agent Memory)"
-              },
-              {
-                "page": "reference/workspace-agent-generator",
-                "title": "Workspace Agent Generator"
-              },
-              {
-                "page": "reference/ui-buttons-and-toggles",
-                "title": "UI Buttons and Toggles"
-              }
-            ]
-          },
-          {
-            "group": "API Reference",
-            "pages": [
-              {
-                "page": "api/overview",
-                "title": "API Overview"
-              },
-              {
-                "page": "api/config-init",
-                "title": "Config and Init"
-              },
-              {
-                "page": "api/openclaw-console-cron",
-                "title": "OpenClaw, Console, and Cron"
-              },
-              {
-                "page": "api/work-orders-operations-receipts",
-                "title": "Work Orders, Operations, and Receipts"
-              },
-              {
-                "page": "api/agents-templates-stations",
-                "title": "Agents, Templates, and Stations"
-              },
-              {
-                "page": "api/workflows-teams-packages",
-                "title": "Workflows, Teams, and Packages"
-              },
-              {
-                "page": "api/plugins-skills-models",
-                "title": "Plugins, Skills, and Models"
-              },
-              {
-                "page": "api/workspace-maintenance-security-sync",
-                "title": "Workspace, Maintenance, Security, and Sync"
-              },
-              {
-                "page": "api/streaming",
-                "title": "Streaming (SSE)"
-              },
-              {
-                "page": "api/internal-endpoint-index",
-                "title": "Endpoint Index"
-              }
-            ]
-          },
-          {
-            "group": "Operations",
-            "pages": [
-              {
-                "page": "operations/troubleshooting",
-                "title": "Troubleshooting"
-              },
-              {
-                "page": "operations/startup-port-conflicts",
-                "title": "Startup Failures and Port Conflicts"
-              },
-              {
-                "page": "operations/openclaw-auth-workspace-errors",
-                "title": "OpenClaw, Auth-required, and Workspace Errors"
-              },
-              {
-                "page": "operations/loopback-policy-violations",
-                "title": "Loopback Policy Violations"
-              },
-              {
-                "page": "operations/unsigned-desktop-install",
-                "title": "Unsigned Desktop Install Guidance"
-              },
-              {
-                "page": "operations/release-distribution-checksums",
-                "title": "Release Artifacts and Checksums"
-              }
-            ]
-          },
-          {
-            "group": "Deployment",
-            "pages": [
-              {
-                "page": "deployment/remote-hosting",
-                "title": "Remote Hosting"
-              }
-            ]
-          },
-          {
-            "group": "Developers",
-            "pages": [
-              {
-                "page": "developers/repo-layout",
-                "title": "Repository Layout"
-              },
-              {
-                "page": "developers/build-test-lint-typecheck",
-                "title": "Build, Test, Lint, and Typecheck"
-              },
-              {
-                "page": "developers/contributing-and-docs-maintenance",
-                "title": "Contributing and Docs Maintenance"
-              },
-              {
-                "page": "deploy/publish-docs-clawcontrol-cc",
-                "title": "Publish the Docs Site (docs.clawcontrol.cc)"
-              }
-            ]
-          }
+        "group": "Home",
+        "pages": [
+          "index"
+        ]
+      },
+      {
+        "group": "Product",
+        "pages": [
+          "product/overview",
+          "product/core-concepts",
+          "product/architecture",
+          "product/data-flow",
+          "product/local-process-model"
+        ]
+      },
+      {
+        "group": "Getting Started",
+        "pages": [
+          "quickstart/web-only",
+          "quickstart/desktop-app",
+          "quickstart/release-install",
+          "quickstart/first-run-setup"
+        ]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "features/dashboard",
+          "features/work-orders-operations",
+          "features/agents-hierarchy-templates",
+          "features/workflows-packages-teams",
+          "features/skills",
+          "features/plugins",
+          "features/models",
+          "features/live-now-console",
+          "features/approvals-governor",
+          "features/workspace-browser-editing",
+          "features/maintenance-recovery",
+          "features/settings-remote-access"
+        ]
+      },
+      {
+        "group": "Integration",
+        "pages": [
+          "integration/openclaw-integration"
+        ]
+      },
+      {
+        "group": "Security & Networking",
+        "pages": [
+          "security/networking-local-only",
+          "security/path-safety-allowlist",
+          "security/approvals-typed-confirm",
+          "security/forbidden-exposure-paths"
+        ]
+      },
+      {
+        "group": "Remote Access",
+        "pages": [
+          "remote/tailscale-ssh-tunnel-only"
+        ]
+      },
+      {
+        "group": "Data",
+        "pages": [
+          "data/persistence-and-migrations"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "reference/workflows",
+          "reference/packages",
+          "reference/agent-templates",
+          "reference/workspace-files",
+          "reference/workspace-agent-generator",
+          "reference/ui-buttons-and-toggles"
+        ]
+      },
+      {
+        "group": "API Reference",
+        "pages": [
+          "api/overview",
+          "api/config-init",
+          "api/openclaw-console-cron",
+          "api/work-orders-operations-receipts",
+          "api/agents-templates-stations",
+          "api/workflows-teams-packages",
+          "api/plugins-skills-models",
+          "api/workspace-maintenance-security-sync",
+          "api/streaming",
+          "api/internal-endpoint-index"
+        ]
+      },
+      {
+        "group": "Operations",
+        "pages": [
+          "operations/troubleshooting",
+          "operations/startup-port-conflicts",
+          "operations/openclaw-auth-workspace-errors",
+          "operations/loopback-policy-violations",
+          "operations/unsigned-desktop-install",
+          "operations/release-distribution-checksums"
+        ]
+      },
+      {
+        "group": "Deployment",
+        "pages": [
+          "deployment/remote-hosting"
+        ]
+      },
+      {
+        "group": "Developers",
+        "pages": [
+          "developers/repo-layout",
+          "developers/build-test-lint-typecheck",
+          "developers/contributing-and-docs-maintenance",
+          "deploy/publish-docs-clawcontrol-cc"
         ]
       }
     ]
-  }
+  },
+  "layout": "sidenav"
 }
