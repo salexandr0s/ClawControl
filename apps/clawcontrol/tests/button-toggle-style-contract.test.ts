@@ -10,6 +10,7 @@ const migratedFiles = [
   'app/(dashboard)/agents/agents-client.tsx',
   'app/(dashboard)/skills/skills-client.tsx',
   'app/(dashboard)/cron/cron-client.tsx',
+  'app/(dashboard)/memory/memory-client.tsx',
   'app/(dashboard)/workspace/workspace-client.tsx',
   'app/(dashboard)/models/models-client.tsx',
   'app/(dashboard)/models/components/add-model-modal.tsx',
@@ -41,7 +42,7 @@ const toggleFiles = [
   'app/(dashboard)/skills/skills-client.tsx',
   'app/(dashboard)/live/live-client.tsx',
   'app/(dashboard)/cron/cron-client.tsx',
-  'app/(dashboard)/workspace/workspace-client.tsx',
+  'app/(dashboard)/memory/memory-client.tsx',
   'app/(dashboard)/settings/page.tsx',
   'components/workflows/workflow-editor-modal.tsx',
 ]

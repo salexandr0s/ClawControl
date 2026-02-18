@@ -347,7 +347,7 @@ export function DropdownMenu<T extends string = string>({
         onClick={() => setOpen(!isOpen)}
         onKeyDown={handleTriggerKeyDown}
       >
-        <span className="min-w-0 truncate">{trigger}</span>
+        <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">{trigger}</span>
         <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 text-fg-2 transition-transform', isOpen && 'rotate-180')} />
       </button>
       {menuNode && (isMounted && typeof document !== 'undefined' ? createPortal(menuNode, document.body) : menuNode)}
