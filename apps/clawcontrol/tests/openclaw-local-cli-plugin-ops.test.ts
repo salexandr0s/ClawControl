@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   runCommandJson: vi.fn(),
   runDynamicCommand: vi.fn(),
   executeCommand: vi.fn(),
+  parseJsonFromCommandOutput: vi.fn(() => null),
   checkOpenClawAvailable: vi.fn(),
 }))
 
@@ -13,6 +14,7 @@ vi.mock('../../../packages/adapters-openclaw/src/command-runner', () => ({
   runCommandJson: mocks.runCommandJson,
   runDynamicCommand: mocks.runDynamicCommand,
   executeCommand: mocks.executeCommand,
+  parseJsonFromCommandOutput: mocks.parseJsonFromCommandOutput,
   checkOpenClawAvailable: mocks.checkOpenClawAvailable,
 }))
 
@@ -23,6 +25,8 @@ describe('LocalCliAdapter plugin operations (OpenClaw 2.17+)', () => {
     mocks.runCommandJson.mockReset()
     mocks.runDynamicCommand.mockReset()
     mocks.executeCommand.mockReset()
+    mocks.parseJsonFromCommandOutput.mockReset()
+    mocks.parseJsonFromCommandOutput.mockReturnValue(null)
     mocks.checkOpenClawAvailable.mockReset()
     mocks.checkOpenClawAvailable.mockResolvedValue({ available: true })
   })

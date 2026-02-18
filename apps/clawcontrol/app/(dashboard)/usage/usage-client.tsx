@@ -6,6 +6,7 @@ import type { Route } from 'next'
 import { PageHeader, SelectDropdown, Button } from '@clawcontrol/ui'
 import { MetricCard } from '@/components/ui/metric-card'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
+import { apiPost } from '@/lib/http'
 import { cn } from '@/lib/utils'
 import { resolveUsageWindowIso } from '@/lib/openclaw/usage-window'
 import { usePageReadyTiming } from '@/lib/perf/client-timing'
@@ -449,22 +450,10 @@ export function UsageClient() {
     setSyncing(true)
 
     try {
-      const response = await fetch('/api/openclaw/usage/sync', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          maxMs: 15_000,
-          maxFiles: 400,
-        }),
+      const sync = await apiPost<UsageSyncApi>('/api/openclaw/usage/sync', {
+        maxMs: 15_000,
+        maxFiles: 400,
       })
-
-      if (!response.ok) {
-        throw new Error(`Sync failed (${response.status})`)
-      }
-
-      const sync = await response.json() as UsageSyncApi
       setSyncMeta({ at: new Date().toISOString(), stats: sync })
       await fetchUsage()
     } catch (syncError) {

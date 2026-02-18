@@ -183,7 +183,22 @@ export function createCliPluginsRepo(): PluginsRepo {
       }
 
       try {
-        const plugin = await adapter.pluginInfo(id)
+        let plugin: Awaited<ReturnType<typeof adapter.pluginInfo>> | undefined
+
+        if (caps.plugins.infoJson) {
+          plugin = await adapter.pluginInfo(id)
+        } else {
+          const plugins = await adapter.listPlugins()
+          plugin = plugins.find((p) => p.id === id || p.name === id)
+        }
+
+        if (!plugin) {
+          return {
+            data: null,
+            meta: await buildMeta('openclaw_cli'),
+          }
+        }
+
         return {
           data: {
             ...adapterToDTO(plugin),

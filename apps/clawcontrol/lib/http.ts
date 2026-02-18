@@ -20,6 +20,7 @@ let bootstrapInFlight: Promise<string> | null = null
 
 export interface ApiError {
   error: string
+  message?: string
   code?: string
   details?: Record<string, unknown>
 }
@@ -86,11 +87,20 @@ async function handleResponse<T>(response: Response): Promise<T> {
       errorData = { error: response.statusText || 'Request failed' }
     }
 
+    const errorMessage = (
+      (typeof errorData.error === 'string' && errorData.error)
+      || (typeof errorData.message === 'string' && errorData.message)
+      || response.statusText
+      || 'Request failed'
+    )
+    const errorCode = typeof errorData.code === 'string' ? errorData.code : undefined
+    const errorDetails = errorData.details
+
     throw new HttpError(
-      errorData.error,
+      errorMessage,
       response.status,
-      errorData.code,
-      errorData.details
+      errorCode,
+      errorDetails
     )
   }
 
@@ -197,6 +207,14 @@ async function withOperatorAuth(path: string, init: RequestInit): Promise<Reques
 async function apiFetch(path: string, init: RequestInit): Promise<Response> {
   const withAuth = await withOperatorAuth(path, init)
   return timedRequest(path, withAuth)
+}
+
+/**
+ * Raw request helper that still applies operator auth/CSRF headers.
+ * Use this for endpoints that return non-JSON payloads (e.g. SSE streams).
+ */
+export async function apiRequest(path: string, init: RequestInit = {}): Promise<Response> {
+  return apiFetch(path, init)
 }
 
 // ============================================================================

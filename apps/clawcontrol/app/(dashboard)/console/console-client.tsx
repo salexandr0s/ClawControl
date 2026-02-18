@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { EmptyState } from '@clawcontrol/ui'
 import { Terminal, AlertCircle } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { agentsApi } from '@/lib/http'
+import { agentsApi, apiDeleteJson, apiPost } from '@/lib/http'
 import { useGatewayChat } from '@/lib/hooks/useGatewayChat'
 import { LoadingState } from '@/components/ui/loading-state'
 import { useChatStore, type ChatMessage } from '@/lib/stores/chat-store'
@@ -239,11 +239,7 @@ export function ConsoleClient() {
     if (syncingSessions) return
     setSyncingSessions(true)
     try {
-      const res = await fetch('/api/openclaw/sessions/sync', { method: 'POST' })
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.message || data?.error || 'Sync failed')
-      }
+      await apiPost('/api/openclaw/sessions/sync')
       await fetchSessions()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed')
@@ -262,17 +258,7 @@ export function ConsoleClient() {
     const sessionKey = session.sessionKey
     setEndingSessionIds((prev) => ({ ...prev, [sessionId]: true }))
     try {
-      const res = await fetch(`/api/openclaw/console/sessions/${sessionId}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ sessionKey }),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || 'Failed to end session')
-      }
+      await apiDeleteJson(`/api/openclaw/console/sessions/${sessionId}`, { sessionKey })
 
       setSessions((prev) => prev.filter((s) => s.sessionKey !== sessionKey))
 

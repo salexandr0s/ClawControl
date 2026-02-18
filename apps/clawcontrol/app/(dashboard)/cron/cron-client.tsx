@@ -19,6 +19,7 @@ import {
 } from '@/lib/cron/calendar'
 import { normalizeCronExpressionToFiveFields } from '@/lib/cron/expression'
 import { buildCronCreateBody, type CronCreateFormValues } from '@/lib/cron/create-request'
+import { apiPost } from '@/lib/http'
 import type { CronJobDTO } from '@/lib/data'
 import { cn } from '@/lib/utils'
 import { timedClientFetch, usePageReadyTiming } from '@/lib/perf/client-timing'
@@ -2167,8 +2168,7 @@ function CronDetail({
     setError(null)
 
     try {
-      const res = await fetch(`/api/openclaw/cron/${job.id}/run`, { method: 'POST' })
-      const data = await res.json()
+      const data = await apiPost<OpenClawResponse<unknown>>(`/api/openclaw/cron/${job.id}/run`)
 
       if (data.status === 'unavailable') {
         setError(data.error ?? 'Failed to run job')
@@ -2190,8 +2190,7 @@ function CronDetail({
     const endpoint = job.enabled ? 'disable' : 'enable'
 
     try {
-      const res = await fetch(`/api/openclaw/cron/${job.id}/${endpoint}`, { method: 'POST' })
-      const data = await res.json()
+      const data = await apiPost<OpenClawResponse<unknown>>(`/api/openclaw/cron/${job.id}/${endpoint}`)
 
       if (data.status === 'unavailable') {
         setError(data.error ?? `Failed to ${endpoint} job`)
@@ -2216,8 +2215,7 @@ function CronDetail({
     setError(null)
 
     try {
-      const res = await fetch(`/api/openclaw/cron/${job.id}/delete`, { method: 'POST' })
-      const data = await res.json()
+      const data = await apiPost<OpenClawResponse<unknown>>(`/api/openclaw/cron/${job.id}/delete`)
 
       if (data.status === 'unavailable') {
         setError(data.error ?? 'Failed to delete job')
@@ -2258,13 +2256,7 @@ function CronDetail({
         body.at = atValue.trim()
       }
 
-      const res = await fetch(`/api/openclaw/cron/${job.id}/edit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-
-      const data = await res.json()
+      const data = await apiPost<OpenClawResponse<unknown>>(`/api/openclaw/cron/${job.id}/edit`, body)
       if (data.status === 'unavailable') {
         setError(data.error ?? 'Failed to save schedule')
       } else {
@@ -2693,13 +2685,7 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
     setError(null)
 
     try {
-      const response = await fetch('/api/openclaw/cron', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(built.body),
-      })
-
-      const data = await response.json()
+      const data = await apiPost<OpenClawResponse<unknown>>('/api/openclaw/cron', built.body)
 
       if (data.status === 'unavailable') {
         setError(data.error || 'Failed to create cron job')
@@ -3013,7 +2999,6 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
               </label>
             </div>
           )}
-          </div>
 
           {/* Enabled Toggle */}
           <div className="flex items-center justify-between">

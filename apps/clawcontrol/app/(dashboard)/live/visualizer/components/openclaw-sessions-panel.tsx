@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@clawcontrol/ui'
+import { apiGet, apiPost } from '@/lib/http'
 import { cn } from '@/lib/utils'
 import { RefreshCw, Bot, Clock, AlertTriangle, Activity } from 'lucide-react'
 
@@ -46,21 +47,15 @@ export function OpenClawSessionsPanel() {
     setError(null)
     try {
       // Sync sessions telemetry
-      const syncRes = await fetch('/api/openclaw/sessions/sync', { method: 'POST' })
-      if (!syncRes.ok) {
-        const body = await syncRes.json().catch(() => ({}))
-        throw new Error(body?.message || body?.code || 'OpenClaw sessions sync failed')
-      }
+      await apiPost('/api/openclaw/sessions/sync')
 
       // Load cached sessions
-      const res = await fetch('/api/openclaw/sessions?limit=200')
-      const json = (await res.json()) as { data: SessionRow[] }
-      setSessions(json.data)
+      const sessionsPayload = await apiGet<{ data: SessionRow[] }>('/api/openclaw/sessions', { limit: 200 })
+      setSessions(sessionsPayload.data)
 
       // Load active operations (for drift badge). No inference.
-      const opsRes = await fetch('/api/operations?status=in_progress')
-      const opsJson = (await opsRes.json()) as { data: Array<{ id: string }> }
-      setActiveOperationIds(new Set((opsJson.data ?? []).map((o) => o.id)))
+      const opsPayload = await apiGet<{ data: Array<{ id: string }> }>('/api/operations', { status: 'in_progress' })
+      setActiveOperationIds(new Set((opsPayload.data ?? []).map((o) => o.id)))
 
       setLastSyncAt(new Date())
     } catch (e) {

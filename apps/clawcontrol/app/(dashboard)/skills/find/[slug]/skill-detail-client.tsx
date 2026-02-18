@@ -23,6 +23,7 @@ import {
   type ClawHubVersionsListItem,
   HttpError,
 } from '@/lib/http'
+import { extractRuntimeRequirements } from '@/lib/clawhub/runtime-requirements'
 import type { AgentDTO, ReceiptDTO } from '@/lib/repo'
 import { cn } from '@/lib/utils'
 import {
@@ -87,43 +88,43 @@ function moderationBadge(m: ClawHubMarketplaceSkillDetail['moderation']) {
   return { label: 'Not flagged', icon: ShieldCheck, className: 'text-status-success bg-status-success/10 border-status-success/20' }
 }
 
-function extractEnvVarsFromText(text: string): string[] {
-  if (!text) return []
-  const matches = text.match(/\\b[A-Z][A-Z0-9_]{2,80}\\b/g) ?? []
-  const filtered = matches.filter((m) => {
-    if (!m.includes('_')) return false
-    return (
-      m.endsWith('_API_KEY')
-      || m.endsWith('_TOKEN')
-      || m.endsWith('_SECRET')
-      || m.endsWith('_KEY')
-    )
-  })
-  return Array.from(new Set(filtered)).sort((a, b) => a.localeCompare(b))
-}
-
-function inferBinsFromFiles(files: Array<{ path: string }>): string[] {
-  const lowerPaths = files.map((f) => f.path.toLowerCase())
-  const bins: string[] = []
-
-  const needsNode = lowerPaths.some((p) =>
-    p === 'package.json' || p.endsWith('.mjs') || p.endsWith('.js') || p.endsWith('.ts')
-  )
-  const needsPython = lowerPaths.some((p) =>
-    p === 'pyproject.toml' || p === 'requirements.txt' || p.endsWith('.py')
-  )
-  const needsBash = lowerPaths.some((p) => p.endsWith('.sh'))
-
-  if (needsNode) bins.push('node')
-  if (needsPython) bins.push('python')
-  if (needsBash) bins.push('bash')
-
-  return bins
-}
-
 function pickSkillMdPath(files: Array<{ path: string }>): string | null {
   const direct = files.find((f) => f.path === 'SKILL.md' || f.path === 'skill.md')
-  return direct?.path ?? null
+  if (direct) return direct.path
+  const nested = files.find((f) => f.path.toLowerCase().endsWith('/skill.md'))
+  return nested?.path ?? null
+}
+
+function localScanBadge(input: {
+  scan: ClawHubLocalScanResult | null
+  scanError: string | null
+  isScanning: boolean
+}) {
+  if (input.isScanning) {
+    return { label: 'Scanning...', className: 'text-fg-2' }
+  }
+
+  if (input.scanError) {
+    return { label: 'Unavailable', className: 'text-fg-2' }
+  }
+
+  if (!input.scan) {
+    return { label: 'Pending', className: 'text-fg-2' }
+  }
+
+  if (input.scan.blocked || input.scan.warnings.some((warning) => warning.severity === 'danger')) {
+    return { label: 'Flagged', className: 'text-status-danger' }
+  }
+
+  if (input.scan.warnings.some((warning) => warning.severity === 'warning')) {
+    return { label: `Warnings (${input.scan.warnings.length})`, className: 'text-status-warning' }
+  }
+
+  if (input.scan.warnings.length > 0) {
+    return { label: `Info (${input.scan.warnings.length})`, className: 'text-fg-2' }
+  }
+
+  return { label: 'Clean', className: 'text-status-success' }
 }
 
 function diffFileManifests(
@@ -210,14 +211,15 @@ export function SkillDetailClient({ slug, agents }: { slug: string; agents: Agen
 
   const runtimeReqs = useMemo(() => {
     const files = versionDetail?.version?.files ?? []
-    const bins = inferBinsFromFiles(files)
-    const envVars = extractEnvVarsFromText(skillMd)
-    const primaryEnv = envVars[0] ?? null
-    return { bins, envVars, primaryEnv }
+    return extractRuntimeRequirements({ files, skillMd })
   }, [versionDetail?.version?.files, skillMd])
 
   const moderation = detail?.moderation ?? null
   const moderationUi = useMemo(() => moderationBadge(moderation), [moderation])
+  const openClawScanUi = useMemo(
+    () => localScanBadge({ scan, scanError, isScanning }),
+    [scan, scanError, isScanning]
+  )
 
   const fetchInitial = useCallback(async () => {
     setIsLoading(true)
@@ -604,11 +606,11 @@ export function SkillDetailClient({ slug, agents }: { slug: string; agents: Agen
             <dl className="mt-3 grid grid-cols-1 gap-2 text-xs">
               <div className="flex items-center justify-between">
                 <dt className="text-fg-2">VirusTotal</dt>
-                <dd className="text-fg-1">Not available</dd>
+                <dd className="text-fg-1">Unavailable via API</dd>
               </div>
               <div className="flex items-center justify-between">
-                <dt className="text-fg-2">OpenClaw scan</dt>
-                <dd className="text-fg-1">Not available</dd>
+                <dt className="text-fg-2">OpenClaw local scan</dt>
+                <dd className={openClawScanUi.className}>{openClawScanUi.label}</dd>
               </div>
               <div className="flex items-center justify-between">
                 <dt className="text-fg-2">Moderation</dt>

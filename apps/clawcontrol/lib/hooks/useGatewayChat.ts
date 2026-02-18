@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react'
 import { useChatStore, type ChatAttachment } from '@/lib/stores/chat-store'
+import { apiRequest } from '@/lib/http'
 
 type SseJson =
   | { chunk: string }
@@ -92,7 +93,7 @@ export function useGatewayChat() {
       let agentResponse = ''
 
       try {
-        const res = await fetch(`/api/openclaw/console/sessions/${sessionId}/chat`, {
+        const res = await apiRequest(`/api/openclaw/console/sessions/${sessionId}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -198,7 +199,7 @@ export function useGatewayChat() {
     if (!sessionId) return
 
     try {
-      const res = await fetch(`/api/openclaw/console/sessions/${sessionId}/abort`, {
+      const res = await apiRequest(`/api/openclaw/console/sessions/${sessionId}/abort`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ runId }),

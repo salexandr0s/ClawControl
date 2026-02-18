@@ -198,7 +198,8 @@ function normalizeBody(
     delivery: delivery ?? { mode: 'none' },
   }
 
-  if (normalized.delivery.mode !== 'none' && normalized.sessionTarget !== 'isolated') {
+  const deliveryMode = normalized.delivery?.mode ?? 'none'
+  if (deliveryMode !== 'none' && normalized.sessionTarget !== 'isolated') {
     return { ok: false, error: 'delivery modes announce/webhook require sessionTarget=isolated' }
   }
 

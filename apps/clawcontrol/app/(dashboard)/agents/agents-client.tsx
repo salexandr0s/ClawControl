@@ -15,6 +15,8 @@ import { FileEditorModal } from '@/components/file-editor-modal'
 import { SkillSelector } from '@/components/skill-selector'
 import {
   agentsApi,
+  apiDeleteJson,
+  apiPost,
   modelsApi,
   templatesApi,
   skillsApi,
@@ -108,6 +110,15 @@ const DEFAULT_AGENT_MODEL_CATALOG: AgentModelCatalog = {
     provider: inferModelProvider(model.id),
   })),
   statusById: {},
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(new Error('Failed to read avatar image'))
+    reader.readAsDataURL(file)
+  })
 }
 
 function buildAgentModelCatalog(listedModels: ModelListItem[]): AgentModelCatalog {
@@ -468,18 +479,10 @@ export function AgentsClient() {
       actionDescription: `Upload custom avatar for ${agent.displayName}`,
       entityName: agent.displayName,
       onConfirm: async (typedConfirmText) => {
-        const reader = new FileReader()
-        reader.onload = async () => {
-          const base64 = (reader.result as string).split(',')[1]
-          await fetch(`/api/agents/${agent.id}/avatar`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: base64, typedConfirmText }),
-          })
-          await fetchData()
-          setCreateResult({ success: true, message: 'Avatar uploaded' })
-        }
-        reader.readAsDataURL(file)
+        const dataUrl = await readFileAsDataUrl(file)
+        await apiPost(`/api/agents/${agent.id}/avatar`, { dataUrl, typedConfirmText })
+        await fetchData()
+        setCreateResult({ success: true, message: 'Avatar uploaded' })
       },
       onError: (err) => {
         setCreateResult({ success: false, message: err.message })
@@ -495,9 +498,7 @@ export function AgentsClient() {
       actionDescription: `Reset avatar to default identicon for ${agent.displayName}`,
       entityName: agent.displayName,
       onConfirm: async (typedConfirmText) => {
-        await fetch(`/api/agents/${agent.id}/avatar?typedConfirmText=${encodeURIComponent(typedConfirmText)}`, {
-          method: 'DELETE',
-        })
+        await apiDeleteJson(`/api/agents/${agent.id}/avatar`, { typedConfirmText })
         await fetchData()
         setCreateResult({ success: true, message: 'Avatar reset to default' })
       },
