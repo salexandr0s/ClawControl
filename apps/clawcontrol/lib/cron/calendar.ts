@@ -1,3 +1,5 @@
+import { normalizeCronExpressionToFiveFields } from './expression'
+
 export type CalendarView = 'day' | 'week' | 'month' | 'year'
 
 export interface CronCalendarSchedule {
@@ -203,18 +205,13 @@ function matchesField(field: ParsedCronField, value: number): boolean {
 }
 
 function parseCronExpression(expr: string | undefined): ParsedCronExpr | null {
-  if (!expr || !expr.trim()) return null
-
-  const normalized = expr.trim().replace(/\s+/g, ' ')
+  const normalized = normalizeCronExpressionToFiveFields(expr)
+  if (!normalized) return null
   if (cronExprCache.has(normalized)) {
     return cronExprCache.get(normalized) ?? null
   }
 
   const parts = normalized.split(' ')
-  if (parts.length !== 5) {
-    cronExprCache.set(normalized, null)
-    return null
-  }
 
   const minute = parseCronField(parts[0], 0, 59)
   const hour = parseCronField(parts[1], 0, 23)

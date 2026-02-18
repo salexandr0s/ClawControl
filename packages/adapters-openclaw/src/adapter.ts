@@ -19,6 +19,8 @@ import type {
 import {
   runCommand,
   runCommandJson,
+  runDynamicCommand,
+  parseJsonFromCommandOutput,
   executeCommand,
   checkOpenClawAvailable,
 } from './command-runner'
@@ -396,28 +398,68 @@ class LocalCliAdapter implements OpenClawAdapter {
       }
     }
 
-    const result = await runCommandJson<{
-      ok: boolean
-      issues: Array<{ message: string; pluginId?: string; severity?: string }>
-    }>('plugins.doctor.json')
+    const result = await runCommand('plugins.doctor')
+    const output = `${result.stdout}\n${result.stderr}`.trim()
 
-    if (result.error) {
+    if (result.exitCode !== 0) {
       return {
         ok: false,
-        issues: [{ pluginId: 'system', severity: 'error', message: result.error }],
+        issues: [{
+          pluginId: 'system',
+          severity: 'error',
+          message: output || result.error || 'Plugin doctor failed',
+        }],
       }
     }
 
-    // Map issues to ensure proper types
-    const issues = (result.data?.issues ?? []).map((i) => ({
-      pluginId: i.pluginId ?? 'unknown',
-      severity: (i.severity === 'error' || i.severity === 'warning' ? i.severity : 'error') as 'error' | 'warning',
-      message: i.message,
-    }))
+    const parsed = parseJsonFromCommandOutput<{
+      ok: boolean
+      issues: Array<{ message: string; pluginId?: string; severity?: string }>
+    }>(result.stdout)
+    if (parsed) {
+      const issues = (parsed.issues ?? []).map((i) => ({
+        pluginId: i.pluginId ?? 'unknown',
+        severity: (i.severity === 'error' || i.severity === 'warning' ? i.severity : 'error') as 'error' | 'warning',
+        message: i.message,
+      }))
+      return {
+        ok: parsed.ok ?? issues.length === 0,
+        issues,
+      }
+    }
+
+    const normalized = output.toLowerCase()
+    if (!normalized || normalized.includes('no plugin issues detected')) {
+      return { ok: true, issues: [] }
+    }
+
+    const issueLines = output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('- '))
+
+    if (issueLines.length === 0) {
+      return { ok: true, issues: [] }
+    }
 
     return {
-      ok: result.data?.ok ?? true,
-      issues,
+      ok: false,
+      issues: issueLines.map((line) => {
+        const cleaned = line.replace(/^-+\s*/, '')
+        const match = cleaned.match(/^([^:]+):\s*(.+)$/)
+        if (!match) {
+          return {
+            pluginId: 'unknown',
+            severity: 'error' as const,
+            message: cleaned,
+          }
+        }
+        return {
+          pluginId: match[1].trim(),
+          severity: 'error' as const,
+          message: match[2].trim(),
+        }
+      }),
     }
   }
 
@@ -428,10 +470,12 @@ class LocalCliAdapter implements OpenClawAdapter {
       return
     }
 
-    // Note: Can't directly pass spec to executeCommand since it only takes allowed command IDs
-    // Would need to extend the command runner to support dynamic arguments
-    yield `[LocalCLI] Installing plugin: ${spec}\n`
-    yield '[LocalCLI] Note: Plugin install via CLI requires direct command execution with arguments\n'
+    const result = await runDynamicCommand('plugins.install', { spec })
+    if (result.stdout) yield result.stdout
+    if (result.stderr) yield result.stderr
+    if (result.exitCode !== 0 && !result.stderr) {
+      yield `[Error] Plugin install failed (exit ${result.exitCode})\n`
+    }
   }
 
   async enablePlugin(id: string): Promise<void> {
@@ -440,9 +484,10 @@ class LocalCliAdapter implements OpenClawAdapter {
       throw new Error('OpenClaw CLI not available')
     }
 
-    // Note: plugins.enable needs the id as an argument
-    // Would need to extend command runner to support dynamic arguments
-    console.log(`[LocalCLI] Enable plugin: ${id}`)
+    const result = await runDynamicCommand('plugins.enable', { id })
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr || result.error || `Failed to enable plugin "${id}"`)
+    }
   }
 
   async disablePlugin(id: string): Promise<void> {
@@ -451,9 +496,10 @@ class LocalCliAdapter implements OpenClawAdapter {
       throw new Error('OpenClaw CLI not available')
     }
 
-    // Note: plugins.disable needs the id as an argument
-    // Would need to extend command runner to support dynamic arguments
-    console.log(`[LocalCLI] Disable plugin: ${id}`)
+    const result = await runDynamicCommand('plugins.disable', { id })
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr || result.error || `Failed to disable plugin "${id}"`)
+    }
   }
 }
 

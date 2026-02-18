@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { runDynamicCommandJson } from '@clawcontrol/adapters-openclaw'
+import { parseJsonFromCommandOutput, runDynamicCommand } from '@clawcontrol/adapters-openclaw'
 import {
   type OpenClawResponse,
   OPENCLAW_TIMEOUT_MS,
@@ -16,6 +16,8 @@ interface EditBody {
   cron?: string
   at?: string
   tz?: string
+  stagger?: string
+  exact?: boolean
 }
 
 interface EditResult {
@@ -67,15 +69,13 @@ export async function POST(
   const start = Date.now()
 
   try {
-    let res:
-      | { data?: unknown; error?: string; exitCode: number }
-      | null = null
+    let result: Awaited<ReturnType<typeof runDynamicCommand>> | null = null
 
     if (mode === 'every') {
       if (!body.every || typeof body.every !== 'string') {
         return NextResponse.json(unavailable('Missing every value', Date.now() - start))
       }
-      res = await runDynamicCommandJson('cron.edit.every', {
+      result = await runDynamicCommand('cron.edit.every', {
         id: jobId,
         every: body.every.trim(),
       }, {
@@ -95,8 +95,14 @@ export async function POST(
       if (body.tz && typeof body.tz === 'string' && body.tz.trim()) {
         params.tz = body.tz.trim()
       }
+      if (body.stagger && typeof body.stagger === 'string' && body.stagger.trim()) {
+        params.stagger = body.stagger.trim()
+      }
+      if (body.exact === true) {
+        params.exact = 'true'
+      }
 
-      res = await runDynamicCommandJson('cron.edit.cron', params, {
+      result = await runDynamicCommand('cron.edit.cron', params, {
         timeout: OPENCLAW_TIMEOUT_MS,
       })
     }
@@ -105,7 +111,7 @@ export async function POST(
       if (!body.at || typeof body.at !== 'string') {
         return NextResponse.json(unavailable('Missing at value', Date.now() - start))
       }
-      res = await runDynamicCommandJson('cron.edit.at', {
+      result = await runDynamicCommand('cron.edit.at', {
         id: jobId,
         at: body.at.trim(),
       }, {
@@ -115,11 +121,18 @@ export async function POST(
 
     const latencyMs = Date.now() - start
 
-    if (!res || res.error) {
-      return NextResponse.json(unavailable(res?.error ?? 'Failed to edit cron job', latencyMs))
+    if (!result) {
+      return NextResponse.json(unavailable('Failed to edit cron job', latencyMs))
+    }
+
+    if (result.exitCode !== 0) {
+      return NextResponse.json(
+        unavailable(result.stderr || result.error || `Command failed with exit code ${result.exitCode}`, latencyMs)
+      )
     }
 
     clearCache('cron.jobs')
+    const parsed = parseJsonFromCommandOutput<{ message?: string }>(result.stdout)
 
     return NextResponse.json({
       status: latencyMs > DEGRADED_THRESHOLD_MS ? 'degraded' : 'ok',
@@ -128,6 +141,7 @@ export async function POST(
         jobId,
         updated: true,
         mode,
+        message: parsed?.message,
       },
       error: null,
       timestamp: new Date().toISOString(),

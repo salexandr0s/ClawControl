@@ -16,6 +16,7 @@ import { cn } from '../theme'
 export type SelectDropdownTone = 'toolbar' | 'field'
 export type SelectDropdownSize = 'sm' | 'md'
 export type SelectDropdownAlign = 'start' | 'end'
+export type SelectDropdownMenuWidth = 'trigger' | 'content' | number | string
 
 export interface SelectDropdownOption<T extends string = string> {
   value: T
@@ -50,7 +51,7 @@ export interface SelectDropdownProps<T extends string = string> {
   emptyMessage?: ReactNode
   footerAction?: SelectDropdownFooterAction
   align?: SelectDropdownAlign
-  menuWidth?: 'trigger' | number | string
+  menuWidth?: SelectDropdownMenuWidth
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -221,8 +222,10 @@ export function SelectDropdown<T extends string = string>({
       }
 
       if (menuWidth === 'trigger') {
-        // Prefer menus that can expand to fit option labels while keeping at least the trigger width.
-        // This prevents short triggers (e.g. "Stars") from truncating longer menu options (e.g. "Downloads").
+        // Canonical behavior: menu width follows trigger width.
+        nextStyle.width = Math.min(rect.width, maxAllowedWidth)
+      } else if (menuWidth === 'content') {
+        // Optional opt-in behavior for menus that should size to their option labels.
         nextStyle.width = 'max-content'
         nextStyle.minWidth = Math.min(rect.width, maxAllowedWidth)
       } else if (typeof menuWidth === 'number') {
@@ -235,6 +238,8 @@ export function SelectDropdown<T extends string = string>({
       const measuredWidth = menuRef.current?.offsetWidth ?? rect.width
       const widthForClamp =
         menuWidth === 'trigger'
+          ? Math.min(rect.width, maxAllowedWidth)
+          : menuWidth === 'content'
           ? Math.min(Math.max(rect.width, measuredWidth), maxAllowedWidth)
           : typeof menuWidth === 'number'
             ? Math.min(menuWidth, maxAllowedWidth)

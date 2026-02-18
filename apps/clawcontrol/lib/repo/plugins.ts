@@ -10,7 +10,7 @@
  * - DB is only used for caching/history, never as canonical truth
  */
 
-import { createAdapter, runDynamicCommandJson } from '@clawcontrol/adapters-openclaw'
+import { createAdapter, runDynamicCommand } from '@clawcontrol/adapters-openclaw'
 import {
   getOpenClawCapabilities,
   type OpenClawCapabilities,
@@ -175,7 +175,7 @@ export function createCliPluginsRepo(): PluginsRepo {
     async getById(id: string) {
       const caps = await getOpenClawCapabilities()
 
-      if (!caps.plugins.supported || !caps.plugins.infoJson) {
+      if (!caps.plugins.supported || !caps.plugins.listJson) {
         return {
           data: null,
           meta: buildUnsupportedMeta(caps),
@@ -305,15 +305,15 @@ export function createCliPluginsRepo(): PluginsRepo {
       }
 
       try {
-        const result = await runDynamicCommandJson<{ ok?: boolean; message?: string }>('plugins.uninstall', { id })
+        const result = await runDynamicCommand('plugins.uninstall', { id })
 
-        if (result.error) {
+        if (result.exitCode !== 0) {
           return {
             success: false,
             meta: {
               ...(await buildMeta('openclaw_cli')),
               degraded: true,
-              message: result.error,
+              message: result.stderr || result.error || `Uninstall failed with exit code ${result.exitCode}`,
             },
           }
         }

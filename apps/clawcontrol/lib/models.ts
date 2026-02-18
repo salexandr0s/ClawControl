@@ -49,6 +49,37 @@ export type ModelColor = (typeof AVAILABLE_MODELS)[number]['color']
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-5'
 
 /**
+ * Infer provider id from either canonical ("provider/model") or legacy model ids.
+ */
+export function inferModelProvider(id: string | null | undefined): string {
+  if (!id) return 'unknown'
+
+  const trimmed = id.trim()
+  if (!trimmed) return 'unknown'
+
+  const slashIndex = trimmed.indexOf('/')
+  if (slashIndex > 0) {
+    return trimmed.slice(0, slashIndex).toLowerCase()
+  }
+
+  const normalized = trimmed.toLowerCase()
+  if (
+    normalized.startsWith('claude')
+    || normalized.includes('sonnet')
+    || normalized.includes('opus')
+    || normalized.includes('haiku')
+  ) {
+    return 'anthropic'
+  }
+  if (normalized.includes('codex')) return 'openai-codex'
+  if (normalized.startsWith('gpt-') || normalized.startsWith('gpt')) return 'openai'
+  if (normalized.includes('gemini')) return 'google-gemini'
+  if (normalized.startsWith('xai') || normalized.startsWith('grok')) return 'xai'
+
+  return 'unknown'
+}
+
+/**
  * Get model info by ID
  */
 export function getModelById(id: string | null | undefined): (typeof AVAILABLE_MODELS)[number] | undefined {

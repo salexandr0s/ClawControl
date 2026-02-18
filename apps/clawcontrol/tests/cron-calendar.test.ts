@@ -65,6 +65,16 @@ describe('cron calendar math', () => {
     expect(estimateRunsForUtcDate(job, new Date(Date.UTC(2026, 1, 7)))).toBe(48)
   })
 
+  it('accepts 6-field cron expressions without parse failure', () => {
+    const job: CronCalendarJob = {
+      id: 'twice-hourly-with-seconds',
+      enabled: true,
+      schedule: { kind: 'cron', expr: '0 13,43 * * * *' },
+    }
+
+    expect(estimateRunsForUtcDate(job, new Date(Date.UTC(2026, 1, 7)))).toBe(48)
+  })
+
   it('uses standard DOM/DOW OR semantics when both fields are restricted', () => {
     const job: CronCalendarJob = {
       id: 'weekday-or-dom',

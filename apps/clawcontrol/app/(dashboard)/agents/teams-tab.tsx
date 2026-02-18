@@ -1383,16 +1383,22 @@ export function TeamsTab() {
 
                         <label className="block text-xs text-fg-2">
                           Reports To
-                          <select
+                          <SelectDropdown
                             value={member.reportsTo ?? ''}
-                            onChange={(event) => setReportsTo(templateId, event.target.value || null)}
-                            className="mt-1 w-full rounded-[var(--radius-sm)] border border-bd-0 bg-bg-3 px-2 py-1 text-xs text-fg-0"
-                          >
-                            <option value="">(none)</option>
-                            {templateChoices.map((choice) => (
-                              <option key={choice} value={choice}>{choice}</option>
-                            ))}
-                          </select>
+                            onChange={(nextValue) => setReportsTo(templateId, nextValue || null)}
+                            ariaLabel={`Reports to for ${templateId}`}
+                            tone="field"
+                            size="sm"
+                            className="mt-1 w-full"
+                            options={[
+                              { value: '', label: '(none)' },
+                              ...templateChoices.map((choice) => ({
+                                value: choice,
+                                label: choice,
+                                textValue: choice,
+                              })),
+                            ]}
+                          />
                         </label>
 
                         {([

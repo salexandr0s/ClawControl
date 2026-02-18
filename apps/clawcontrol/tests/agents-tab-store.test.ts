@@ -92,6 +92,13 @@ describe('agents-tab-store', () => {
     const requestB = mod.revalidateAgentsTabCache({ force: false, blocking: false })
 
     expect(mockAgentsList).toHaveBeenCalledTimes(1)
+    expect(mockAgentsList).toHaveBeenCalledWith({
+      mode: 'light',
+      includeSessionOverlay: true,
+      includeModelOverlay: true,
+      syncSessions: true,
+      cacheTtlMs: 5000,
+    })
     expect(mockOperationsList).toHaveBeenCalledTimes(1)
 
     resolveAgents({ data: freshAgents })

@@ -11,6 +11,12 @@ export interface SessionFileIdentity {
 export interface ParsedUsageLine {
   seenAt: Date
   model: string | null
+  sessionKey: string | null
+  source: string | null
+  channel: string | null
+  kind: string | null
+  operationId: string | null
+  workOrderId: string | null
   inputTokens: bigint
   outputTokens: bigint
   cacheReadTokens: bigint
@@ -76,6 +82,48 @@ function getNestedRecord(value: unknown): JsonRecord | null {
   return value as JsonRecord
 }
 
+function toText(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function normalizeSourceLabel(value: string): string {
+  const key = value.trim().toLowerCase()
+  if (!key) return 'unknown'
+
+  const sourceMap: Record<string, string> = {
+    agent: 'overlay',
+    webchat: 'web',
+    browser: 'web',
+    telegram: 'telegram',
+    discord: 'discord',
+    signal: 'signal',
+    whatsapp: 'whatsapp',
+    matrix: 'matrix',
+    slack: 'slack',
+    teams: 'teams',
+  }
+
+  return sourceMap[key] ?? key
+}
+
+function normalizeChannelLabel(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function parseLinkageFromSessionKey(sessionKey: string | null): { operationId: string | null; workOrderId: string | null } {
+  if (!sessionKey) return { operationId: null, workOrderId: null }
+
+  const opMatch = sessionKey.match(/(?:^|:)op:([a-z0-9]{10,})/i)
+  const woMatch = sessionKey.match(/(?:^|:)wo:([a-z0-9]{10,})/i)
+
+  return {
+    operationId: opMatch?.[1] ?? null,
+    workOrderId: woMatch?.[1] ?? null,
+  }
+}
+
 function getUsage(record: JsonRecord): UsageShape | null {
   const direct = getNestedRecord(record.usage)
   if (direct) return direct as UsageShape
@@ -93,6 +141,110 @@ function getUsage(record: JsonRecord): UsageShape | null {
   }
 
   return null
+}
+
+function getSessionKey(record: JsonRecord): string | null {
+  const message = getNestedRecord(record.message)
+  const payload = getNestedRecord(record.payload)
+  const session = getNestedRecord(record.session)
+  const payloadSession = getNestedRecord(payload?.session)
+
+  const candidates = [
+    toText(record.sessionKey),
+    toText(record.session_key),
+    toText(message?.sessionKey),
+    toText(message?.session_key),
+    toText(payload?.sessionKey),
+    toText(payload?.session_key),
+    toText(session?.key),
+    toText(payloadSession?.key),
+  ]
+
+  return candidates.find((value): value is string => Boolean(value)) ?? null
+}
+
+function getKind(record: JsonRecord): string | null {
+  const message = getNestedRecord(record.message)
+  const payload = getNestedRecord(record.payload)
+
+  const value = toText(record.kind) ?? toText(message?.kind) ?? toText(payload?.kind)
+  return value ? value.toLowerCase() : null
+}
+
+function getChannel(record: JsonRecord): string | null {
+  const message = getNestedRecord(record.message)
+  const payload = getNestedRecord(record.payload)
+
+  const value =
+    toText(record.channel)
+    ?? toText(record.chatType)
+    ?? toText(message?.channel)
+    ?? toText(message?.chatType)
+    ?? toText(payload?.channel)
+    ?? toText(payload?.chatType)
+
+  return value ? normalizeChannelLabel(value) : null
+}
+
+function getSource(record: JsonRecord, sessionKey: string | null, channel: string | null): string | null {
+  const message = getNestedRecord(record.message)
+  const payload = getNestedRecord(record.payload)
+
+  const explicit =
+    toText(record.source)
+    ?? toText(message?.source)
+    ?? toText(payload?.source)
+
+  if (explicit) return normalizeSourceLabel(explicit)
+  if (channel) return normalizeSourceLabel(channel)
+
+  if (sessionKey) {
+    const firstToken = sessionKey.split(':')[0] ?? ''
+    const normalized = normalizeSourceLabel(firstToken)
+    return normalized || null
+  }
+
+  return null
+}
+
+function getOperationId(record: JsonRecord, sessionKey: string | null): string | null {
+  const message = getNestedRecord(record.message)
+  const payload = getNestedRecord(record.payload)
+  const meta = getNestedRecord(record.meta)
+  const payloadMeta = getNestedRecord(payload?.meta)
+  const linkage = parseLinkageFromSessionKey(sessionKey)
+
+  return (
+    toText(record.operationId)
+    ?? toText(record.operation_id)
+    ?? toText(message?.operationId)
+    ?? toText(message?.operation_id)
+    ?? toText(payload?.operationId)
+    ?? toText(payload?.operation_id)
+    ?? toText(meta?.operationId)
+    ?? toText(payloadMeta?.operationId)
+    ?? linkage.operationId
+  )
+}
+
+function getWorkOrderId(record: JsonRecord, sessionKey: string | null): string | null {
+  const message = getNestedRecord(record.message)
+  const payload = getNestedRecord(record.payload)
+  const meta = getNestedRecord(record.meta)
+  const payloadMeta = getNestedRecord(payload?.meta)
+  const linkage = parseLinkageFromSessionKey(sessionKey)
+
+  return (
+    toText(record.workOrderId)
+    ?? toText(record.work_order_id)
+    ?? toText(message?.workOrderId)
+    ?? toText(message?.work_order_id)
+    ?? toText(payload?.workOrderId)
+    ?? toText(payload?.work_order_id)
+    ?? toText(meta?.workOrderId)
+    ?? toText(payloadMeta?.workOrderId)
+    ?? linkage.workOrderId
+  )
 }
 
 function getModel(record: JsonRecord): string | null {
@@ -221,6 +373,12 @@ export function parseUsageLine(line: string): ParsedUsageLine | null {
     : 0n
 
   const totalCostMicros = usage ? parseCostMicros(usage.cost) : 0n
+  const sessionKey = getSessionKey(record)
+  const channel = getChannel(record)
+  const source = getSource(record, sessionKey, channel)
+  const kind = getKind(record)
+  const operationId = getOperationId(record, sessionKey)
+  const workOrderId = getWorkOrderId(record, sessionKey)
 
   const seenAt =
     pickDate(record.createdAt)
@@ -240,6 +398,12 @@ export function parseUsageLine(line: string): ParsedUsageLine | null {
   return {
     seenAt,
     model: getModel(record),
+    sessionKey,
+    source,
+    channel,
+    kind,
+    operationId,
+    workOrderId,
     inputTokens,
     outputTokens,
     cacheReadTokens,

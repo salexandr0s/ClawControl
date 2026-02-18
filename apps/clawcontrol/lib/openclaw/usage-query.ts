@@ -58,6 +58,20 @@ export interface UsageBreakdownBothResult {
   byModel: UsageBreakdownGroup[]
 }
 
+interface UsageAggregateRow {
+  sessionId: string
+  agentId: string
+  modelKey: string
+  model: string | null
+  dayStart: Date
+  inputTokens: bigint
+  outputTokens: bigint
+  cacheReadTokens: bigint
+  cacheWriteTokens: bigint
+  totalTokens: bigint
+  totalCostMicros: bigint
+}
+
 const QUERY_TTL_MS = 15_000
 const DEFAULT_RANGE_DAYS = 30
 const DEFAULT_RANGE_ROUND_MS = 60_000
@@ -128,31 +142,35 @@ function computeCacheEfficiency(cacheReadTokens: bigint, inputTokens: bigint): n
   return Number((cacheReadTokens * 10_000n) / denom) / 100
 }
 
-async function fetchUsageRowsRaw(from: Date, to: Date, agentId: string | null) {
-  return prisma.sessionUsageAggregate.findMany({
+async function fetchUsageRowsRaw(from: Date, to: Date, agentId: string | null): Promise<UsageAggregateRow[]> {
+  const fromDay = startOfDay(from)
+  const toDay = startOfDay(to)
+
+  return prisma.sessionUsageDailyAggregate.findMany({
     where: {
-      lastSeenAt: {
-        gte: from,
-        lte: to,
+      dayStart: {
+        gte: fromDay,
+        lte: toDay,
       },
       ...(agentId ? { agentId } : {}),
     },
     select: {
+      sessionId: true,
       agentId: true,
+      modelKey: true,
       model: true,
+      dayStart: true,
       inputTokens: true,
       outputTokens: true,
       cacheReadTokens: true,
       cacheWriteTokens: true,
       totalTokens: true,
       totalCostMicros: true,
-      lastSeenAt: true,
-      sessionId: true,
     },
   })
 }
 
-async function fetchUsageRowsCached(from: Date, to: Date, agentId: string | null) {
+async function fetchUsageRowsCached(from: Date, to: Date, agentId: string | null): Promise<UsageAggregateRow[]> {
   const key = `usage.rows:${from.toISOString()}:${to.toISOString()}:${agentId ?? 'all'}`
   const { value } = await getOrLoadWithCache(key, QUERY_TTL_MS, async () =>
     fetchUsageRowsRaw(from, to, agentId)
@@ -160,11 +178,19 @@ async function fetchUsageRowsCached(from: Date, to: Date, agentId: string | null
   return value
 }
 
+function modelLabel(row: UsageAggregateRow): string {
+  const label = row.model?.trim()
+  if (label) return label
+  if (row.modelKey?.trim()) return row.modelKey
+  return 'unknown'
+}
+
 function aggregateBreakdownGroups(
-  rows: Awaited<ReturnType<typeof fetchUsageRowsRaw>>,
+  rows: UsageAggregateRow[],
   groupBy: 'model' | 'agent'
 ): UsageBreakdownGroup[] {
   const grouped = new Map<string, {
+    label: string
     inputTokens: bigint
     outputTokens: bigint
     cacheReadTokens: bigint
@@ -175,11 +201,16 @@ function aggregateBreakdownGroups(
   }>()
 
   for (const row of rows) {
-    const key = groupBy === 'model'
-      ? (row.model || 'unknown')
-      : row.agentId || 'unknown'
+    const normalizedKey = groupBy === 'model'
+      ? (row.modelKey || 'unknown')
+      : (row.agentId || 'unknown')
 
-    const prev = grouped.get(key) ?? {
+    const label = groupBy === 'model'
+      ? modelLabel(row)
+      : (row.agentId || 'unknown')
+
+    const prev = grouped.get(normalizedKey) ?? {
+      label,
       inputTokens: 0n,
       outputTokens: 0n,
       cacheReadTokens: 0n,
@@ -187,6 +218,10 @@ function aggregateBreakdownGroups(
       totalTokens: 0n,
       totalCostMicros: 0n,
       sessions: new Set<string>(),
+    }
+
+    if (prev.label === 'unknown' && label !== 'unknown') {
+      prev.label = label
     }
 
     prev.inputTokens += row.inputTokens
@@ -197,12 +232,12 @@ function aggregateBreakdownGroups(
     prev.totalCostMicros += row.totalCostMicros
     prev.sessions.add(row.sessionId)
 
-    grouped.set(key, prev)
+    grouped.set(normalizedKey, prev)
   }
 
-  return Array.from(grouped.entries())
-    .map(([key, value]) => ({
-      key,
+  return Array.from(grouped.values())
+    .map((value) => ({
+      key: value.label,
       inputTokens: toStr(value.inputTokens),
       outputTokens: toStr(value.outputTokens),
       cacheReadTokens: toStr(value.cacheReadTokens),
@@ -245,8 +280,7 @@ export async function getUsageSummary(input: {
     }>()
 
     for (const row of rows) {
-      if (!row.lastSeenAt) continue
-      const bucket = toBucketStart(row.lastSeenAt, input.range)
+      const bucket = toBucketStart(row.dayStart, input.range)
       const key = bucket.toISOString()
       const prev = buckets.get(key) ?? {
         inputTokens: 0n,

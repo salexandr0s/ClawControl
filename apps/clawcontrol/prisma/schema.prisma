@@ -303,6 +303,14 @@ model SessionUsageAggregate {
   id               String   @id @default(cuid())
   sessionId        String   @unique @map("session_id")
   agentId          String   @map("agent_id")
+  sessionKey       String?  @map("session_key")
+  source           String?
+  channel          String?
+  sessionKind      String?  @map("session_kind")
+  sessionClass     String?  @map("session_class")
+  providerKey      String?  @map("provider_key")
+  operationId      String?  @map("operation_id")
+  workOrderId      String?  @map("work_order_id")
   model            String?
   inputTokens      BigInt   @default(0) @map("input_tokens")
   outputTokens     BigInt   @default(0) @map("output_tokens")
@@ -320,9 +328,62 @@ model SessionUsageAggregate {
 
   @@index([agentId, lastSeenAt])
   @@index([model, lastSeenAt])
+  @@index([providerKey, lastSeenAt])
+  @@index([source, lastSeenAt])
+  @@index([channel, lastSeenAt])
+  @@index([sessionKind, lastSeenAt])
+  @@index([sessionClass, lastSeenAt])
+  @@index([operationId])
+  @@index([workOrderId])
   @@index([totalCostMicros])
   @@index([hasErrors])
   @@map("session_usage_aggregates")
+}
+
+model SessionUsageDailyAggregate {
+  id               String   @id @default(cuid())
+  sessionId        String   @map("session_id")
+  agentId          String   @map("agent_id")
+  modelKey         String   @map("model_key")
+  model            String?
+  dayStart         DateTime @map("day_start")
+  inputTokens      BigInt   @default(0) @map("input_tokens")
+  outputTokens     BigInt   @default(0) @map("output_tokens")
+  cacheReadTokens  BigInt   @default(0) @map("cache_read_tokens")
+  cacheWriteTokens BigInt   @default(0) @map("cache_write_tokens")
+  totalTokens      BigInt   @default(0) @map("total_tokens")
+  totalCostMicros  BigInt   @default(0) @map("total_cost_micros")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([sessionId, dayStart, modelKey])
+  @@index([dayStart])
+  @@index([dayStart, agentId])
+  @@index([dayStart, modelKey])
+  @@map("session_usage_daily_aggregates")
+}
+
+model SessionUsageHourlyAggregate {
+  id               String   @id @default(cuid())
+  sessionId        String   @map("session_id")
+  agentId          String   @map("agent_id")
+  modelKey         String   @map("model_key")
+  model            String?
+  hourStart        DateTime @map("hour_start")
+  inputTokens      BigInt   @default(0) @map("input_tokens")
+  outputTokens     BigInt   @default(0) @map("output_tokens")
+  cacheReadTokens  BigInt   @default(0) @map("cache_read_tokens")
+  cacheWriteTokens BigInt   @default(0) @map("cache_write_tokens")
+  totalTokens      BigInt   @default(0) @map("total_tokens")
+  totalCostMicros  BigInt   @default(0) @map("total_cost_micros")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([sessionId, hourStart, modelKey])
+  @@index([hourStart])
+  @@index([hourStart, agentId])
+  @@index([hourStart, modelKey])
+  @@map("session_usage_hourly_aggregates")
 }
 
 model SessionToolUsage {
@@ -339,6 +400,21 @@ model SessionToolUsage {
   @@index([toolName])
   @@index([sessionId])
   @@map("session_tool_usage")
+}
+
+model SessionToolUsageDailyAggregate {
+  id         String   @id @default(cuid())
+  sessionId  String   @map("session_id")
+  dayStart   DateTime @map("day_start")
+  toolName   String   @map("tool_name")
+  callCount  BigInt   @default(0) @map("call_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([sessionId, dayStart, toolName])
+  @@index([dayStart])
+  @@index([toolName, dayStart])
+  @@map("session_tool_usage_daily_aggregates")
 }
 
 // ============================================================================

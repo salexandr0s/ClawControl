@@ -22,8 +22,8 @@ const DEFAULT_OPENCLAW_BIN = 'openclaw'
 let resolvedOpenClawBin = process.env.OPENCLAW_BIN?.trim() || DEFAULT_OPENCLAW_BIN
 export const OPENCLAW_BIN = DEFAULT_OPENCLAW_BIN
 
-/** Minimum supported OpenClaw version (semver) */
-export const MIN_OPENCLAW_VERSION = '0.1.0'
+/** Minimum supported OpenClaw version (date-based semver) */
+export const MIN_OPENCLAW_VERSION = '2026.2.17'
 
 // ============================================================================
 // TYPES

@@ -8,22 +8,7 @@ import {
   setCache,
 } from '@/lib/openclaw/availability'
 import { classifyOpenClawError } from '@/lib/openclaw/error-shape'
-
-/**
- * Cron run DTO from OpenClaw CLI.
- * Based on `openclaw cron runs --id <jobId> --json` output.
- */
-export interface CronRunDTO {
-  id: string
-  jobId: string
-  startedAt: string
-  endedAt?: string
-  status: 'success' | 'failed' | 'running'
-  durationMs?: number
-  exitCode?: number
-  error?: string
-  output?: string
-}
+import { normalizeCronRunsPayload, type CronRunDTO } from '@/lib/repo/cron-normalize'
 
 /**
  * GET /api/openclaw/cron/runs?id=<jobId>
@@ -36,6 +21,7 @@ export interface CronRunDTO {
 export async function GET(request: NextRequest): Promise<NextResponse<OpenClawResponse<CronRunDTO[]> | { error: string }>> {
   const { searchParams } = new URL(request.url)
   const jobId = searchParams.get('id')
+  const limitRaw = searchParams.get('limit')
 
   // id parameter is required (CLI requires --id flag)
   if (!jobId) {
@@ -53,7 +39,19 @@ export async function GET(request: NextRequest): Promise<NextResponse<OpenClawRe
     )
   }
 
-  const cacheKey = `cron.runs.${jobId}`
+  let limit: number | undefined
+  if (limitRaw && limitRaw.trim()) {
+    const parsedLimit = Number(limitRaw)
+    if (!Number.isInteger(parsedLimit) || parsedLimit <= 0 || parsedLimit > 1000) {
+      return NextResponse.json(
+        { error: 'Invalid limit parameter' },
+        { status: 400 }
+      )
+    }
+    limit = parsedLimit
+  }
+
+  const cacheKey = limit !== undefined ? `cron.runs.${jobId}.${limit}` : `cron.runs.${jobId}`
 
   // Check cache first (15s TTL to prevent refresh cascade)
   const cached = getCached<CronRunDTO[]>(cacheKey)
@@ -64,7 +62,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<OpenClawRe
   const start = Date.now()
 
   try {
-    const res = await runDynamicCommandJson<CronRunDTO[]>('cron.runs', { id: jobId }, {
+    const params: Record<string, string> = { id: jobId }
+    if (limit !== undefined) params.limit = String(limit)
+
+    const res = await runDynamicCommandJson<unknown>('cron.runs', params, {
       timeout: OPENCLAW_TIMEOUT_MS,
     })
 
@@ -84,8 +85,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<OpenClawRe
       return NextResponse.json(response)
     }
 
-    // CLI may return null/undefined for empty list
-    const runs = res.data ?? []
+    const runs = normalizeCronRunsPayload(res.data, jobId)
 
     const response: OpenClawResponse<CronRunDTO[]> = {
       status: latencyMs > DEGRADED_THRESHOLD_MS ? 'degraded' : 'ok',

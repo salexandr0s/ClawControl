@@ -8,18 +8,7 @@ import {
   setCache,
 } from '@/lib/openclaw/availability'
 import { classifyOpenClawError } from '@/lib/openclaw/error-shape'
-
-/**
- * Cron scheduler status response from OpenClaw CLI.
- * Based on `openclaw cron status --json` output.
- */
-export interface CronStatusDTO {
-  running: boolean
-  jobCount: number
-  nextRun?: string
-  lastRun?: string
-  uptime?: number
-}
+import { normalizeCronStatusPayload, type CronStatusDTO } from '@/lib/repo/cron-normalize'
 
 const CACHE_KEY = 'cron.status'
 
@@ -39,15 +28,15 @@ export async function GET(): Promise<NextResponse<OpenClawResponse<CronStatusDTO
   const start = Date.now()
 
   try {
-    const res = await runCommandJson<CronStatusDTO>('cron.status.json', {
+    const res = await runCommandJson<unknown>('cron.status.json', {
       timeout: OPENCLAW_TIMEOUT_MS,
     })
 
     const latencyMs = Date.now() - start
 
-    if (res.error || !res.data) {
+    if (res.error) {
       const details = classifyOpenClawError(res.error ?? 'Failed to get cron status', {
-        parseFailed: !res.error && !res.data,
+        parseFailed: false,
       })
       const response: OpenClawResponse<CronStatusDTO> = {
         status: 'unavailable',
@@ -64,7 +53,7 @@ export async function GET(): Promise<NextResponse<OpenClawResponse<CronStatusDTO
     const response: OpenClawResponse<CronStatusDTO> = {
       status: latencyMs > DEGRADED_THRESHOLD_MS ? 'degraded' : 'ok',
       latencyMs,
-      data: res.data,
+      data: normalizeCronStatusPayload(res.data),
       error: null,
       timestamp: new Date().toISOString(),
       cached: false,

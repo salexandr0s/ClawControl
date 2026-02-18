@@ -13,6 +13,7 @@ import { getOrLoadWithCache } from '@/lib/perf/async-cache'
 const AUTO_SYNC_TTL_MS = 4_000
 const AGENTS_ROUTE_DEFAULT_TTL_MS = 2_500
 const AGENTS_ROUTE_LIGHT_TTL_MS = 5_000
+const ACTIVE_SESSION_AGE_MS = 5 * 60 * 1000
 let lastAutoSyncAtMs = 0
 let autoSyncInFlight: Promise<{ seen: number; upserted: number }> | null = null
 
@@ -100,6 +101,17 @@ function isSyntheticIdleSeenAt(agent: AgentDTO): boolean {
   return Math.abs(agent.updatedAt.getTime() - agent.lastSeenAt.getTime()) <= 1_000
 }
 
+function staleSafeSessionState(
+  state: 'idle' | 'active' | 'error',
+  seenAtMs: number,
+  nowMs: number
+): 'idle' | 'active' | 'error' {
+  if ((state === 'active' || state === 'error') && (nowMs - seenAtMs) >= ACTIVE_SESSION_AGE_MS) {
+    return 'idle'
+  }
+  return state
+}
+
 async function overlaySessionStatus(agents: AgentDTO[]): Promise<AgentDTO[]> {
   if (agents.length === 0) return agents
 
@@ -120,7 +132,10 @@ async function overlaySessionStatus(agents: AgentDTO[]): Promise<AgentDTO[]> {
     orderBy: { lastSeenAt: 'desc' },
   })
 
+  const nowMs = Date.now()
   const bestByRuntimeId = new Map<string, { state: 'idle' | 'active' | 'error'; seenAtMs: number }>()
+  const freshestByRuntimeId = new Map<string, number>()
+
   for (const row of rows) {
     const runtimeId = row.agentId.trim().toLowerCase()
     if (!runtimeId) continue
@@ -129,16 +144,23 @@ async function overlaySessionStatus(agents: AgentDTO[]): Promise<AgentDTO[]> {
     if (!state) continue
 
     const seenAtMs = row.lastSeenAt.getTime()
+    const effectiveState = staleSafeSessionState(state, seenAtMs, nowMs)
+
+    const freshestSeenAtMs = freshestByRuntimeId.get(runtimeId)
+    if (freshestSeenAtMs === undefined || seenAtMs > freshestSeenAtMs) {
+      freshestByRuntimeId.set(runtimeId, seenAtMs)
+    }
+
     const existing = bestByRuntimeId.get(runtimeId)
     if (!existing) {
-      bestByRuntimeId.set(runtimeId, { state, seenAtMs })
+      bestByRuntimeId.set(runtimeId, { state: effectiveState, seenAtMs })
       continue
     }
 
     const existingPriority = STATUS_PRIORITY[existing.state]
-    const nextPriority = STATUS_PRIORITY[state]
+    const nextPriority = STATUS_PRIORITY[effectiveState]
     if (nextPriority > existingPriority || (nextPriority === existingPriority && seenAtMs > existing.seenAtMs)) {
-      bestByRuntimeId.set(runtimeId, { state, seenAtMs })
+      bestByRuntimeId.set(runtimeId, { state: effectiveState, seenAtMs })
     }
   }
 
@@ -146,8 +168,16 @@ async function overlaySessionStatus(agents: AgentDTO[]): Promise<AgentDTO[]> {
     const tokens = tokensByAgent.get(agent.id) ?? []
 
     let best: { state: 'idle' | 'active' | 'error'; seenAtMs: number } | null = null
+    let freshestSeenAtMs: number | null = null
+
     for (const token of tokens) {
-      const candidate = bestByRuntimeId.get(token.toLowerCase())
+      const normalizedToken = token.toLowerCase()
+      const freshest = freshestByRuntimeId.get(normalizedToken)
+      if (freshest !== undefined && (freshestSeenAtMs === null || freshest > freshestSeenAtMs)) {
+        freshestSeenAtMs = freshest
+      }
+
+      const candidate = bestByRuntimeId.get(normalizedToken)
       if (!candidate) continue
       if (!best) {
         best = candidate
@@ -162,19 +192,32 @@ async function overlaySessionStatus(agents: AgentDTO[]): Promise<AgentDTO[]> {
     }
 
     if (!best) {
+      if (agent.status === 'active' || agent.status === 'error') {
+        return {
+          ...agent,
+          status: 'idle',
+          ...(isSyntheticIdleSeenAt(agent) ? { lastSeenAt: null } : {}),
+        }
+      }
       if (!isSyntheticIdleSeenAt(agent)) return agent
       return { ...agent, lastSeenAt: null }
     }
 
     const status = mergeStatus(agent.status, best.state)
-    const shouldUpdateSeenAt = !agent.lastSeenAt || best.seenAtMs !== agent.lastSeenAt.getTime()
+    const shouldUpdateSeenAt =
+      freshestSeenAtMs !== null
+      && (!agent.lastSeenAt || freshestSeenAtMs !== agent.lastSeenAt.getTime())
+    const shouldUpdateHeartbeatAt =
+      freshestSeenAtMs !== null
+      && (!agent.lastHeartbeatAt || freshestSeenAtMs !== agent.lastHeartbeatAt.getTime())
 
-    if (status === agent.status && !shouldUpdateSeenAt) return agent
+    if (status === agent.status && !shouldUpdateSeenAt && !shouldUpdateHeartbeatAt) return agent
 
     return {
       ...agent,
       status,
-      lastSeenAt: new Date(best.seenAtMs),
+      ...(shouldUpdateSeenAt && freshestSeenAtMs !== null ? { lastSeenAt: new Date(freshestSeenAtMs) } : {}),
+      ...(shouldUpdateHeartbeatAt && freshestSeenAtMs !== null ? { lastHeartbeatAt: new Date(freshestSeenAtMs) } : {}),
     }
   })
 }

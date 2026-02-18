@@ -9,57 +9,7 @@ import {
 } from '@/lib/openclaw/availability'
 import { withRouteTiming } from '@/lib/perf/route-timing'
 import { classifyOpenClawError } from '@/lib/openclaw/error-shape'
-
-/**
- * Cron job schedule types.
- * Based on OpenClaw cron job schema from docs.openclaw.ai/automation/cron-jobs.
- */
-export interface CronSchedule {
-  kind: 'at' | 'every' | 'cron'
-  /** Epoch ms for 'at' type */
-  atMs?: number
-  /** Interval in ms for 'every' type */
-  everyMs?: number
-  /** 5-field cron expression for 'cron' type */
-  expr?: string
-  /** IANA timezone */
-  tz?: string
-}
-
-/**
- * Cron job payload types.
- */
-export interface CronPayload {
-  kind: 'systemEvent' | 'agentTurn'
-  /** Text for systemEvent kind */
-  text?: string
-  /** Message for agentTurn kind */
-  message?: string
-  deliver?: boolean
-  channel?: string
-  to?: string
-}
-
-/**
- * Cron job DTO from OpenClaw CLI.
- * Based on `openclaw cron list --json` output.
- */
-export interface CronJobDTO {
-  id: string
-  name: string
-  schedule: CronSchedule
-  sessionTarget: 'main' | 'isolated'
-  wakeMode: 'now' | 'next-heartbeat'
-  payload: CronPayload
-  agentId?: string
-  description?: string
-  enabled?: boolean
-  deleteAfterRun?: boolean
-  lastRunAt?: string
-  nextRunAt?: string
-  lastStatus?: 'success' | 'failed' | 'running'
-  runCount?: number
-}
+import { normalizeCronJobsPayload, type CronJobDTO } from '@/lib/repo/cron-normalize'
 
 const CACHE_KEY = 'cron.jobs'
 
@@ -79,7 +29,7 @@ const getCronJobsRoute = async (): Promise<NextResponse<OpenClawResponse<CronJob
   const start = Date.now()
 
   try {
-    const res = await runCommandJson<CronJobDTO[]>('cron.jobs.json', {
+    const res = await runCommandJson<unknown>('cron.jobs.json', {
       timeout: OPENCLAW_TIMEOUT_MS,
     })
 
@@ -99,8 +49,7 @@ const getCronJobsRoute = async (): Promise<NextResponse<OpenClawResponse<CronJob
       return NextResponse.json(response)
     }
 
-    // CLI may return null/undefined for empty list
-    const jobs = res.data ?? []
+    const jobs = normalizeCronJobsPayload(res.data)
 
     const response: OpenClawResponse<CronJobDTO[]> = {
       status: latencyMs > DEGRADED_THRESHOLD_MS ? 'degraded' : 'ok',

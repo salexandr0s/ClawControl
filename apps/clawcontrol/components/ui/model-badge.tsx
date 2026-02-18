@@ -1,7 +1,7 @@
 'use client'
 
 import { cn } from '@/lib/utils'
-import { getModelById, getModelShortName } from '@/lib/models'
+import { getModelById, getModelShortName, inferModelProvider } from '@/lib/models'
 import { ProviderLogo } from '@/components/provider-logo'
 import { Cpu } from 'lucide-react'
 
@@ -20,8 +20,7 @@ const COLOR_CLASSES = {
 } as const
 
 function providerFromModelId(modelId: string | null): string {
-  if (!modelId) return 'unknown'
-  return modelId.split('/')[0] || 'unknown'
+  return inferModelProvider(modelId)
 }
 
 export function ModelBadge({

@@ -10,7 +10,7 @@
  *
  * Requirements:
  * - OpenClaw CLI must be installed and on PATH for operational mode
- * - Minimum version: 0.1.0
+ * - Minimum version: 2026.2.17
  * - Install from: https://github.com/openclaw/openclaw
  */
 

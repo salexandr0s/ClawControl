@@ -24,6 +24,7 @@ const migratedFiles = [
   'app/(dashboard)/skills/skills-client.tsx',
   'app/(dashboard)/work-orders/work-orders-client.tsx',
   'app/(dashboard)/agents/agents-client.tsx',
+  'app/(dashboard)/agents/teams-tab.tsx',
 ]
 
 const selectDropdownFiles = [
@@ -38,6 +39,7 @@ const selectDropdownFiles = [
   'app/(dashboard)/skills/skills-client.tsx',
   'app/(dashboard)/work-orders/work-orders-client.tsx',
   'app/(dashboard)/agents/agents-client.tsx',
+  'app/(dashboard)/agents/teams-tab.tsx',
 ]
 
 const dropdownMenuFiles = [

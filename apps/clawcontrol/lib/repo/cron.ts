@@ -13,64 +13,28 @@ import {
   DEGRADED_THRESHOLD_MS,
   CACHE_TTL_MS,
 } from '@/lib/openclaw/availability'
+import {
+  normalizeCronJobsPayload,
+  normalizeCronRunsPayload,
+  normalizeCronStatusPayload,
+  type CronJobDTO,
+  type CronPayload,
+  type CronRunDTO,
+  type CronSchedule,
+  type CronStatusDTO,
+} from './cron-normalize'
+
+export type {
+  CronStatusDTO,
+  CronSchedule,
+  CronPayload,
+  CronJobDTO,
+  CronRunDTO,
+} from './cron-normalize'
 
 // ============================================================================
 // TYPES
 // ============================================================================
-
-export interface CronStatusDTO {
-  running: boolean
-  jobCount: number
-  nextRun?: string
-  lastRun?: string
-  uptime?: number
-}
-
-export interface CronSchedule {
-  kind: 'at' | 'every' | 'cron'
-  atMs?: number
-  everyMs?: number
-  expr?: string
-  tz?: string
-}
-
-export interface CronPayload {
-  kind: 'systemEvent' | 'agentTurn'
-  text?: string
-  message?: string
-  deliver?: boolean
-  channel?: string
-  to?: string
-}
-
-export interface CronJobDTO {
-  id: string
-  name: string
-  schedule: CronSchedule
-  sessionTarget: 'main' | 'isolated'
-  wakeMode: 'now' | 'next-heartbeat'
-  payload: CronPayload
-  agentId?: string
-  description?: string
-  enabled?: boolean
-  deleteAfterRun?: boolean
-  lastRunAt?: string
-  nextRunAt?: string
-  lastStatus?: 'success' | 'failed' | 'running'
-  runCount?: number
-}
-
-export interface CronRunDTO {
-  id: string
-  jobId: string
-  startedAt: string
-  endedAt?: string
-  status: 'success' | 'failed' | 'running'
-  durationMs?: number
-  exitCode?: number
-  error?: string
-  output?: string
-}
 
 // ============================================================================
 // REPOSITORY INTERFACE
@@ -128,7 +92,7 @@ export function createCliCronRepo(): CronRepo {
       const start = Date.now()
 
       try {
-        const res = await runCommandJson<CronStatusDTO>('cron.status.json', {
+        const res = await runCommandJson<unknown>('cron.status.json', {
           timeout: OPENCLAW_TIMEOUT_MS,
         })
 
@@ -145,11 +109,12 @@ export function createCliCronRepo(): CronRepo {
           }
         }
 
+        const statusData = normalizeCronStatusPayload(res.data)
         const status: AvailabilityStatus = latencyMs > DEGRADED_THRESHOLD_MS ? 'degraded' : 'ok'
         const response: OpenClawResponse<CronStatusDTO> = {
           status,
           latencyMs,
-          data: res.data,
+          data: statusData,
           error: null,
           timestamp: new Date().toISOString(),
           cached: false,
@@ -177,7 +142,7 @@ export function createCliCronRepo(): CronRepo {
       const start = Date.now()
 
       try {
-        const res = await runCommandJson<CronJobDTO[]>('cron.jobs.json', {
+        const res = await runCommandJson<unknown>('cron.jobs.json', {
           timeout: OPENCLAW_TIMEOUT_MS,
         })
 
@@ -194,8 +159,7 @@ export function createCliCronRepo(): CronRepo {
           }
         }
 
-        // CLI may return null/undefined for empty list
-        const jobs = res.data ?? []
+        const jobs = normalizeCronJobsPayload(res.data)
 
         const status: AvailabilityStatus = latencyMs > DEGRADED_THRESHOLD_MS ? 'degraded' : 'ok'
         const response: OpenClawResponse<CronJobDTO[]> = {
@@ -241,7 +205,7 @@ export function createCliCronRepo(): CronRepo {
       const start = Date.now()
 
       try {
-        const res = await runDynamicCommandJson<CronRunDTO[]>('cron.runs', { id: jobId }, {
+        const res = await runDynamicCommandJson<unknown>('cron.runs', { id: jobId }, {
           timeout: OPENCLAW_TIMEOUT_MS,
         })
 
@@ -258,8 +222,7 @@ export function createCliCronRepo(): CronRepo {
           }
         }
 
-        // CLI may return null/undefined for empty list
-        const runs = res.data ?? []
+        const runs = normalizeCronRunsPayload(res.data, jobId)
 
         const status: AvailabilityStatus = latencyMs > DEGRADED_THRESHOLD_MS ? 'degraded' : 'ok'
         const response: OpenClawResponse<CronRunDTO[]> = {

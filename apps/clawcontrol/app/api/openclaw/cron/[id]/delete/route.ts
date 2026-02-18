@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { runDynamicCommandJson } from '@clawcontrol/adapters-openclaw'
+import { parseJsonFromCommandOutput, runDynamicCommand } from '@clawcontrol/adapters-openclaw'
 import {
   type OpenClawResponse,
   OPENCLAW_TIMEOUT_MS,
@@ -41,19 +41,20 @@ export async function POST(
   const start = Date.now()
 
   try {
-    const res = await runDynamicCommandJson<DeleteResult>('cron.delete', { id: jobId }, {
+    const result = await runDynamicCommand('cron.delete', { id: jobId }, {
       timeout: OPENCLAW_TIMEOUT_MS,
     })
 
     const latencyMs = Date.now() - start
 
-    if (res.error) {
-      const details = classifyOpenClawError(res.error)
+    if (result.exitCode !== 0) {
+      const errorMessage = result.stderr || result.error || `Command failed with exit code ${result.exitCode}`
+      const details = classifyOpenClawError(errorMessage)
       return NextResponse.json({
         status: 'unavailable',
         latencyMs,
         data: null,
-        error: res.error,
+        error: errorMessage,
         ...details,
         timestamp: new Date().toISOString(),
         cached: false,
@@ -63,10 +64,12 @@ export async function POST(
     // Clear cron jobs cache so list refreshes without deleted job
     clearCache('cron.jobs')
 
+    const parsed = parseJsonFromCommandOutput<DeleteResult>(result.stdout)
+
     return NextResponse.json({
       status: latencyMs > DEGRADED_THRESHOLD_MS ? 'degraded' : 'ok',
       latencyMs,
-      data: res.data ?? { jobId, deleted: true },
+      data: parsed ?? { jobId, deleted: true },
       error: null,
       timestamp: new Date().toISOString(),
       cached: false,

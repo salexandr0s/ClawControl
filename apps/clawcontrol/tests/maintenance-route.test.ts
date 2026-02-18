@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@clawcontrol/adapters-openclaw', () => ({
   OPENCLAW_BIN: 'openclaw',
-  MIN_OPENCLAW_VERSION: '0.1.0',
+  MIN_OPENCLAW_VERSION: '2026.2.17',
 }))
 
 vi.mock('@/lib/openclaw/runtime-deps', () => ({

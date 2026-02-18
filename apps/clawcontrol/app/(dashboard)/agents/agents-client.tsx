@@ -23,7 +23,7 @@ import {
   type TemplateSummary,
   type SkillSummary,
 } from '@/lib/http'
-import { AVAILABLE_MODELS, DEFAULT_MODEL } from '@/lib/models'
+import { AVAILABLE_MODELS, DEFAULT_MODEL, inferModelProvider } from '@/lib/models'
 import type { AgentDTO, OperationDTO } from '@/lib/repo'
 import { slugifyDisplayName } from '@/lib/agent-identity'
 import { useStations } from '@/lib/stations-context'
@@ -105,7 +105,7 @@ const DEFAULT_AGENT_MODEL_CATALOG: AgentModelCatalog = {
     id: model.id,
     name: model.name,
     description: model.description,
-    provider: model.id.split('/')[0] || 'unknown',
+    provider: inferModelProvider(model.id),
   })),
   statusById: {},
 }
@@ -123,7 +123,7 @@ function buildAgentModelCatalog(listedModels: ModelListItem[]): AgentModelCatalo
     }
 
     const existing = entriesById.get(listed.key)
-    const provider = listed.key.split('/')[0] || 'unknown'
+    const provider = inferModelProvider(listed.key)
     const description = listed.missing || !listed.available
       ? 'Configured but unavailable for this provider'
       : existing?.description ?? listed.input ?? 'Configured model'
@@ -1605,6 +1605,7 @@ function AgentDetail({
     icon: <StationIcon stationId={station.id} />,
     textValue: `${station.id} ${station.name}`,
   }))
+  const lastHeartbeatDisplayAt = agent.lastHeartbeatAt ?? agent.lastSeenAt
 
   return (
     <div className="space-y-5">
@@ -1739,7 +1740,9 @@ function AgentDetail({
               <dd className="text-fg-1 font-mono text-xs truncate">{agent.sessionKey}</dd>
               <dt className="text-fg-2">Last Heartbeat</dt>
               <dd className="text-fg-1 font-mono text-xs">
-                {agent.lastHeartbeatAt ? formatRelativeTime(agent.lastHeartbeatAt) : 'Never'}
+                {lastHeartbeatDisplayAt
+                  ? formatRelativeTime(lastHeartbeatDisplayAt)
+                  : 'Never'}
               </dd>
               <dt className="text-fg-2">Registered</dt>
               <dd className="text-fg-1 font-mono text-xs">{new Date(agent.createdAt).toLocaleDateString()}</dd>
@@ -1836,7 +1839,7 @@ function AgentDetail({
                   }}
                   ariaLabel="AI model"
                   tone="field"
-                  size="md"
+                  size="sm"
                   options={modelOptions}
                   search="auto"
                 />
@@ -1930,7 +1933,7 @@ function AgentDetail({
                   onChange={(nextValue) => setEditFallbacks((prev) => [...prev, nextValue])}
                   ariaLabel="Add fallback model"
                   tone="field"
-                  size="md"
+                  size="sm"
                   placeholder="Add fallback..."
                   options={fallbackModelOptions}
                   disabled={fallbackModelOptions.length === 0}
@@ -1988,7 +1991,7 @@ function AgentDetail({
                     onChange={setEditStation}
                     ariaLabel="Agent station"
                     tone="field"
-                    size="md"
+                    size="sm"
                     options={stationOptions}
                     search="auto"
                     footerAction={{

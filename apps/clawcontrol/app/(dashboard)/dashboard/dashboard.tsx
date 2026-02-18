@@ -14,6 +14,12 @@ import { cn } from '@/lib/utils'
 import { timedClientFetch, usePageReadyTiming } from '@/lib/perf/client-timing'
 import { apiPost, HttpError } from '@/lib/http'
 import {
+  computeUsageAvgPerDay,
+  getUtcInclusiveDayCount,
+  resolveUsageWindowIso,
+  startOfUtcDay,
+} from '@/lib/openclaw/usage-window'
+import {
   Activity,
   Bot,
   Clock,
@@ -129,6 +135,12 @@ interface UsageSyncApi {
   sessionsUpdated: number
   toolsUpserted: number
   cursorResets: number
+  filesTotal: number
+  filesRemaining: number
+  coveragePct: number
+  indexVersion?: string
+  rebuildTriggered?: boolean
+  rebuildInProgress?: boolean
   durationMs: number
 }
 
@@ -371,36 +383,21 @@ export function Dashboard({
   }, [usageSummary?.from, usageSummary?.to, usageSummary?.series])
 
   const usageSeries = useMemo(() => {
-    if (fullUsageSeries.length === 0) return []
-
-    const firstActiveDayIndex = fullUsageSeries.findIndex((point) => {
-      const value = Number(point.totalTokens)
-      return Number.isFinite(value) && value > 0
-    })
-
-    if (firstActiveDayIndex === -1) return []
-    return fullUsageSeries.slice(firstActiveDayIndex)
+    return fullUsageSeries
   }, [fullUsageSeries])
 
   const usageDayCount = useMemo(() => {
     if (!usageSummary) return USAGE_WINDOW_DAYS
-    if (usageSeries.length > 0) return usageSeries.length
-    return getUtcInclusiveDayCount(usageSummary.from, usageSummary.to)
-  }, [usageSummary, usageSeries.length])
+    return Math.min(USAGE_WINDOW_DAYS, getUtcInclusiveDayCount(usageSummary.from, usageSummary.to))
+  }, [usageSummary?.from, usageSummary?.to])
 
   const avgPerDay = useMemo(() => {
     if (!usageSummary) return null
-    const dayCount = BigInt(Math.max(1, usageDayCount))
-    try {
-      const totalTokens = BigInt(usageSummary.totals.totalTokens)
-      const totalCostMicros = BigInt(usageSummary.totals.totalCostMicros)
-      return {
-        avgTokens: (totalTokens / dayCount).toString(),
-        avgCostMicros: (totalCostMicros / dayCount).toString(),
-      }
-    } catch {
-      return null
-    }
+    return computeUsageAvgPerDay({
+      totalTokens: usageSummary.totals.totalTokens,
+      totalCostMicros: usageSummary.totals.totalCostMicros,
+      dayCount: usageDayCount,
+    })
   }, [usageSummary, usageDayCount])
 
   const dailyRows = useMemo(
@@ -453,14 +450,26 @@ export function Dashboard({
       <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-bd-0 overflow-hidden order-last">
         <div className="px-4 py-3 border-b border-bd-0 flex items-center justify-between">
           <h2 className="terminal-header">Usage + Cost</h2>
-          <button
-            onClick={handleSyncUsage}
-            disabled={usageSyncing}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-bg-3 text-fg-1 hover:bg-bg-1 disabled:opacity-50"
-          >
-            <RefreshCw className={cn('w-3.5 h-3.5', usageSyncing && 'animate-spin')} />
-            Sync Usage
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const { fromIso, toIso } = resolveUsageWindowIso(USAGE_WINDOW_DAYS)
+                const next = `/usage?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`
+                router.push(next as Route)
+              }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-bg-3 text-fg-1 hover:bg-bg-1"
+            >
+              Open Full Usage
+            </button>
+            <button
+              onClick={handleSyncUsage}
+              disabled={usageSyncing}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-bg-3 text-fg-1 hover:bg-bg-1 disabled:opacity-50"
+            >
+              <RefreshCw className={cn('w-3.5 h-3.5', usageSyncing && 'animate-spin')} />
+              Sync Usage
+            </button>
+          </div>
         </div>
 
         <div className="p-4">
@@ -665,38 +674,6 @@ export function Dashboard({
   )
 }
 
-const USAGE_RANGE_ROUND_MS = 60_000
-
-function startOfUtcDay(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
-}
-
-function resolveUsageWindowIso(days: number): { fromIso: string; toIso: string } {
-  const roundedNowMs = Math.floor(Date.now() / USAGE_RANGE_ROUND_MS) * USAGE_RANGE_ROUND_MS
-  const to = new Date(roundedNowMs)
-
-  const toDay = startOfUtcDay(to)
-  const safeDays = Math.max(1, Math.floor(days))
-  const from = new Date(toDay)
-  from.setUTCDate(toDay.getUTCDate() - (safeDays - 1))
-
-  return {
-    fromIso: from.toISOString(),
-    toIso: to.toISOString(),
-  }
-}
-
-function getUtcInclusiveDayCount(fromIso: string, toIso: string): number {
-  const from = startOfUtcDay(new Date(fromIso))
-  const to = startOfUtcDay(new Date(toIso))
-  const diffMs = to.getTime() - from.getTime()
-
-  if (!Number.isFinite(diffMs)) return 1
-
-  const dayCount = Math.floor(diffMs / 86_400_000) + 1
-  return dayCount > 0 ? dayCount : 1
-}
-
 function formatShortDateTime(iso: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return '—'
@@ -720,8 +697,13 @@ function formatUsageSyncSummary(stats: UsageSyncApi): string {
   if (!stats.lockAcquired) return 'Another sync is running'
 
   const duration = formatDurationMs(stats.durationMs)
-  if (stats.sessionsUpdated > 0) return `Updated ${stats.sessionsUpdated} sessions (${duration})`
-  if (stats.filesUpdated > 0) return `Updated ${stats.filesUpdated} files (${duration})`
+  const hasCoverage = Number.isFinite(stats.coveragePct) && stats.filesTotal > 0
+  const coverage = hasCoverage ? ` • ${stats.coveragePct.toFixed(1)}% coverage` : ''
+  const remaining = hasCoverage && stats.filesRemaining > 0 ? ` • ${stats.filesRemaining} remaining` : ''
+
+  if (stats.sessionsUpdated > 0) return `Updated ${stats.sessionsUpdated} sessions (${duration})${coverage}${remaining}`
+  if (stats.filesUpdated > 0) return `Updated ${stats.filesUpdated} files (${duration})${coverage}${remaining}`
+  if (hasCoverage) return `Scanned ${stats.filesScanned}/${stats.filesTotal} files (${duration})${coverage}${remaining}`
   return `No updates (${duration})`
 }
 

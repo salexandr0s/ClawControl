@@ -17,6 +17,8 @@ import {
   type CalendarView,
   type CronCalendarJob,
 } from '@/lib/cron/calendar'
+import { normalizeCronExpressionToFiveFields } from '@/lib/cron/expression'
+import { buildCronCreateBody, type CronCreateFormValues } from '@/lib/cron/create-request'
 import type { CronJobDTO } from '@/lib/data'
 import { cn } from '@/lib/utils'
 import { timedClientFetch, usePageReadyTiming } from '@/lib/perf/client-timing'
@@ -261,8 +263,9 @@ function scheduleToRawText(schedule: CliCronJob['schedule']): string {
 }
 
 function parseCronExpr(expr: string, tz?: string): string {
-  const parts = expr.split(' ')
-  if (parts.length !== 5) return expr
+  const normalized = normalizeCronExpressionToFiveFields(expr)
+  if (!normalized) return expr
+  const parts = normalized.split(' ')
 
   const [minute, hour, dayOfMonth, month, dayOfWeek] = parts
   const tzSuffix = tz ? ` (${tz.split('/').pop()})` : ''
@@ -600,9 +603,9 @@ function parseUiCronField(rawField: string, min: number, max: number, normalizeD
 }
 
 function parseUiCronExpression(expr: string | undefined): ParsedUiCronExpr | null {
-  if (!expr || !expr.trim()) return null
-  const parts = expr.trim().replace(/\s+/g, ' ').split(' ')
-  if (parts.length !== 5) return null
+  const normalized = normalizeCronExpressionToFiveFields(expr)
+  if (!normalized) return null
+  const parts = normalized.split(' ')
 
   const minute = parseUiCronField(parts[0], 0, 59)
   const hour = parseUiCronField(parts[1], 0, 23)
@@ -2603,8 +2606,21 @@ interface CreateCronJobModalProps {
 
 function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalProps) {
   const [name, setName] = useState('')
-  const [schedule, setSchedule] = useState('0 * * * *')
-  const [command, setCommand] = useState('')
+  const [scheduleKind, setScheduleKind] = useState<CronCreateFormValues['scheduleKind']>('cron')
+  const [cronExpr, setCronExpr] = useState('0 * * * *')
+  const [everyValue, setEveryValue] = useState('20m')
+  const [atValue, setAtValue] = useState('')
+  const [tzValue, setTzValue] = useState('')
+  const [staggerValue, setStaggerValue] = useState('')
+  const [exact, setExact] = useState(false)
+  const [payloadKind, setPayloadKind] = useState<CronCreateFormValues['payloadKind']>('agentTurn')
+  const [payloadText, setPayloadText] = useState('')
+  const [sessionTarget, setSessionTarget] = useState<CronCreateFormValues['sessionTarget']>('isolated')
+  const [wakeMode, setWakeMode] = useState<CronCreateFormValues['wakeMode']>('now')
+  const [deliveryMode, setDeliveryMode] = useState<CronCreateFormValues['deliveryMode']>('none')
+  const [deliveryChannel, setDeliveryChannel] = useState('')
+  const [deliveryTo, setDeliveryTo] = useState('')
+  const [deliveryBestEffort, setDeliveryBestEffort] = useState(false)
   const [enabled, setEnabled] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -2614,8 +2630,21 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
   useEffect(() => {
     if (isOpen) {
       setName('')
-      setSchedule('0 * * * *')
-      setCommand('')
+      setScheduleKind('cron')
+      setCronExpr('0 * * * *')
+      setEveryValue('20m')
+      setAtValue('')
+      setTzValue('')
+      setStaggerValue('')
+      setExact(false)
+      setPayloadKind('agentTurn')
+      setPayloadText('')
+      setSessionTarget('isolated')
+      setWakeMode('now')
+      setDeliveryMode('none')
+      setDeliveryChannel('')
+      setDeliveryTo('')
+      setDeliveryBestEffort(false)
       setEnabled(true)
       setError(null)
       setTimeout(() => nameInputRef.current?.focus(), 100)
@@ -2635,8 +2664,28 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!name.trim() || !schedule.trim() || !command.trim()) {
-      setError('All fields are required')
+    const built = buildCronCreateBody({
+      name,
+      enabled,
+      scheduleKind,
+      cronExpr,
+      every: everyValue,
+      at: atValue,
+      tz: tzValue,
+      stagger: staggerValue,
+      exact,
+      payloadKind,
+      payloadText,
+      sessionTarget,
+      wakeMode,
+      deliveryMode,
+      deliveryChannel,
+      deliveryTo,
+      deliveryBestEffort,
+    })
+
+    if (!built.ok) {
+      setError(built.error)
       return
     }
 
@@ -2647,7 +2696,7 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
       const response = await fetch('/api/openclaw/cron', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, schedule, command, enabled }),
+        body: JSON.stringify(built.body),
       })
 
       const data = await response.json()
@@ -2666,6 +2715,13 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
 
   if (!isOpen) return null
 
+  const isScheduleValid = (
+    (scheduleKind === 'cron' && cronExpr.trim().length > 0)
+    || (scheduleKind === 'every' && everyValue.trim().length > 0)
+    || (scheduleKind === 'at' && atValue.trim().length > 0)
+  )
+  const canSubmit = Boolean(name.trim() && payloadText.trim() && isScheduleValid)
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
@@ -2675,7 +2731,7 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
       />
 
       {/* Modal */}
-      <div className="relative bg-bg-1 border border-bd-1 rounded-[var(--radius-lg)] shadow-2xl w-full max-w-lg mx-4">
+      <div className="relative bg-bg-1 border border-bd-1 rounded-[var(--radius-lg)] shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-bd-0">
           <h2 className="text-base font-medium text-fg-0">New Cron Job</h2>
@@ -2689,7 +2745,7 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto max-h-[calc(90vh-72px)]">
           {/* Name */}
           <div>
             <label htmlFor="cron-name" className="block text-xs font-medium text-fg-1 mb-1.5">
@@ -2707,39 +2763,256 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
             />
           </div>
 
-          {/* Schedule */}
+          {/* Schedule Kind */}
           <div>
-            <label htmlFor="cron-schedule" className="block text-xs font-medium text-fg-1 mb-1.5">
-              Schedule (cron expression)
-            </label>
-            <input
-              id="cron-schedule"
-              type="text"
-              value={schedule}
-              onChange={(e) => setSchedule(e.target.value)}
-              placeholder="0 * * * *"
-              disabled={isSubmitting}
-              className="w-full px-3 py-2 text-sm font-mono bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
-            />
-            <p className="mt-1 text-xs text-fg-2">
-              minute hour day month weekday (e.g., &quot;0 * * * *&quot; = every hour)
-            </p>
+            <label className="block text-xs font-medium text-fg-1 mb-1.5">Schedule kind</label>
+            <div className="inline-flex rounded-[var(--radius-md)] border border-bd-1 overflow-hidden bg-bg-2">
+              {(['cron', 'every', 'at'] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setScheduleKind(kind)}
+                  className={cn(
+                    'px-3 py-1.5 text-xs capitalize',
+                    scheduleKind === kind ? 'bg-bg-3 text-fg-0' : 'text-fg-2 hover:text-fg-1'
+                  )}
+                >
+                  {kind}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Command */}
+          {/* Schedule Fields */}
+          {scheduleKind === 'cron' && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-fg-1 mb-1.5">Cron expression</label>
+                <input
+                  type="text"
+                  value={cronExpr}
+                  onChange={(e) => setCronExpr(e.target.value)}
+                  placeholder="0 * * * *"
+                  disabled={isSubmitting}
+                  className="w-full px-3 py-2 text-sm font-mono bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-fg-1 mb-1.5">Timezone (optional)</label>
+                  <input
+                    type="text"
+                    value={tzValue}
+                    onChange={(e) => setTzValue(e.target.value)}
+                    placeholder="UTC"
+                    disabled={isSubmitting}
+                    className="w-full px-3 py-2 text-sm bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-fg-1 mb-1.5">Stagger (optional)</label>
+                  <input
+                    type="text"
+                    value={staggerValue}
+                    onChange={(e) => setStaggerValue(e.target.value)}
+                    placeholder="20s"
+                    disabled={isSubmitting}
+                    className="w-full px-3 py-2 text-sm bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-fg-1">
+                <input
+                  type="checkbox"
+                  checked={exact}
+                  onChange={(e) => setExact(e.target.checked)}
+                  disabled={isSubmitting}
+                  className="rounded border-bd-1"
+                />
+                Exact cron timing
+              </label>
+            </div>
+          )}
+
+          {scheduleKind === 'every' && (
+            <div>
+              <label className="block text-xs font-medium text-fg-1 mb-1.5">Every interval</label>
+              <input
+                type="text"
+                value={everyValue}
+                onChange={(e) => setEveryValue(e.target.value)}
+                placeholder="20m"
+                disabled={isSubmitting}
+                className="w-full px-3 py-2 text-sm font-mono bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+              />
+            </div>
+          )}
+
+          {scheduleKind === 'at' && (
+            <div>
+              <label className="block text-xs font-medium text-fg-1 mb-1.5">At time</label>
+              <input
+                type="text"
+                value={atValue}
+                onChange={(e) => setAtValue(e.target.value)}
+                placeholder="2026-02-20T10:00:00Z or +20m"
+                disabled={isSubmitting}
+                className="w-full px-3 py-2 text-sm font-mono bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+              />
+            </div>
+          )}
+
+          {/* Payload + Session */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-fg-1 mb-1.5">Payload kind</label>
+              <div className="inline-flex rounded-[var(--radius-md)] border border-bd-1 overflow-hidden bg-bg-2">
+                {(['agentTurn', 'systemEvent'] as const).map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      setPayloadKind(kind)
+                      if (kind === 'agentTurn') {
+                        setSessionTarget('isolated')
+                      } else {
+                        setSessionTarget('main')
+                        setDeliveryMode('none')
+                      }
+                    }}
+                    className={cn(
+                      'px-3 py-1.5 text-xs',
+                      payloadKind === kind ? 'bg-bg-3 text-fg-0' : 'text-fg-2 hover:text-fg-1'
+                    )}
+                  >
+                    {kind}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-fg-1 mb-1.5">Session target</label>
+              <div className="inline-flex rounded-[var(--radius-md)] border border-bd-1 overflow-hidden bg-bg-2">
+                {(['isolated', 'main'] as const).map((target) => (
+                  <button
+                    key={target}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      setSessionTarget(target)
+                      if (target === 'isolated') {
+                        setPayloadKind('agentTurn')
+                      } else {
+                        setPayloadKind('systemEvent')
+                        setDeliveryMode('none')
+                      }
+                    }}
+                    className={cn(
+                      'px-3 py-1.5 text-xs capitalize',
+                      sessionTarget === target ? 'bg-bg-3 text-fg-0' : 'text-fg-2 hover:text-fg-1'
+                    )}
+                  >
+                    {target}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div>
-            <label htmlFor="cron-command" className="block text-xs font-medium text-fg-1 mb-1.5">
-              Command
+            <label className="block text-xs font-medium text-fg-1 mb-1.5">
+              {payloadKind === 'agentTurn' ? 'Agent message' : 'System event text'}
             </label>
             <textarea
-              id="cron-command"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              placeholder="openclaw run --task cleanup"
-              rows={3}
+              value={payloadText}
+              onChange={(e) => setPayloadText(e.target.value)}
+              placeholder={payloadKind === 'agentTurn' ? 'What should the agent do?' : 'System event payload text'}
+              rows={4}
               disabled={isSubmitting}
-              className="w-full px-3 py-2 text-sm font-mono bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 resize-none disabled:opacity-50"
+              className="w-full px-3 py-2 text-sm font-mono bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 resize-y disabled:opacity-50"
             />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-fg-1 mb-1.5">Wake mode</label>
+              <div className="inline-flex rounded-[var(--radius-md)] border border-bd-1 overflow-hidden bg-bg-2">
+                {(['now', 'next-heartbeat'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setWakeMode(mode)}
+                    className={cn(
+                      'px-3 py-1.5 text-xs',
+                      wakeMode === mode ? 'bg-bg-3 text-fg-0' : 'text-fg-2 hover:text-fg-1'
+                    )}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-fg-1 mb-1.5">Delivery mode</label>
+              <div className="inline-flex rounded-[var(--radius-md)] border border-bd-1 overflow-hidden bg-bg-2">
+                {(['none', 'announce', 'webhook'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    disabled={isSubmitting || sessionTarget === 'main'}
+                    onClick={() => setDeliveryMode(mode)}
+                    className={cn(
+                      'px-3 py-1.5 text-xs capitalize',
+                      deliveryMode === mode ? 'bg-bg-3 text-fg-0' : 'text-fg-2 hover:text-fg-1',
+                      sessionTarget === 'main' && mode !== 'none' && 'opacity-50 cursor-not-allowed'
+                    )}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {deliveryMode !== 'none' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-fg-1 mb-1.5">Delivery channel (optional)</label>
+                <input
+                  type="text"
+                  value={deliveryChannel}
+                  onChange={(e) => setDeliveryChannel(e.target.value)}
+                  placeholder={deliveryMode === 'webhook' ? 'webhook' : 'telegram'}
+                  disabled={isSubmitting}
+                  className="w-full px-3 py-2 text-sm bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-fg-1 mb-1.5">Delivery target (optional)</label>
+                <input
+                  type="text"
+                  value={deliveryTo}
+                  onChange={(e) => setDeliveryTo(e.target.value)}
+                  placeholder="@channel-or-destination"
+                  disabled={isSubmitting}
+                  className="w-full px-3 py-2 text-sm bg-bg-2 border border-bd-1 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-2 focus:outline-none focus:ring-1 focus:ring-status-info/50 disabled:opacity-50"
+                />
+              </div>
+              <label className="md:col-span-2 flex items-center gap-2 text-xs text-fg-1">
+                <input
+                  type="checkbox"
+                  checked={deliveryBestEffort}
+                  onChange={(e) => setDeliveryBestEffort(e.target.checked)}
+                  disabled={isSubmitting}
+                  className="rounded border-bd-1"
+                />
+                Best effort delivery
+              </label>
+            </div>
+          )}
           </div>
 
           {/* Enabled Toggle */}
@@ -2787,7 +3060,7 @@ function CreateCronJobModal({ isOpen, onClose, onCreated }: CreateCronJobModalPr
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting || !name.trim() || !schedule.trim() || !command.trim()}
+              disabled={isSubmitting || !canSubmit}
               variant="primary"
               size="md"
             >
