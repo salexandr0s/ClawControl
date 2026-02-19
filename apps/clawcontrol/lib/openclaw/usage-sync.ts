@@ -12,6 +12,7 @@ import { parseSessionIdentity, parseUsageLine } from './usage-parser'
 export interface UsageSyncOptions {
   maxMs?: number
   maxFiles?: number
+  priorityPaths?: string[] | null
 }
 
 export interface UsageSyncStats {
@@ -93,6 +94,11 @@ interface UsageCursorState {
 
 interface UsageCursorOrderingState {
   updatedAt: Date
+}
+
+interface SessionFileInventory {
+  sourcePaths: string[]
+  mtimeMsByPath: Map<string, number>
 }
 
 interface SessionOverlay {
@@ -320,7 +326,7 @@ function shouldResetCursor(
   return false
 }
 
-async function listSessionFiles(): Promise<string[]> {
+async function listSessionFiles(): Promise<SessionFileInventory> {
   const openClawHome = getOpenClawHome()
   const agentsDir = join(openClawHome, 'agents')
 
@@ -328,10 +334,13 @@ async function listSessionFiles(): Promise<string[]> {
   try {
     agentEntries = await fsp.readdir(agentsDir, { withFileTypes: true })
   } catch {
-    return []
+    return {
+      sourcePaths: [],
+      mtimeMsByPath: new Map(),
+    }
   }
 
-  const files: string[] = []
+  const entries: Array<{ sourcePath: string; mtimeMs: number }> = []
 
   for (const ent of agentEntries) {
     if (!ent.isDirectory()) continue
@@ -348,22 +357,55 @@ async function listSessionFiles(): Promise<string[]> {
     for (const s of sessionEntries) {
       if (!s.isFile()) continue
       if (!s.name.endsWith('.jsonl')) continue
-      files.push(join(sessionsDir, s.name))
+      const sourcePath = join(sessionsDir, s.name)
+      let mtimeMs = 0
+
+      try {
+        const stat = await fsp.stat(sourcePath)
+        const parsedMtimeMs = Number(stat.mtimeMs)
+        mtimeMs = Number.isFinite(parsedMtimeMs) ? parsedMtimeMs : 0
+      } catch {
+        mtimeMs = 0
+      }
+
+      entries.push({ sourcePath, mtimeMs })
     }
   }
 
-  files.sort((a, b) => a.localeCompare(b))
-  return files
+  entries.sort((a, b) => a.sourcePath.localeCompare(b.sourcePath))
+
+  return {
+    sourcePaths: entries.map((entry) => entry.sourcePath),
+    mtimeMsByPath: new Map(entries.map((entry) => [entry.sourcePath, entry.mtimeMs])),
+  }
 }
 
 export function buildSyncFileQueue(
   files: string[],
-  cursorsByPath: Map<string, UsageCursorOrderingState>
+  cursorsByPath: Map<string, UsageCursorOrderingState>,
+  options: {
+    priorityPaths?: string[] | null
+    fileMtimeMsByPath?: Map<string, number> | null
+  } = {}
 ): string[] {
+  const priorityPaths = options.priorityPaths ?? []
+  const mtimeByPath = options.fileMtimeMsByPath ?? null
+  const fileSet = new Set(files)
+  const prioritized: string[] = []
+  const prioritizedSet = new Set<string>()
+
+  for (const sourcePath of priorityPaths) {
+    if (!fileSet.has(sourcePath)) continue
+    if (prioritizedSet.has(sourcePath)) continue
+    prioritized.push(sourcePath)
+    prioritizedSet.add(sourcePath)
+  }
+
   const unseen: string[] = []
   const seen: string[] = []
 
   for (const filePath of files) {
+    if (prioritizedSet.has(filePath)) continue
     if (cursorsByPath.has(filePath)) {
       seen.push(filePath)
     } else {
@@ -371,7 +413,12 @@ export function buildSyncFileQueue(
     }
   }
 
-  unseen.sort((a, b) => a.localeCompare(b))
+  unseen.sort((a, b) => {
+    const aMs = mtimeByPath?.get(a) ?? 0
+    const bMs = mtimeByPath?.get(b) ?? 0
+    if (aMs !== bMs) return bMs - aMs
+    return a.localeCompare(b)
+  })
   seen.sort((a, b) => {
     const aCursor = cursorsByPath.get(a)
     const bCursor = cursorsByPath.get(b)
@@ -381,7 +428,7 @@ export function buildSyncFileQueue(
     return a.localeCompare(b)
   })
 
-  return unseen.concat(seen)
+  return prioritized.concat(unseen, seen)
 }
 
 function emptyDelta(): SessionDelta {
@@ -911,7 +958,8 @@ export async function syncUsageTelemetry(options: UsageSyncOptions = {}): Promis
     durationMs: 0,
   }
 
-  const files = await listSessionFiles()
+  const inventory = await listSessionFiles()
+  const files = inventory.sourcePaths
   stats.filesTotal = files.length
 
   if (files.length === 0) {
@@ -943,7 +991,10 @@ export async function syncUsageTelemetry(options: UsageSyncOptions = {}): Promis
     ordering.set(sourcePath, { updatedAt: cursor.updatedAt })
   }
 
-  const queue = buildSyncFileQueue(files, ordering)
+  const queue = buildSyncFileQueue(files, ordering, {
+    priorityPaths: options.priorityPaths,
+    fileMtimeMsByPath: inventory.mtimeMsByPath,
+  })
   const coveredPaths = new Set<string>(cursorsByPath.keys())
 
   for (const filePath of queue) {

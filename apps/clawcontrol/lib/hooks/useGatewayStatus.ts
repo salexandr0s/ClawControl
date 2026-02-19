@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
-type GatewayHealth = 'ok' | 'degraded' | 'unavailable'
+export type GatewayHealth = 'ok' | 'degraded' | 'unavailable'
 
-interface GatewayStatusPayload {
+export interface GatewayStatusPayload {
   status: GatewayHealth
   latencyMs: number
   timestamp: string
@@ -14,12 +14,21 @@ interface GatewayStatusPayload {
   } | null
 }
 
-interface UseGatewayStatusOptions {
+export interface UseGatewayStatusOptions {
   polling?: boolean
   refreshIntervalMs?: number
   initialStatus?: GatewayHealth
   initialLatencyMs?: number | null
   initialError?: string | null
+}
+
+export interface DerivedGatewayStatus {
+  status: GatewayHealth
+  isOnline: boolean
+  runtimeRunning: boolean | null
+  latencyMs: number | null
+  lastCheck: string | null
+  error: string | null
 }
 
 async function fetchGatewayStatus(): Promise<GatewayStatusPayload | null> {
@@ -29,6 +38,27 @@ async function fetchGatewayStatus(): Promise<GatewayStatusPayload | null> {
     return res.json()
   } catch {
     return null
+  }
+}
+
+export function deriveGatewayStatusState(
+  status: GatewayStatusPayload | null,
+  options: Pick<UseGatewayStatusOptions, 'initialStatus' | 'initialLatencyMs' | 'initialError'> = {}
+): DerivedGatewayStatus {
+  const normalizedStatus = status?.status ?? options.initialStatus ?? 'unavailable'
+  const runtimeRunning =
+    typeof status?.data?.running === 'boolean'
+      ? status.data.running
+      : null
+  const isOnline = normalizedStatus !== 'unavailable'
+
+  return {
+    status: normalizedStatus,
+    isOnline,
+    runtimeRunning,
+    latencyMs: status?.latencyMs ?? options.initialLatencyMs ?? null,
+    lastCheck: status?.timestamp ?? null,
+    error: status?.error ?? options.initialError ?? null,
   }
 }
 
@@ -71,17 +101,10 @@ export function useGatewayStatus(options: UseGatewayStatusOptions = {}) {
     return () => window.clearInterval(interval)
   }, [polling, refresh, refreshIntervalMs])
 
-  const normalizedStatus = status?.status ?? options.initialStatus ?? 'unavailable'
-  const isOnline =
-    normalizedStatus !== 'unavailable' &&
-    (status?.data?.running ?? true)
+  const derived = deriveGatewayStatusState(status, options)
 
   return {
-    status: normalizedStatus,
-    isOnline,
-    latencyMs: status?.latencyMs ?? options.initialLatencyMs ?? null,
-    lastCheck: status?.timestamp ?? null,
-    error: status?.error ?? options.initialError ?? null,
+    ...derived,
     loading,
     refresh,
   }

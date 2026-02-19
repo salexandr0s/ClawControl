@@ -6,7 +6,9 @@ import type { Route } from 'next'
 import { PageHeader, SelectDropdown, Button } from '@clawcontrol/ui'
 import { MetricCard } from '@/components/ui/metric-card'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
-import { apiPost } from '@/lib/http'
+import { AgentAvatar } from '@/components/ui/agent-avatar'
+import { ProviderLogo } from '@/components/provider-logo'
+import { apiPost, agentsApi } from '@/lib/http'
 import { cn } from '@/lib/utils'
 import { resolveUsageWindowIso } from '@/lib/openclaw/usage-window'
 import { usePageReadyTiming } from '@/lib/perf/client-timing'
@@ -26,6 +28,7 @@ import {
 } from 'lucide-react'
 
 type UsageSort = 'cost_desc' | 'tokens_desc' | 'recent_desc'
+type UsageScope = 'parity' | 'all'
 
 type UsageSyncApi = {
   ok: boolean
@@ -41,6 +44,12 @@ type UsageSyncApi = {
   indexVersion?: string
   rebuildTriggered?: boolean
   rebuildInProgress?: boolean
+  parity?: {
+    sessionLimit: number
+    sampledCount: number
+    sessionsInRangeTotal: number
+    missingCoverageCount: number
+  } | null
   durationMs: number
 }
 
@@ -49,6 +58,13 @@ type UsageSummaryApi = {
     from: string
     to: string
     timezone: string
+    meta: {
+      scope: UsageScope
+      sessionSampleLimit: number | null
+      sessionSampleCount: number | null
+      sessionsInRangeTotal: number | null
+      missingCoverageCount: number | null
+    }
     totals: {
       inputTokens: string
       outputTokens: string
@@ -152,6 +168,7 @@ type UsageFilters = {
   from: string
   to: string
   timezone: string
+  scope: UsageScope
   agentId: string
   sessionClass: string
   source: string
@@ -170,9 +187,13 @@ type UsageFilters = {
 type BreakdownKey = 'agent' | 'model' | 'provider' | 'source' | 'sessionClass' | 'tool'
 
 type BreakdownState = Record<BreakdownKey, UsageBreakdownApi['data'] | null>
+type AgentAvatarEntry = { agentId: string; name: string }
 
 const DEFAULT_WINDOW_DAYS = 30
 const DEFAULT_PAGE_SIZE = 50
+const PARITY_SESSION_LIMIT = 1000
+const PARITY_PRIME_MAX_MS = 8000
+const PARITY_PRIME_MAX_FILES = 1000
 
 const breakdownKeys: BreakdownKey[] = ['model', 'agent', 'provider', 'source', 'sessionClass', 'tool']
 
@@ -184,6 +205,7 @@ function defaultFilters(): UsageFilters {
     from: fromIso,
     to: toIso,
     timezone: localTz,
+    scope: 'parity',
     agentId: '',
     sessionClass: '',
     source: '',
@@ -204,6 +226,7 @@ function parseFilters(searchParams: URLSearchParams): UsageFilters {
   const defaults = defaultFilters()
   const hasErrors = searchParams.get('hasErrors')
   const sort = searchParams.get('sort') as UsageSort | null
+  const scopeParam = searchParams.get('scope')
 
   const page = Number.parseInt(searchParams.get('page') ?? `${defaults.page}`, 10)
   const pageSize = Number.parseInt(searchParams.get('pageSize') ?? `${defaults.pageSize}`, 10)
@@ -212,6 +235,7 @@ function parseFilters(searchParams: URLSearchParams): UsageFilters {
     from: searchParams.get('from') ?? defaults.from,
     to: searchParams.get('to') ?? defaults.to,
     timezone: searchParams.get('timezone') ?? defaults.timezone,
+    scope: scopeParam === 'all' ? 'all' : 'parity',
     agentId: searchParams.get('agentId') ?? '',
     sessionClass: searchParams.get('sessionClass') ?? '',
     source: searchParams.get('source') ?? '',
@@ -233,6 +257,7 @@ function buildSearchParams(filters: UsageFilters): URLSearchParams {
   params.set('from', filters.from)
   params.set('to', filters.to)
   params.set('timezone', filters.timezone)
+  params.set('scope', filters.scope)
 
   if (filters.agentId) params.set('agentId', filters.agentId)
   if (filters.sessionClass) params.set('sessionClass', filters.sessionClass)
@@ -332,6 +357,7 @@ export function UsageClient() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [syncMeta, setSyncMeta] = useState<{ at: string; stats: UsageSyncApi } | null>(null)
+  const [agentAvatarMap, setAgentAvatarMap] = useState<Record<string, AgentAvatarEntry>>({})
   const [error, setError] = useState<string | null>(null)
 
   const queryParams = useMemo(() => {
@@ -339,6 +365,7 @@ export function UsageClient() {
       from: filters.from,
       to: filters.to,
       timezone: filters.timezone,
+      scope: filters.scope,
       page: String(filters.page),
       pageSize: String(filters.pageSize),
       sort: filters.sort,
@@ -357,6 +384,16 @@ export function UsageClient() {
 
     return params
   }, [filters])
+
+  const optionsQueryParams = useMemo(() => {
+    const params = new URLSearchParams({
+      from: filters.from,
+      to: filters.to,
+      timezone: filters.timezone,
+      scope: filters.scope,
+    })
+    return params.toString()
+  }, [filters.from, filters.scope, filters.timezone, filters.to])
 
   const exportCsvUrl = useMemo(() => {
     const params = new URLSearchParams(queryParams)
@@ -390,16 +427,59 @@ export function UsageClient() {
     commitFilters({ from: fromIso, to: toIso })
   }, [commitFilters])
 
-  const fetchUsage = useCallback(async () => {
+  const loadAgentAvatarMap = useCallback(async () => {
+    try {
+      const result = await agentsApi.list({
+        mode: 'light',
+        includeSessionOverlay: false,
+        includeModelOverlay: false,
+        syncSessions: false,
+        cacheTtlMs: 60_000,
+      })
+
+      const nextMap: Record<string, AgentAvatarEntry> = {}
+      for (const agent of result.data) {
+        const runtimeAgentId = agent.runtimeAgentId?.trim().toLowerCase()
+        if (!runtimeAgentId) continue
+
+        nextMap[runtimeAgentId] = {
+          agentId: agent.id,
+          name: agent.displayName || agent.name || agent.runtimeAgentId,
+        }
+      }
+
+      setAgentAvatarMap(nextMap)
+    } catch {
+      // Non-blocking: usage can still render with identicon fallback.
+    }
+  }, [])
+
+  const fetchUsage = useCallback(async (options?: { skipPrimeSync?: boolean }) => {
     setLoading(true)
     setError(null)
 
     try {
+      if (filters.scope === 'parity' && !options?.skipPrimeSync) {
+        try {
+          const prime = await apiPost<UsageSyncApi>('/api/openclaw/usage/sync', {
+            mode: 'parity',
+            from: filters.from,
+            to: filters.to,
+            sessionLimit: PARITY_SESSION_LIMIT,
+            maxMs: PARITY_PRIME_MAX_MS,
+            maxFiles: PARITY_PRIME_MAX_FILES,
+          })
+          setSyncMeta({ at: new Date().toISOString(), stats: prime })
+        } catch {
+          // Non-blocking: still render current DB state if prime sync cannot run.
+        }
+      }
+
       const [summaryRes, activityRes, sessionsRes, optionsRes, ...breakdownResponses] = await Promise.all([
         fetch(`/api/openclaw/usage/explore/summary?${queryParams.toString()}`),
         fetch(`/api/openclaw/usage/explore/activity?${queryParams.toString()}`),
         fetch(`/api/openclaw/usage/explore/sessions?${queryParams.toString()}`),
-        fetch(`/api/openclaw/usage/explore/options?from=${encodeURIComponent(filters.from)}&to=${encodeURIComponent(filters.to)}&timezone=${encodeURIComponent(filters.timezone)}`),
+        fetch(`/api/openclaw/usage/explore/options?${optionsQueryParams}`),
         ...breakdownKeys.map((groupBy) => fetch(`/api/openclaw/usage/explore/breakdown?groupBy=${groupBy}&${queryParams.toString()}`)),
       ])
 
@@ -439,11 +519,15 @@ export function UsageClient() {
     } finally {
       setLoading(false)
     }
-  }, [filters.from, filters.timezone, filters.to, queryParams])
+  }, [filters.from, filters.scope, filters.to, optionsQueryParams, queryParams])
 
   useEffect(() => {
     void fetchUsage()
   }, [fetchUsage])
+
+  useEffect(() => {
+    void loadAgentAvatarMap()
+  }, [loadAgentAvatarMap])
 
   const handleSync = useCallback(async () => {
     if (syncing) return
@@ -453,15 +537,23 @@ export function UsageClient() {
       const sync = await apiPost<UsageSyncApi>('/api/openclaw/usage/sync', {
         maxMs: 15_000,
         maxFiles: 400,
+        ...(filters.scope === 'parity'
+          ? {
+            mode: 'parity',
+            from: filters.from,
+            to: filters.to,
+            sessionLimit: PARITY_SESSION_LIMIT,
+          }
+          : {}),
       })
       setSyncMeta({ at: new Date().toISOString(), stats: sync })
-      await fetchUsage()
+      await fetchUsage({ skipPrimeSync: true })
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : 'Usage sync failed')
     } finally {
       setSyncing(false)
     }
-  }, [fetchUsage, syncing])
+  }, [fetchUsage, filters.from, filters.scope, filters.to, syncing])
 
   const maxDailyTokens = useMemo(() => {
     const values = summary?.series.map((point) => Number(point.totalTokens)) ?? []
@@ -471,6 +563,11 @@ export function UsageClient() {
   const weekdayMax = useMemo(() => {
     const values = activity?.weekdays.map((point) => Number(point.totalTokens)) ?? []
     return values.reduce((max, value) => (Number.isFinite(value) && value > max ? value : max), 0)
+  }, [activity?.weekdays])
+
+  const orderedWeekdays = useMemo(() => {
+    const weekdays = activity?.weekdays ?? []
+    return [...weekdays].sort((a, b) => ((a.weekday + 6) % 7) - ((b.weekday + 6) % 7))
   }, [activity?.weekdays])
 
   const hourMax = useMemo(() => {
@@ -578,6 +675,25 @@ export function UsageClient() {
     }
   }, [dailyTypeTotal, summary])
 
+  const sessionKpiValue = useMemo(() => {
+    if (!summary) return '—'
+
+    if (summary.meta.scope === 'parity') {
+      const sampled = summary.meta.sessionSampleCount ?? summary.totals.sessionCount
+      const total = summary.meta.sessionsInRangeTotal ?? sampled
+      return `${sampled}/${total}`
+    }
+
+    return summary.totals.sessionCount
+  }, [summary])
+
+  const parityCoverageWarning = useMemo(() => {
+    if (!summary || summary.meta.scope !== 'parity') return null
+    const missing = summary.meta.missingCoverageCount ?? 0
+    if (missing <= 0) return null
+    return `${missing} sampled session${missing === 1 ? '' : 's'} still missing from ingestion.`
+  }, [summary])
+
   return (
     <div className="w-full space-y-4">
       <PageHeader
@@ -610,6 +726,19 @@ export function UsageClient() {
           <button onClick={() => applyQuickRange(1)} className="btn-secondary btn-sm">Today</button>
           <button onClick={() => applyQuickRange(7)} className="btn-secondary btn-sm">7d</button>
           <button onClick={() => applyQuickRange(30)} className="btn-secondary btn-sm">30d</button>
+
+          <SelectDropdown
+            value={filters.scope}
+            onChange={(value) => commitFilters({ scope: value as UsageScope })}
+            options={[
+              { value: 'parity', label: 'Official parity' },
+              { value: 'all', label: 'All ingested' },
+            ]}
+            tone="toolbar"
+            size="sm"
+            ariaLabel="Usage scope"
+            className="w-[170px]"
+          />
 
           <div className="h-5 w-px bg-bd-0" />
 
@@ -753,6 +882,13 @@ export function UsageClient() {
             Last sync: {new Date(syncMeta.at).toLocaleString()} • {formatSyncSummary(syncMeta.stats)}
           </div>
         )}
+
+        {parityCoverageWarning && (
+          <div className="inline-flex items-center gap-1 rounded border border-status-warning/40 bg-status-warning/10 px-2 py-1 text-xs text-status-warning">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            {parityCoverageWarning}
+          </div>
+        )}
       </div>
 
       {error && (
@@ -762,23 +898,30 @@ export function UsageClient() {
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-        <MetricCard label="Total Tokens" value={summary ? formatCompactNumber(summary.totals.totalTokens) : '—'} icon={Layers} tone="info" />
-        <MetricCard label="Total Cost" value={summary ? formatUsdFromMicros(summary.totals.totalCostMicros) : '—'} icon={DollarSign} tone="warning" />
-        <MetricCard label="Avg / day" value={summary ? formatUsdFromMicros(summary.totals.avgCostMicrosPerDay) : '—'} icon={CalendarDays} tone="muted" />
-        <MetricCard label="Sessions" value={summary ? summary.totals.sessionCount : '—'} icon={Users} tone="success" />
-        <MetricCard label="Cache Efficiency" value={summary ? `${summary.totals.cacheEfficiencyPct.toFixed(2)}%` : '—'} icon={Database} tone="progress" />
-        <MetricCard label="Input Tokens" value={summary ? formatCompactNumber(summary.totals.inputTokens) : '—'} icon={Filter} tone="muted" />
-        <MetricCard label="Output Tokens" value={summary ? formatCompactNumber(summary.totals.outputTokens) : '—'} icon={Activity} tone="danger" />
+        <MetricCard label="Total Tokens" value={summary ? formatCompactNumber(summary.totals.totalTokens) : '—'} icon={Layers} tone="info" size="compact" />
+        <MetricCard label="Total Cost" value={summary ? formatUsdFromMicros(summary.totals.totalCostMicros) : '—'} icon={DollarSign} tone="warning" size="compact" />
+        <MetricCard label="Avg / day" value={summary ? formatUsdFromMicros(summary.totals.avgCostMicrosPerDay) : '—'} icon={CalendarDays} tone="muted" size="compact" />
+        <MetricCard
+          label={summary?.meta.scope === 'parity' ? 'Sessions (sampled)' : 'Sessions'}
+          value={sessionKpiValue}
+          icon={Users}
+          tone="success"
+          size="compact"
+        />
+        <MetricCard label="Cache Efficiency" value={summary ? `${summary.totals.cacheEfficiencyPct.toFixed(2)}%` : '—'} icon={Database} tone="progress" size="compact" />
+        <MetricCard label="Input Tokens" value={summary ? formatCompactNumber(summary.totals.inputTokens) : '—'} icon={Filter} tone="muted" size="compact" />
+        <MetricCard label="Output Tokens" value={summary ? formatCompactNumber(summary.totals.outputTokens) : '—'} icon={Activity} tone="danger" size="compact" />
         <MetricCard
           label="Error Filter"
           value={filters.hasErrors === 'all' ? 'All' : filters.hasErrors === 'true' ? 'Only errors' : 'No errors'}
           icon={AlertTriangle}
           tone={filters.hasErrors === 'true' ? 'danger' : 'muted'}
+          size="compact"
         />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 rounded-[var(--radius-lg)] border border-bd-0 bg-bg-2 p-4 space-y-3">
+        <div className="lg:col-span-2 rounded-[var(--radius-lg)] border border-bd-0 bg-bg-2 p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <h2 className="terminal-header">Daily Token Usage</h2>
             <div className="text-xs text-fg-2">{summary?.series.length ?? 0} days in window</div>
@@ -789,8 +932,8 @@ export function UsageClient() {
           ) : !summary || summary.series.length === 0 ? (
             <div className="text-sm text-fg-2">No usage in selected range.</div>
           ) : (
-            <>
-              <div className="h-44 flex items-end gap-1 rounded border border-bd-0 bg-bg-3/50 p-2">
+            <div className="flex-1 flex flex-col gap-3">
+              <div className="min-h-[11rem] flex-1 flex items-end gap-1 rounded border border-bd-0 bg-bg-3/50 p-2">
                 {summary.series.map((point) => {
                   const value = Number(point.totalTokens)
                   const height = maxDailyTokens > 0 && Number.isFinite(value)
@@ -827,7 +970,7 @@ export function UsageClient() {
                   <span>Cache read {summary ? formatCompactNumber(summary.totals.cacheReadTokens) : '—'}</span>
                 </div>
               </div>
-            </>
+            </div>
           )}
         </div>
 
@@ -837,7 +980,7 @@ export function UsageClient() {
           <div className="space-y-2">
             <div className="text-xs text-fg-2">Day of week</div>
             <div className="grid grid-cols-2 gap-2">
-              {(activity?.weekdays ?? []).map((day) => {
+              {orderedWeekdays.map((day) => {
                 const tokens = Number(day.totalTokens)
                 return (
                   <div key={day.weekday} className={cn('rounded border px-2 py-1.5', intensityClass(tokens, weekdayMax))}>
@@ -874,6 +1017,7 @@ export function UsageClient() {
         {breakdownKeys.map((key) => (
           <BreakdownCard
             key={key}
+            groupBy={key}
             title={
               key === 'model' ? 'Top Models' :
                 key === 'agent' ? 'Top Agents' :
@@ -882,6 +1026,7 @@ export function UsageClient() {
                       key === 'sessionClass' ? 'Session Classes' : 'Top Tools'
             }
             breakdown={breakdowns[key]}
+            agentAvatarMap={agentAvatarMap}
             loading={loading}
           />
         ))}
@@ -957,12 +1102,16 @@ export function UsageClient() {
 }
 
 function BreakdownCard({
+  groupBy,
   title,
   breakdown,
+  agentAvatarMap,
   loading,
 }: {
+  groupBy: BreakdownKey
   title: string
   breakdown: UsageBreakdownApi['data'] | null
+  agentAvatarMap: Record<string, AgentAvatarEntry>
   loading: boolean
 }) {
   return (
@@ -980,7 +1129,20 @@ function BreakdownCard({
           {breakdown.groups.slice(0, 8).map((group) => (
             <div key={group.key} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-xs text-fg-0 truncate" title={group.key}>{group.key}</div>
+                <div className="min-w-0 flex items-center gap-1.5">
+                  {groupBy === 'provider' && (
+                    <ProviderLogo provider={group.key} size="xs" className="opacity-80" />
+                  )}
+                  {groupBy === 'agent' && (
+                    <AgentAvatar
+                      agentId={agentAvatarMap[group.key.trim().toLowerCase()]?.agentId ?? group.key}
+                      name={agentAvatarMap[group.key.trim().toLowerCase()]?.name ?? group.key}
+                      size="xs"
+                      className="opacity-85"
+                    />
+                  )}
+                  <div className="text-xs text-fg-0 truncate" title={group.key}>{group.key}</div>
+                </div>
                 <div className="text-[11px] text-fg-2">
                   {formatCompactNumber(group.totalTokens)} tok • {group.sessionCount} sessions
                   {group.toolCallCount ? ` • ${formatCompactNumber(group.toolCallCount)} calls` : ''}

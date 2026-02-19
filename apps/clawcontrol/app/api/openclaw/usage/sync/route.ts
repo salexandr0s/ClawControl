@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { invalidateAsyncCacheByPrefix } from '@/lib/perf/async-cache'
 import { withIngestionLease } from '@/lib/openclaw/ingestion-lease'
+import { resolveUsageParityScope } from '@/lib/openclaw/usage-parity-scope'
 import { syncUsageTelemetry } from '@/lib/openclaw/usage-sync'
 
 const LEASE_NAME = 'usage-sync'
@@ -34,6 +35,10 @@ export async function POST(request: NextRequest) {
     maxMs?: number
     maxFiles?: number
     force?: boolean
+    mode?: 'parity'
+    from?: string
+    to?: string
+    sessionLimit?: number
   } = {}
 
   try {
@@ -61,9 +66,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const parityScope = body.mode === 'parity'
+      ? await resolveUsageParityScope({
+        from: body.from,
+        to: body.to,
+        sessionLimit: body.sessionLimit,
+      })
+      : null
+
     const syncStats = await syncUsageTelemetry({
       maxMs: body.maxMs,
       maxFiles: body.maxFiles,
+      priorityPaths: parityScope?.priorityPaths,
     })
 
     // Ensure summary/breakdown endpoints reflect fresh DB state immediately after a sync.
@@ -75,6 +89,14 @@ export async function POST(request: NextRequest) {
       indexVersion: USAGE_INDEX_VERSION,
       rebuildTriggered,
       rebuildInProgress: syncStats.filesRemaining > 0,
+      parity: parityScope
+        ? {
+          sessionLimit: parityScope.sessionLimit,
+          sampledCount: parityScope.sampledCount,
+          sessionsInRangeTotal: parityScope.sessionsInRangeTotal,
+          missingCoverageCount: parityScope.missingCoverageCount,
+        }
+        : null,
       ...syncStats,
       durationMs: Date.now() - startedAt,
     }
@@ -95,6 +117,7 @@ export async function POST(request: NextRequest) {
       indexVersion: USAGE_INDEX_VERSION,
       rebuildTriggered: false,
       rebuildInProgress: false,
+      parity: null,
       durationMs: 0,
     })
   }

@@ -5,6 +5,7 @@ const mockDailyFindMany = vi.fn()
 const mockHourlyFindMany = vi.fn()
 const mockSessionFindMany = vi.fn()
 const mockToolDailyFindMany = vi.fn()
+const mockResolveUsageParityScope = vi.fn()
 
 vi.mock('@/lib/db', () => ({
   prisma: {
@@ -21,6 +22,10 @@ vi.mock('@/lib/db', () => ({
       findMany: mockToolDailyFindMany,
     },
   },
+}))
+
+vi.mock('@/lib/openclaw/usage-parity-scope', () => ({
+  resolveUsageParityScope: mockResolveUsageParityScope,
 }))
 
 const dailyRows = [
@@ -157,22 +162,52 @@ describe('usage-explore-query', () => {
     mockHourlyFindMany.mockReset()
     mockSessionFindMany.mockReset()
     mockToolDailyFindMany.mockReset()
+    mockResolveUsageParityScope.mockReset()
 
-    mockDailyFindMany.mockImplementation(async ({ where }: { where: { dayStart: { gte: Date; lte: Date }; modelKey?: string; agentId?: string } }) => {
+    mockResolveUsageParityScope.mockResolvedValue({
+      from: '2026-02-05T00:00:00.000Z',
+      to: '2026-02-06T23:59:59.999Z',
+      sessionLimit: 1000,
+      sessionIdsSampled: ['s1', 's2'],
+      sampledCount: 2,
+      sessionsInRangeTotal: 2,
+      priorityPaths: [],
+      missingCoverageCount: 0,
+    })
+
+    mockDailyFindMany.mockImplementation(async ({ where }: {
+      where: {
+        dayStart: { gte: Date; lte: Date }
+        modelKey?: string
+        agentId?: string
+        sessionId?: { in: string[] }
+      }
+    }) => {
+      const sessionIds = where.sessionId ? new Set(where.sessionId.in) : null
       return dailyRows.filter((row) =>
         row.dayStart >= where.dayStart.gte
         && row.dayStart <= where.dayStart.lte
         && (!where.modelKey || row.modelKey === where.modelKey)
         && (!where.agentId || row.agentId === where.agentId)
+        && (!sessionIds || sessionIds.has(row.sessionId))
       )
     })
 
-    mockHourlyFindMany.mockImplementation(async ({ where }: { where: { hourStart: { gte: Date; lte: Date }; modelKey?: string; agentId?: string } }) => {
+    mockHourlyFindMany.mockImplementation(async ({ where }: {
+      where: {
+        hourStart: { gte: Date; lte: Date }
+        modelKey?: string
+        agentId?: string
+        sessionId?: { in: string[] }
+      }
+    }) => {
+      const sessionIds = where.sessionId ? new Set(where.sessionId.in) : null
       return hourlyRows.filter((row) =>
         row.hourStart >= where.hourStart.gte
         && row.hourStart <= where.hourStart.lte
         && (!where.modelKey || row.modelKey === where.modelKey)
         && (!where.agentId || row.agentId === where.agentId)
+        && (!sessionIds || sessionIds.has(row.sessionId))
       )
     })
 
@@ -292,5 +327,101 @@ describe('usage-explore-query', () => {
     expect(hour10?.totalTokens).toBe('180')
     expect(hour15?.totalTokens).toBe('280')
     expect(activity.totals.totalCostMicros).toBe('3600')
+  })
+
+  it('applies parity session sampling and exposes summary metadata', async () => {
+    const query = await import('@/lib/openclaw/usage-explore-query')
+
+    mockResolveUsageParityScope.mockResolvedValue({
+      from: '2026-02-05T00:00:00.000Z',
+      to: '2026-02-06T23:59:59.999Z',
+      sessionLimit: 1000,
+      sessionIdsSampled: ['s1'],
+      sampledCount: 1,
+      sessionsInRangeTotal: 2,
+      priorityPaths: ['missing-session.jsonl'],
+      missingCoverageCount: 1,
+    })
+
+    const summary = await query.getUsageExploreSummary({
+      scope: 'parity',
+      from: '2026-02-05T00:00:00.000Z',
+      to: '2026-02-06T23:59:59.999Z',
+      timezone: 'UTC',
+    })
+
+    expect(summary.meta.scope).toBe('parity')
+    expect(summary.meta.sessionSampleCount).toBe(1)
+    expect(summary.meta.sessionsInRangeTotal).toBe(2)
+    expect(summary.meta.missingCoverageCount).toBe(1)
+    expect(summary.totals.totalCostMicros).toBe('2400')
+    expect(summary.totals.sessionCount).toBe(1)
+
+    const sessions = await query.getUsageExploreSessions({
+      scope: 'parity',
+      from: '2026-02-05T00:00:00.000Z',
+      to: '2026-02-06T23:59:59.999Z',
+      timezone: 'UTC',
+    })
+
+    expect(sessions.totalSessions).toBe(1)
+    expect(sessions.rows[0]?.sessionId).toBe('s1')
+  })
+
+  it('keeps all-ingested mode behavior and bypasses parity sampling', async () => {
+    const query = await import('@/lib/openclaw/usage-explore-query')
+
+    mockResolveUsageParityScope.mockClear()
+
+    const summary = await query.getUsageExploreSummary({
+      scope: 'all',
+      from: '2026-02-05T00:00:00.000Z',
+      to: '2026-02-06T23:59:59.999Z',
+      timezone: 'UTC',
+    })
+
+    expect(summary.meta.scope).toBe('all')
+    expect(summary.meta.sessionSampleCount).toBeNull()
+    expect(summary.totals.totalCostMicros).toBe('4500')
+    expect(summary.totals.sessionCount).toBe(2)
+    expect(mockResolveUsageParityScope).not.toHaveBeenCalled()
+  })
+
+  it('chunks parity session id filters to stay under sqlite in limits', async () => {
+    const query = await import('@/lib/openclaw/usage-explore-query')
+
+    const sampledIds = Array.from({ length: 1001 }, (_, index) => `sample-${index}`)
+    sampledIds[0] = 's1'
+    sampledIds[1] = 's2'
+
+    mockResolveUsageParityScope.mockResolvedValueOnce({
+      from: '2026-02-05T00:00:00.000Z',
+      to: '2026-02-06T23:59:59.999Z',
+      sessionLimit: 1001,
+      sessionIdsSampled: sampledIds,
+      sampledCount: sampledIds.length,
+      sessionsInRangeTotal: sampledIds.length,
+      priorityPaths: [],
+      missingCoverageCount: 0,
+    })
+
+    mockDailyFindMany.mockClear()
+
+    const summary = await query.getUsageExploreSummary({
+      scope: 'parity',
+      from: '2026-02-05T00:00:00.000Z',
+      to: '2026-02-06T23:59:59.999Z',
+      timezone: 'UTC',
+    })
+
+    expect(summary.totals.totalCostMicros).toBe('4500')
+    expect(mockDailyFindMany).toHaveBeenCalledTimes(2)
+
+    const inClauseSizes = mockDailyFindMany.mock.calls.map((call) => {
+      const where = call?.[0]?.where as { sessionId?: { in: string[] } }
+      return where.sessionId?.in.length ?? 0
+    })
+
+    expect(inClauseSizes).toEqual([900, 101])
   })
 })

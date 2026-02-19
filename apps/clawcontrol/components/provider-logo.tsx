@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils'
 
 type ProviderLogoProps = {
   provider: string
-  size?: 'sm' | 'md'
+  size?: 'xs' | 'sm' | 'md'
   className?: string
 }
 
@@ -93,9 +93,9 @@ export function ProviderLogo({ provider, size = 'sm', className }: ProviderLogoP
   const canonical = canonicalProvider(provider)
   const visual = PROVIDER_VISUALS[canonical]
 
-  const boxClass = size === 'md' ? 'w-7 h-7 rounded-md' : 'w-6 h-6 rounded-md'
-  const iconClass = size === 'md' ? 'w-5 h-5' : 'w-4 h-4'
-  const labelClass = size === 'md' ? 'text-[10px]' : 'text-[9px]'
+  const boxClass = size === 'md' ? 'w-7 h-7 rounded-md' : size === 'sm' ? 'w-6 h-6 rounded-md' : 'w-4 h-4 rounded-sm'
+  const iconClass = size === 'md' ? 'w-5 h-5' : size === 'sm' ? 'w-4 h-4' : 'w-3 h-3'
+  const labelClass = size === 'md' ? 'text-[10px]' : size === 'sm' ? 'text-[9px]' : 'text-[8px]'
 
   return (
     <span

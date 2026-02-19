@@ -2,20 +2,24 @@ import 'server-only'
 
 import { prisma } from '@/lib/db'
 import { getOrLoadWithCache } from '@/lib/perf/async-cache'
+import { resolveUsageParityScope } from '@/lib/openclaw/usage-parity-scope'
 
 const QUERY_TTL_MS = 15_000
 const DEFAULT_RANGE_DAYS = 30
 const DEFAULT_PAGE_SIZE = 50
 const MAX_PAGE_SIZE = 200
 const SQLITE_IN_LIMIT = 900
+const DEFAULT_PARITY_SESSION_LIMIT = 1000
 
 export type UsageExploreSort = 'cost_desc' | 'tokens_desc' | 'recent_desc'
 export type UsageExploreBreakdownKey = 'agent' | 'model' | 'provider' | 'source' | 'sessionClass' | 'tool'
+export type UsageExploreScope = 'parity' | 'all'
 
 export interface UsageExploreFiltersInput {
   from?: string | null
   to?: string | null
   timezone?: string | null
+  scope?: UsageExploreScope | null
   agentId?: string | null
   sessionClass?: string | null
   source?: string | null
@@ -36,6 +40,7 @@ export interface UsageExploreSummaryResult {
   to: string
   timezone: string
   filters: UsageExploreFilterEcho
+  meta: UsageExploreSummaryMeta
   totals: {
     inputTokens: string
     outputTokens: string
@@ -57,6 +62,14 @@ export interface UsageExploreSummaryResult {
     totalTokens: string
     totalCostMicros: string
   }>
+}
+
+export interface UsageExploreSummaryMeta {
+  scope: UsageExploreScope
+  sessionSampleLimit: number | null
+  sessionSampleCount: number | null
+  sessionsInRangeTotal: number | null
+  missingCoverageCount: number | null
 }
 
 export interface UsageExploreBreakdownGroup {
@@ -177,10 +190,17 @@ type RangeWindow = {
 
 type ResolvedFilters = {
   range: RangeWindow
+  scope: UsageExploreScope
   filterEcho: UsageExploreFilterEcho
   page: number
   pageSize: number
   sort: UsageExploreSort
+}
+
+type ResolvedScope = {
+  scope: UsageExploreScope
+  sessionIds: string[] | null
+  meta: UsageExploreSummaryMeta
 }
 
 type SessionDimensionRow = {
@@ -291,6 +311,11 @@ function normalizeTimezone(input: string | null | undefined): string {
   } catch {
     return 'UTC'
   }
+}
+
+function normalizeScope(input: UsageExploreScope | string | null | undefined): UsageExploreScope {
+  const normalized = normalizeLabel(input)
+  return normalized === 'all' ? 'all' : 'parity'
 }
 
 function toBigIntString(value: bigint): string {
@@ -441,10 +466,45 @@ function resolveFilters(input: UsageExploreFiltersInput): ResolvedFilters {
       toDay: startOfUtcDay(to),
       timezone: normalizeTimezone(input.timezone),
     },
+    scope: normalizeScope(input.scope),
     filterEcho,
     page: safePage,
     pageSize: safePageSize,
     sort,
+  }
+}
+
+async function resolveScope(input: ResolvedFilters): Promise<ResolvedScope> {
+  if (input.scope === 'all') {
+    return {
+      scope: 'all',
+      sessionIds: null,
+      meta: {
+        scope: 'all',
+        sessionSampleLimit: null,
+        sessionSampleCount: null,
+        sessionsInRangeTotal: null,
+        missingCoverageCount: null,
+      },
+    }
+  }
+
+  const parity = await resolveUsageParityScope({
+    from: input.range.from,
+    to: input.range.to,
+    sessionLimit: DEFAULT_PARITY_SESSION_LIMIT,
+  })
+
+  return {
+    scope: 'parity',
+    sessionIds: parity.sessionIdsSampled,
+    meta: {
+      scope: 'parity',
+      sessionSampleLimit: parity.sessionLimit,
+      sessionSampleCount: parity.sampledCount,
+      sessionsInRangeTotal: parity.sessionsInRangeTotal,
+      missingCoverageCount: parity.missingCoverageCount,
+    },
   }
 }
 
@@ -484,8 +544,8 @@ function matchesTextQuery(session: SessionDimensionRow, usage: { model: string |
   return haystack.includes(normalized)
 }
 
-async function loadFilteredDailyRows(input: ResolvedFilters): Promise<FilteredDailyRow[]> {
-  const where = {
+async function loadDailyUsageRows(input: ResolvedFilters, scopedSessionIds: string[] | null): Promise<DailyUsageRow[]> {
+  const whereBase = {
     dayStart: {
       gte: input.range.fromDay,
       lte: input.range.toDay,
@@ -494,22 +554,47 @@ async function loadFilteredDailyRows(input: ResolvedFilters): Promise<FilteredDa
     ...(input.filterEcho.agentId ? { agentId: input.filterEcho.agentId } : {}),
   }
 
-  const usageRows = await prisma.sessionUsageDailyAggregate.findMany({
-    where,
-    select: {
-      sessionId: true,
-      agentId: true,
-      modelKey: true,
-      model: true,
-      dayStart: true,
-      inputTokens: true,
-      outputTokens: true,
-      cacheReadTokens: true,
-      cacheWriteTokens: true,
-      totalTokens: true,
-      totalCostMicros: true,
-    },
-  })
+  const select = {
+    sessionId: true,
+    agentId: true,
+    modelKey: true,
+    model: true,
+    dayStart: true,
+    inputTokens: true,
+    outputTokens: true,
+    cacheReadTokens: true,
+    cacheWriteTokens: true,
+    totalTokens: true,
+    totalCostMicros: true,
+  } as const
+
+  if (scopedSessionIds === null) {
+    return prisma.sessionUsageDailyAggregate.findMany({
+      where: whereBase,
+      select,
+    })
+  }
+
+  if (scopedSessionIds.length === 0) return []
+
+  const chunks = chunkValues(scopedSessionIds, SQLITE_IN_LIMIT)
+  const rows = await Promise.all(
+    chunks.map((subset) =>
+      prisma.sessionUsageDailyAggregate.findMany({
+        where: {
+          ...whereBase,
+          sessionId: { in: subset },
+        },
+        select,
+      })
+    )
+  )
+
+  return rows.flat()
+}
+
+async function loadFilteredDailyRows(input: ResolvedFilters, scopedSessionIds: string[] | null): Promise<FilteredDailyRow[]> {
+  const usageRows = await loadDailyUsageRows(input, scopedSessionIds)
 
   if (usageRows.length === 0) return []
 
@@ -547,8 +632,8 @@ async function loadFilteredDailyRows(input: ResolvedFilters): Promise<FilteredDa
   return filtered
 }
 
-async function loadFilteredHourlyRows(input: ResolvedFilters): Promise<FilteredHourlyRow[]> {
-  const where = {
+async function loadHourlyUsageRows(input: ResolvedFilters, scopedSessionIds: string[] | null): Promise<HourlyUsageRow[]> {
+  const whereBase = {
     hourStart: {
       gte: startOfUtcHour(input.range.from),
       lte: startOfUtcHour(input.range.to),
@@ -557,22 +642,47 @@ async function loadFilteredHourlyRows(input: ResolvedFilters): Promise<FilteredH
     ...(input.filterEcho.agentId ? { agentId: input.filterEcho.agentId } : {}),
   }
 
-  const usageRows = await prisma.sessionUsageHourlyAggregate.findMany({
-    where,
-    select: {
-      sessionId: true,
-      agentId: true,
-      modelKey: true,
-      model: true,
-      hourStart: true,
-      inputTokens: true,
-      outputTokens: true,
-      cacheReadTokens: true,
-      cacheWriteTokens: true,
-      totalTokens: true,
-      totalCostMicros: true,
-    },
-  })
+  const select = {
+    sessionId: true,
+    agentId: true,
+    modelKey: true,
+    model: true,
+    hourStart: true,
+    inputTokens: true,
+    outputTokens: true,
+    cacheReadTokens: true,
+    cacheWriteTokens: true,
+    totalTokens: true,
+    totalCostMicros: true,
+  } as const
+
+  if (scopedSessionIds === null) {
+    return prisma.sessionUsageHourlyAggregate.findMany({
+      where: whereBase,
+      select,
+    })
+  }
+
+  if (scopedSessionIds.length === 0) return []
+
+  const chunks = chunkValues(scopedSessionIds, SQLITE_IN_LIMIT)
+  const rows = await Promise.all(
+    chunks.map((subset) =>
+      prisma.sessionUsageHourlyAggregate.findMany({
+        where: {
+          ...whereBase,
+          sessionId: { in: subset },
+        },
+        select,
+      })
+    )
+  )
+
+  return rows.flat()
+}
+
+async function loadFilteredHourlyRows(input: ResolvedFilters, scopedSessionIds: string[] | null): Promise<FilteredHourlyRow[]> {
+  const usageRows = await loadHourlyUsageRows(input, scopedSessionIds)
 
   if (usageRows.length === 0) return []
 
@@ -896,6 +1006,7 @@ function cacheKey(prefix: string, input: ResolvedFilters, extra: string = ''): s
     input.range.from.toISOString(),
     input.range.to.toISOString(),
     input.range.timezone,
+    `scope=${input.scope}`,
     input.filterEcho.agentId ?? 'all',
     input.filterEcho.sessionClass ?? 'all',
     input.filterEcho.source ?? 'all',
@@ -918,7 +1029,8 @@ export async function getUsageExploreSummary(input: UsageExploreFiltersInput): P
   const key = cacheKey('usage.explore.summary', resolved)
 
   const { value } = await getOrLoadWithCache(key, QUERY_TTL_MS, async () => {
-    const rows = await loadFilteredDailyRows(resolved)
+    const scope = await resolveScope(resolved)
+    const rows = await loadFilteredDailyRows(resolved, scope.sessionIds)
     const series = buildDailySeries({
       fromDay: resolved.range.fromDay,
       toDay: resolved.range.toDay,
@@ -940,6 +1052,7 @@ export async function getUsageExploreSummary(input: UsageExploreFiltersInput): P
       to: resolved.range.to.toISOString(),
       timezone: resolved.range.timezone,
       filters: resolved.filterEcho,
+      meta: scope.meta,
       totals: {
         inputTokens: toBigIntString(totalInput),
         outputTokens: toBigIntString(totalOutput),
@@ -966,7 +1079,8 @@ export async function getUsageExploreBreakdown(input: {
   const key = cacheKey('usage.explore.breakdown', resolved, `groupBy=${input.groupBy}`)
 
   const { value } = await getOrLoadWithCache(key, QUERY_TTL_MS, async () => {
-    const rows = await loadFilteredDailyRows(resolved)
+    const scope = await resolveScope(resolved)
+    const rows = await loadFilteredDailyRows(resolved, scope.sessionIds)
 
     const groups = input.groupBy === 'tool'
       ? await aggregateToolGroups({
@@ -994,7 +1108,8 @@ export async function getUsageExploreActivity(input: UsageExploreFiltersInput): 
   const key = cacheKey('usage.explore.activity', resolved)
 
   const { value } = await getOrLoadWithCache(key, QUERY_TTL_MS, async () => {
-    const rows = await loadFilteredHourlyRows(resolved)
+    const scope = await resolveScope(resolved)
+    const rows = await loadFilteredHourlyRows(resolved, scope.sessionIds)
 
     const weekdayBuckets = Array.from({ length: 7 }, (_, weekday) => ({
       weekday,
@@ -1051,7 +1166,8 @@ export async function getUsageExploreSessions(input: UsageExploreFiltersInput): 
   const key = cacheKey('usage.explore.sessions', resolved)
 
   const { value } = await getOrLoadWithCache(key, QUERY_TTL_MS, async () => {
-    const rows = await loadFilteredDailyRows(resolved)
+    const scope = await resolveScope(resolved)
+    const rows = await loadFilteredDailyRows(resolved, scope.sessionIds)
 
     const bySession = new Map<string, {
       session: SessionDimensionRow
@@ -1160,7 +1276,8 @@ export async function getUsageExploreOptions(input: UsageExploreFiltersInput): P
   const key = cacheKey('usage.explore.options', resolved)
 
   const { value } = await getOrLoadWithCache(key, QUERY_TTL_MS, async () => {
-    const rows = await loadFilteredDailyRows(resolved)
+    const scope = await resolveScope(resolved)
+    const rows = await loadFilteredDailyRows(resolved, scope.sessionIds)
 
     const agents = new Set<string>()
     const sessionClasses = new Set<string>()
@@ -1231,6 +1348,7 @@ export function parseUsageExploreFiltersFromSearchParams(searchParams: URLSearch
     from: searchParams.get('from'),
     to: searchParams.get('to'),
     timezone: searchParams.get('timezone'),
+    scope: normalizeScope(searchParams.get('scope')),
     agentId: searchParams.get('agentId'),
     sessionClass: searchParams.get('sessionClass'),
     source: searchParams.get('source'),

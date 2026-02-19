@@ -9,10 +9,12 @@ import {
 } from '@/components/ui/status-pill'
 import { CanonicalTable, type Column } from '@/components/ui/canonical-table'
 import { MetricCard } from '@/components/ui/metric-card'
+import { AgentAvatar } from '@/components/ui/agent-avatar'
+import { ProviderLogo } from '@/components/provider-logo'
 import { useGatewayStatus } from '@/lib/hooks/useGatewayStatus'
 import { cn } from '@/lib/utils'
 import { timedClientFetch, usePageReadyTiming } from '@/lib/perf/client-timing'
-import { apiPost, HttpError } from '@/lib/http'
+import { apiPost, HttpError, agentsApi } from '@/lib/http'
 import {
   computeUsageAvgPerDay,
   getUtcInclusiveDayCount,
@@ -117,14 +119,22 @@ interface UsageSummaryApi {
   }
 }
 
+interface UsageBreakdownGroup {
+  key: string
+  totalCostMicros: string
+  totalTokens: string
+}
+
 interface UsageBreakdownApi {
   data: {
-    groups: Array<{
-      key: string
-      totalCostMicros: string
-      totalTokens: string
-    }>
+    groupBy: 'model' | 'agent'
+    groups: UsageBreakdownGroup[]
   }
+}
+
+type AgentAvatarEntry = {
+  agentId: string
+  name: string
 }
 
 interface UsageSyncApi {
@@ -145,6 +155,26 @@ interface UsageSyncApi {
 }
 
 const USAGE_WINDOW_DAYS = 30
+
+function deriveProviderFromModel(model: string): string {
+  const normalized = model.trim().toLowerCase()
+  if (!normalized) return 'unknown'
+
+  if (normalized.startsWith('anthropic/') || normalized.startsWith('claude')) return 'anthropic'
+  if (normalized.startsWith('openai-codex/') || normalized.includes('codex')) return 'openai-codex'
+  if (normalized.startsWith('openai/') || normalized.startsWith('gpt-')) return 'openai'
+  if (normalized.startsWith('google/') || normalized.startsWith('gemini')) return 'google'
+  if (normalized.startsWith('mistral/')) return 'mistral'
+  if (normalized.startsWith('deepseek/')) return 'deepseek'
+  if (normalized.startsWith('xai/') || normalized.startsWith('grok')) return 'xai'
+
+  const slash = normalized.indexOf('/')
+  if (slash > 0) {
+    return normalized.slice(0, slash)
+  }
+
+  return normalized
+}
 
 // ============================================================================
 // COLUMNS
@@ -265,7 +295,9 @@ export function Dashboard({
       : 'danger'
 
   const [usageSummary, setUsageSummary] = useState<UsageSummaryApi['data'] | null>(null)
-  const [usageBreakdown, setUsageBreakdown] = useState<UsageBreakdownApi['data'] | null>(null)
+  const [usageModelBreakdown, setUsageModelBreakdown] = useState<UsageBreakdownGroup[]>([])
+  const [usageAgentBreakdown, setUsageAgentBreakdown] = useState<UsageBreakdownGroup[]>([])
+  const [agentAvatarMap, setAgentAvatarMap] = useState<Record<string, AgentAvatarEntry>>({})
   const [usageLoading, setUsageLoading] = useState(true)
   const [usageSyncing, setUsageSyncing] = useState(false)
   const [usageSyncMeta, setUsageSyncMeta] = useState<{ at: string; stats: UsageSyncApi } | null>(null)
@@ -279,20 +311,29 @@ export function Dashboard({
       from: fromIso,
       to: toIso,
     })
-    const breakdownParams = new URLSearchParams({
+    const modelBreakdownParams = new URLSearchParams({
       groupBy: 'model',
       from: fromIso,
       to: toIso,
     })
+    const agentBreakdownParams = new URLSearchParams({
+      groupBy: 'agent',
+      from: fromIso,
+      to: toIso,
+    })
 
-    const [summaryRes, breakdownRes] = await Promise.all([
+    const [summaryRes, modelBreakdownRes, agentBreakdownRes] = await Promise.all([
       timedClientFetch(`/api/openclaw/usage/summary?${summaryParams.toString()}`, undefined, {
         page: 'dashboard',
         name: `usage.summary.${metaSuffix}`,
       }),
-      timedClientFetch(`/api/openclaw/usage/breakdown?${breakdownParams.toString()}`, undefined, {
+      timedClientFetch(`/api/openclaw/usage/breakdown?${modelBreakdownParams.toString()}`, undefined, {
         page: 'dashboard',
         name: `usage.breakdown.model.${metaSuffix}`,
+      }),
+      timedClientFetch(`/api/openclaw/usage/breakdown?${agentBreakdownParams.toString()}`, undefined, {
+        page: 'dashboard',
+        name: `usage.breakdown.agent.${metaSuffix}`,
       }),
     ])
 
@@ -301,10 +342,15 @@ export function Dashboard({
       setUsageSummary(summaryJson.data)
     }
 
-      if (breakdownRes.ok) {
-        const breakdownJson = (await breakdownRes.json()) as UsageBreakdownApi
-        setUsageBreakdown(breakdownJson.data)
-      }
+    if (modelBreakdownRes.ok) {
+      const breakdownJson = (await modelBreakdownRes.json()) as UsageBreakdownApi
+      setUsageModelBreakdown(breakdownJson.data.groups)
+    }
+
+    if (agentBreakdownRes.ok) {
+      const breakdownJson = (await agentBreakdownRes.json()) as UsageBreakdownApi
+      setUsageAgentBreakdown(breakdownJson.data.groups)
+    }
   }, [])
 
   useEffect(() => {
@@ -335,6 +381,37 @@ export function Dashboard({
     }
     void warmSync()
   }, [loadUsageMetrics])
+
+  const loadAgentAvatarMap = useCallback(async () => {
+    try {
+      const result = await agentsApi.list({
+        mode: 'light',
+        includeSessionOverlay: false,
+        includeModelOverlay: false,
+        syncSessions: false,
+        cacheTtlMs: 60_000,
+      })
+
+      const nextMap: Record<string, AgentAvatarEntry> = {}
+      for (const agent of result.data) {
+        const runtimeAgentId = agent.runtimeAgentId?.trim().toLowerCase()
+        if (!runtimeAgentId) continue
+
+        nextMap[runtimeAgentId] = {
+          agentId: agent.id,
+          name: agent.displayName || agent.name || agent.runtimeAgentId,
+        }
+      }
+
+      setAgentAvatarMap(nextMap)
+    } catch {
+      // Non-blocking: cards can still render with identicon fallback.
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadAgentAvatarMap()
+  }, [loadAgentAvatarMap])
 
   const handleSyncUsage = async () => {
     setUsageSyncing(true)
@@ -410,6 +487,32 @@ export function Dashboard({
     return Number.isFinite(value) && value > max ? value : max
   }, 0)
 
+  const usageProviderBreakdown = useMemo(() => {
+    const grouped = new Map<string, { totalCostMicros: bigint; totalTokens: bigint }>()
+
+    for (const group of usageModelBreakdown) {
+      const provider = deriveProviderFromModel(group.key)
+      const prev = grouped.get(provider) ?? { totalCostMicros: 0n, totalTokens: 0n }
+
+      prev.totalCostMicros += BigInt(group.totalCostMicros)
+      prev.totalTokens += BigInt(group.totalTokens)
+      grouped.set(provider, prev)
+    }
+
+    return Array.from(grouped.entries())
+      .map(([key, value]) => ({
+        key,
+        totalCostMicros: value.totalCostMicros.toString(),
+        totalTokens: value.totalTokens.toString(),
+      }))
+      .sort((a, b) => {
+        const aCost = BigInt(a.totalCostMicros)
+        const bCost = BigInt(b.totalCostMicros)
+        if (aCost === bCost) return a.key.localeCompare(b.key)
+        return aCost > bCost ? -1 : 1
+      })
+  }, [usageModelBreakdown])
+
   return (
     <div className="flex flex-col gap-6 w-full">
       {stats.totalAgents === 0 && (
@@ -429,22 +532,24 @@ export function Dashboard({
 
       {/* Stats Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        <MetricCard label="Gateway" value={gatewayValue} icon={Activity} tone={gatewayTone} />
-        <MetricCard label="Active WOs" value={stats.activeWorkOrders} icon={PlayCircle} tone="progress" />
+        <MetricCard label="Gateway" value={gatewayValue} icon={Activity} tone={gatewayTone} size="compact" />
+        <MetricCard label="Active WOs" value={stats.activeWorkOrders} icon={PlayCircle} tone="progress" size="compact" />
         <MetricCard
           label="Blocked"
           value={stats.blockedWorkOrders}
           icon={AlertTriangle}
           tone={stats.blockedWorkOrders > 0 ? 'warning' : 'success'}
+          size="compact"
         />
         <MetricCard
           label="Approvals"
           value={stats.pendingApprovals}
           icon={Clock}
           tone={stats.pendingApprovals > 0 ? 'info' : 'success'}
+          size="compact"
         />
-        <MetricCard label="Agents" value={`${stats.activeAgents}/${stats.totalAgents}`} icon={Bot} tone="success" />
-        <MetricCard label="Completed" value={stats.completedToday} icon={CheckCircle} tone="muted" />
+        <MetricCard label="Agents" value={`${stats.activeAgents}/${stats.totalAgents}`} icon={Bot} tone="success" size="compact" />
+        <MetricCard label="Completed" value={stats.completedToday} icon={CheckCircle} tone="muted" size="compact" />
       </div>
 
       <div className="bg-bg-2 rounded-[var(--radius-lg)] border border-bd-0 overflow-hidden order-last">
@@ -590,20 +695,49 @@ export function Dashboard({
                 )}
               </div>
 
-              <div>
-                <div className="text-xs text-fg-2 mb-2">By model cost split</div>
-                {usageBreakdown && usageBreakdown.groups.length > 0 ? (
-                  <div className="space-y-1">
-                    {usageBreakdown.groups.slice(0, 5).map((group) => (
-                      <div key={group.key} className="flex items-center justify-between text-xs">
-                        <span className="text-fg-1 truncate max-w-[260px]">{group.key}</span>
-                        <span className="font-mono text-fg-2">{formatUsdFromMicros(group.totalCostMicros)}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-xs text-fg-3">No model-level usage data yet.</div>
-                )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs text-fg-2 mb-2">Top providers by cost</div>
+                  {usageProviderBreakdown.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {usageProviderBreakdown.slice(0, 5).map((group) => (
+                        <div key={group.key} className="flex items-center justify-between text-xs gap-2">
+                          <span className="min-w-0 flex items-center gap-1.5">
+                            <ProviderLogo provider={group.key} size="xs" className="opacity-80" />
+                            <span className="text-fg-1 truncate">{group.key}</span>
+                          </span>
+                          <span className="font-mono text-fg-2">{formatUsdFromMicros(group.totalCostMicros)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-fg-3">No provider-level usage data yet.</div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="text-xs text-fg-2 mb-2">Top agents by cost</div>
+                  {usageAgentBreakdown.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {usageAgentBreakdown.slice(0, 5).map((group) => (
+                        <div key={group.key} className="flex items-center justify-between text-xs gap-2">
+                          <span className="min-w-0 flex items-center gap-1.5">
+                            <AgentAvatar
+                              agentId={agentAvatarMap[group.key.trim().toLowerCase()]?.agentId ?? group.key}
+                              name={agentAvatarMap[group.key.trim().toLowerCase()]?.name ?? group.key}
+                              size="xs"
+                              className="opacity-85"
+                            />
+                            <span className="text-fg-1 truncate">{group.key}</span>
+                          </span>
+                          <span className="font-mono text-fg-2">{formatUsdFromMicros(group.totalCostMicros)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-fg-3">No agent-level usage data yet.</div>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
@@ -721,11 +855,11 @@ function formatUsdFromMicros(micros: string): string {
 
 function MiniMetric({ label, value, subValue }: { label: string; value: string; subValue?: string }) {
   return (
-    <div className="p-2.5 rounded border border-bd-0 bg-bg-3">
-      <div className="text-[11px] text-fg-2">{label}</div>
-      <div className="text-sm text-fg-0 font-medium mt-0.5 tabular-nums">{value}</div>
+    <div className="p-2.5 rounded-[var(--radius-md)] border border-bd-0 bg-bg-3 min-w-0">
+      <div className="text-[9.5px] leading-4 text-fg-2 truncate">{label}</div>
+      <div className="text-[13.5px] leading-none text-fg-0 font-medium mt-0.5 tabular-nums truncate">{value}</div>
       {subValue && (
-        <div className="text-[11px] text-fg-2 mt-1 tabular-nums">{subValue}</div>
+        <div className="text-[9.5px] leading-4 text-fg-2 mt-1 tabular-nums">{subValue}</div>
       )}
     </div>
   )

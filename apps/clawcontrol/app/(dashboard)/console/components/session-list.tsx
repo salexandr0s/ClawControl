@@ -34,6 +34,7 @@ interface SessionListProps {
 }
 
 type FilterState = 'all' | 'active' | 'idle' | 'error'
+const PINNED_SESSION_KEY = 'agent:main:main'
 
 // ============================================================================
 // HELPERS
@@ -102,9 +103,7 @@ export function SessionList({
   const filteredSessions = useMemo(() => {
     const base = filter === 'all' ? sessions : sessions.filter(s => s.state === filter)
     const q = deferredQuery.trim().toLowerCase()
-    if (!q) return base
-
-    return base.filter((s) => {
+    const searched = q ? base.filter((s) => {
       const agent = agentsBySessionKey[s.sessionKey]
       const displayName = (agent?.name || s.agentId || '').toLowerCase()
       const sessionKey = (s.sessionKey || '').toLowerCase()
@@ -118,7 +117,15 @@ export function SessionList({
         kind.includes(q) ||
         model.includes(q)
       )
-    })
+    }) : base
+
+    const pinnedIndex = searched.findIndex((s) => s.sessionKey === PINNED_SESSION_KEY)
+    if (pinnedIndex <= 0) return searched
+
+    const ordered = searched.slice()
+    const [pinned] = ordered.splice(pinnedIndex, 1)
+    ordered.unshift(pinned)
+    return ordered
   }, [sessions, filter, deferredQuery, agentsBySessionKey])
 
   // Count by state

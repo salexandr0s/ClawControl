@@ -319,16 +319,23 @@ describe('usage-sync queue scheduling', () => {
   it('prioritizes unseen files and reaches full coverage across bounded runs', () => {
     const files = ['a.jsonl', 'b.jsonl', 'c.jsonl', 'd.jsonl', 'e.jsonl']
     const maxFilesPerRun = 2
+    const mtimeByPath = new Map<string, number>([
+      ['a.jsonl', 100],
+      ['b.jsonl', 200],
+      ['c.jsonl', 300],
+      ['d.jsonl', 400],
+      ['e.jsonl', 500],
+    ])
 
     const cursors = new Map<string, { updatedAt: Date }>()
     const visited = new Set<string>()
 
-    const firstRunQueue = buildSyncFileQueue(files, cursors)
-    expect(firstRunQueue).toEqual(files)
+    const firstRunQueue = buildSyncFileQueue(files, cursors, { fileMtimeMsByPath: mtimeByPath })
+    expect(firstRunQueue).toEqual(['e.jsonl', 'd.jsonl', 'c.jsonl', 'b.jsonl', 'a.jsonl'])
 
     let run = 0
     while (visited.size < files.length && run < 10) {
-      const queue = buildSyncFileQueue(files, cursors)
+      const queue = buildSyncFileQueue(files, cursors, { fileMtimeMsByPath: mtimeByPath })
       const batch = queue.slice(0, maxFilesPerRun)
 
       for (const [index, filePath] of batch.entries()) {
@@ -343,6 +350,39 @@ describe('usage-sync queue scheduling', () => {
 
     expect(visited.size).toBe(files.length)
     expect(run).toBeLessThanOrEqual(3)
+  })
+
+  it('places explicit priority paths first', () => {
+    const files = ['a.jsonl', 'b.jsonl', 'c.jsonl']
+    const cursors = new Map<string, { updatedAt: Date }>([
+      ['b.jsonl', { updatedAt: new Date('2026-02-08T00:00:00.000Z') }],
+    ])
+
+    const queue = buildSyncFileQueue(files, cursors, {
+      priorityPaths: ['b.jsonl', 'a.jsonl', 'missing.jsonl', 'b.jsonl'],
+      fileMtimeMsByPath: new Map<string, number>([
+        ['a.jsonl', 100],
+        ['b.jsonl', 300],
+        ['c.jsonl', 200],
+      ]),
+    })
+
+    expect(queue).toEqual(['b.jsonl', 'a.jsonl', 'c.jsonl'])
+  })
+
+  it('orders unseen files by newest file mtime', () => {
+    const files = ['a.jsonl', 'b.jsonl', 'c.jsonl']
+    const cursors = new Map<string, { updatedAt: Date }>()
+
+    const queue = buildSyncFileQueue(files, cursors, {
+      fileMtimeMsByPath: new Map<string, number>([
+        ['a.jsonl', 100],
+        ['b.jsonl', 300],
+        ['c.jsonl', 200],
+      ]),
+    })
+
+    expect(queue).toEqual(['b.jsonl', 'c.jsonl', 'a.jsonl'])
   })
 
   it('orders previously seen files by oldest cursor update time', () => {

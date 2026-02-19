@@ -7,11 +7,11 @@ import { useGatewayStatus } from '@/lib/hooks/useGatewayStatus'
 
 export function SyncBanner({ className, withMargin = true }: { className?: string; withMargin?: boolean }) {
   const { status, loading, syncing, triggerSync } = useSyncStatus()
-  const { isOnline, loading: gatewayLoading } = useGatewayStatus()
+  const { status: gatewayStatus, loading: gatewayLoading } = useGatewayStatus()
 
   if (loading || !status) return null
 
-  if (!gatewayLoading && !isOnline) {
+  if (!gatewayLoading && gatewayStatus === 'unavailable') {
     return (
       <div
         className={cn(

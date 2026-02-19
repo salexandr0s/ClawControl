@@ -36,6 +36,7 @@ import {
   XCircle,
   RefreshCw,
   X,
+  Store,
   ExternalLink,
   Upload,
 } from 'lucide-react'
@@ -423,7 +424,7 @@ export function SkillsClient({ skills: initialSkills, agents }: Props) {
                 href={{ pathname: '/skills/find' }}
                 className={buttonLikeClass({ variant: 'secondary', size: 'md' })}
               >
-                <ExternalLink className="w-3.5 h-3.5" />
+                <Store className="w-3.5 h-3.5" />
                 Find Skills
               </Link>
               <label className={buttonLikeClass({ variant: 'secondary', size: 'md', className: 'cursor-pointer' })}>

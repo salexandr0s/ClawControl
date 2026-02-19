@@ -14,7 +14,7 @@ import { useProtectedAction } from '@/lib/hooks/useProtectedAction'
 import { useSettings } from '@/lib/settings-context'
 import { packagesApi, workflowsApi, type WorkflowDetail, type WorkflowListItem } from '@/lib/http'
 import { cn } from '@/lib/utils'
-import { Copy, Download, FileUp, Plus, Trash2, Upload } from 'lucide-react'
+import { Bot, ChevronDown, Copy, Download, FileUp, Plus, Tag, Trash2, Upload } from 'lucide-react'
 
 function formatRelative(value: string): string {
   const ts = new Date(value).getTime()
@@ -471,10 +471,25 @@ export function WorkflowsClient() {
             {drawerTab === 'stages' && (
               <div className="space-y-2">
                 {selected.workflow.stages.map((stage, index) => (
-                  <div key={stage.ref} className="rounded-[var(--radius-sm)] border border-bd-0 bg-bg-2 p-2">
-                    <div className="text-sm text-fg-0">{index + 1}. {stage.ref}</div>
-                    <div className="text-xs text-fg-2">Agent: {stage.agent}</div>
-                    <div className="text-xs text-fg-2">Type: {stage.type ?? 'single'}</div>
+                  <div key={stage.ref}>
+                    <div className="rounded-[var(--radius-sm)] border border-bd-0 bg-bg-2 p-2.5 space-y-1.5">
+                      <div className="text-sm text-fg-0">{index + 1}. {stage.ref}</div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-pill border border-bd-0 bg-bg-3 px-2 py-0.5 text-[11px] text-fg-1">
+                          <Bot className="w-3 h-3 text-fg-2" />
+                          {stage.agent}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-pill border border-bd-0 bg-bg-3 px-2 py-0.5 text-[11px] text-fg-1">
+                          <Tag className="w-3 h-3 text-fg-2" />
+                          {stage.type ?? 'single'}
+                        </span>
+                      </div>
+                    </div>
+                    {index < selected.workflow.stages.length - 1 && (
+                      <div className="flex justify-center py-1">
+                        <ChevronDown className="w-3.5 h-3.5 text-fg-3" />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
