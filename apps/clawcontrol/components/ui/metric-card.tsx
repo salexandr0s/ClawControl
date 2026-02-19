@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 export type MetricTone = 'success' | 'warning' | 'danger' | 'info' | 'progress' | 'muted'
@@ -49,8 +50,8 @@ export function MetricCard({
   size = 'default',
   className,
 }: {
-  label: string
-  value: string | number
+  label: ReactNode
+  value: ReactNode
   icon: React.ComponentType<{ className?: string }>
   tone?: MetricTone
   size?: MetricCardSize

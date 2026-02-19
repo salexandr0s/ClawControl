@@ -18,6 +18,7 @@ import {
   Clock3,
   Database,
   DollarSign,
+  Info,
   Layers,
   RefreshCw,
   Search,
@@ -295,6 +296,11 @@ function formatCompactNumber(value: string): string {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return value
   return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(parsed)
+}
+
+function formatInteger(value: number): string {
+  if (!Number.isFinite(value)) return '0'
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)
 }
 
 function formatUsdFromMicros(micros: string): string {
@@ -679,12 +685,18 @@ export function UsageClient() {
     if (!summary) return '—'
 
     if (summary.meta.scope === 'parity') {
-      const sampled = summary.meta.sessionSampleCount ?? summary.totals.sessionCount
-      const total = summary.meta.sessionsInRangeTotal ?? sampled
-      return `${sampled}/${total}`
+      const total = summary.meta.sessionsInRangeTotal ?? summary.totals.sessionCount
+      return formatInteger(total)
     }
 
-    return summary.totals.sessionCount
+    return formatInteger(summary.totals.sessionCount)
+  }, [summary])
+
+  const sessionKpiTooltip = useMemo(() => {
+    if (!summary || summary.meta.scope !== 'parity') return null
+    const sampled = summary.meta.sessionSampleCount ?? summary.totals.sessionCount
+    const total = summary.meta.sessionsInRangeTotal ?? sampled
+    return `Sampled sessions: ${formatInteger(sampled)}/${formatInteger(total)}`
   }, [summary])
 
   const parityCoverageWarning = useMemo(() => {
@@ -902,8 +914,17 @@ export function UsageClient() {
         <MetricCard label="Total Cost" value={summary ? formatUsdFromMicros(summary.totals.totalCostMicros) : '—'} icon={DollarSign} tone="warning" size="compact" />
         <MetricCard label="Avg / day" value={summary ? formatUsdFromMicros(summary.totals.avgCostMicrosPerDay) : '—'} icon={CalendarDays} tone="muted" size="compact" />
         <MetricCard
-          label={summary?.meta.scope === 'parity' ? 'Sessions (sampled)' : 'Sessions'}
-          value={sessionKpiValue}
+          label="Sessions"
+          value={(
+            <span className="inline-flex items-center gap-1">
+              <span>{sessionKpiValue}</span>
+              {sessionKpiTooltip && (
+                <span className="inline-flex items-center text-fg-3" title={sessionKpiTooltip} aria-label={sessionKpiTooltip}>
+                  <Info className="w-3 h-3" />
+                </span>
+              )}
+            </span>
+          )}
           icon={Users}
           tone="success"
           size="compact"

@@ -65,8 +65,64 @@ type DesktopUpdateInfo = {
   error?: string
 }
 
+type OpenClawUpdateInfo = {
+  latestVersion: string | null
+  releaseUrl: string
+  releaseName: string | null
+  publishedAt: string | null
+}
+
+type OpenClawLatestReleaseApi = {
+  data?: {
+    tagName: string | null
+    version: string | null
+    name: string | null
+    url: string
+    publishedAt: string | null
+  }
+  error?: string
+}
+
 const USER_AVATAR_MAX_DIMENSION = 256
 const USER_AVATAR_MAX_DATA_URL_LENGTH = 1_500_000
+const OPENCLAW_RELEASES_URL = 'https://github.com/openclaw/openclaw/releases'
+
+function normalizeVersion(value: string | null | undefined): string | null {
+  if (!value) return null
+  const normalized = value.trim().replace(/^v/i, '')
+  return normalized.length > 0 ? normalized : null
+}
+
+function parseVersionParts(value: string | null | undefined): number[] | null {
+  const normalized = normalizeVersion(value)
+  if (!normalized) return null
+  const parts = normalized.match(/\d+/g)?.map((part) => Number(part))
+  if (!parts || parts.length === 0 || parts.some((part) => !Number.isFinite(part))) return null
+  return parts
+}
+
+function isVersionUpdateAvailable(currentVersion: string | null | undefined, latestVersion: string | null | undefined): boolean {
+  const current = normalizeVersion(currentVersion)
+  const latest = normalizeVersion(latestVersion)
+  if (!current || !latest) return false
+
+  const currentParts = parseVersionParts(current)
+  const latestParts = parseVersionParts(latest)
+
+  if (!currentParts || !latestParts) {
+    return current !== latest
+  }
+
+  const length = Math.max(currentParts.length, latestParts.length)
+  for (let i = 0; i < length; i += 1) {
+    const left = currentParts[i] ?? 0
+    const right = latestParts[i] ?? 0
+    if (left === right) continue
+    return left < right
+  }
+
+  return false
+}
 
 declare global {
   interface Window {
@@ -128,6 +184,10 @@ export default function SettingsPage() {
   const [updatesError, setUpdatesError] = useState<string | null>(null)
   const [openingRelease, setOpeningRelease] = useState(false)
   const [desktopUpdateInfo, setDesktopUpdateInfo] = useState<DesktopUpdateInfo | null>(null)
+  const [openClawUpdatesLoading, setOpenClawUpdatesLoading] = useState(false)
+  const [openClawUpdatesError, setOpenClawUpdatesError] = useState<string | null>(null)
+  const [openingOpenClawRelease, setOpeningOpenClawRelease] = useState(false)
+  const [openClawUpdateInfo, setOpenClawUpdateInfo] = useState<OpenClawUpdateInfo | null>(null)
 
   // OpenClaw auto-discovery state
   const [discoverData, setDiscoverData] = useState<OpenClawDiscoverResponse | null>(null)
@@ -141,6 +201,7 @@ export default function SettingsPage() {
   useEffect(() => {
     loadSettingsConfig()
     loadDiscover()
+    void handleCheckOpenClawUpdates(true)
 
     if (typeof window !== 'undefined') {
       setPickerAvailable(typeof window.clawcontrolDesktop?.pickDirectory === 'function')
@@ -256,6 +317,50 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleCheckOpenClawUpdates(silent = false) {
+    setOpenClawUpdatesLoading(true)
+    if (!silent) {
+      setOpenClawUpdatesError(null)
+    }
+
+    try {
+      const res = await fetch('/api/openclaw/releases/latest', { cache: 'no-store' })
+      const payload = (await res.json().catch(() => null)) as OpenClawLatestReleaseApi | null
+
+      if (!res.ok || !payload?.data) {
+        throw new Error(payload?.error ?? 'Failed to check OpenClaw updates')
+      }
+
+      setOpenClawUpdateInfo({
+        latestVersion: payload.data.version,
+        releaseUrl: payload.data.url || OPENCLAW_RELEASES_URL,
+        releaseName: payload.data.name,
+        publishedAt: payload.data.publishedAt,
+      })
+      setOpenClawUpdatesError(null)
+    } catch (err) {
+      if (!silent) {
+        setOpenClawUpdatesError(err instanceof Error ? err.message : 'Failed to check OpenClaw updates')
+      }
+    } finally {
+      setOpenClawUpdatesLoading(false)
+    }
+  }
+
+  async function openExternalUrl(url: string): Promise<void> {
+    if (typeof window === 'undefined') return
+
+    if (typeof window.clawcontrolDesktop?.openExternalUrl === 'function') {
+      const result = await window.clawcontrolDesktop.openExternalUrl(url)
+      if (!result.ok) {
+        throw new Error(result.message ?? 'Failed to open external URL')
+      }
+      return
+    }
+
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
   async function handleOpenReleasePage() {
     const releaseUrl = desktopUpdateInfo?.releaseUrl
     if (!releaseUrl) return
@@ -264,18 +369,26 @@ export default function SettingsPage() {
     setUpdatesError(null)
 
     try {
-      if (typeof window !== 'undefined' && typeof window.clawcontrolDesktop?.openExternalUrl === 'function') {
-        const result = await window.clawcontrolDesktop.openExternalUrl(releaseUrl)
-        if (!result.ok) {
-          throw new Error(result.message ?? 'Failed to open release page')
-        }
-      } else if (typeof window !== 'undefined') {
-        window.open(releaseUrl, '_blank', 'noopener,noreferrer')
-      }
+      await openExternalUrl(releaseUrl)
     } catch (err) {
       setUpdatesError(err instanceof Error ? err.message : 'Failed to open release page')
     } finally {
       setOpeningRelease(false)
+    }
+  }
+
+  async function handleOpenOpenClawReleasePage() {
+    const releaseUrl = openClawUpdateInfo?.releaseUrl || OPENCLAW_RELEASES_URL
+
+    setOpeningOpenClawRelease(true)
+    setOpenClawUpdatesError(null)
+
+    try {
+      await openExternalUrl(releaseUrl)
+    } catch (err) {
+      setOpenClawUpdatesError(err instanceof Error ? err.message : 'Failed to open OpenClaw release page')
+    } finally {
+      setOpeningOpenClawRelease(false)
     }
   }
 
@@ -433,6 +546,10 @@ export default function SettingsPage() {
   const discovered = discoverData && discoverData.status !== 'not_found' ? discoverData : null
   const notFound = discoverData && discoverData.status === 'not_found' ? discoverData : null
   const lastSyncAt = syncStatus?.lastSync?.timestamp ?? null
+  const openClawInstalledVersion = settingsConfig?.runtime.cli.cliVersion ?? null
+  const openClawLatestVersion = openClawUpdateInfo?.latestVersion ?? null
+  const openClawCliAvailable = Boolean(settingsConfig?.runtime.cli.cliAvailable)
+  const openClawUpdateAvailable = openClawCliAvailable && isVersionUpdateAvailable(openClawInstalledVersion, openClawLatestVersion)
 
   async function handleAvatarFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -530,76 +647,158 @@ export default function SettingsPage() {
         <div>
           <h2 className="text-sm font-medium text-fg-0">App Updates</h2>
           <p className="text-xs text-fg-2 mt-0.5">
-            Check latest desktop release status.
+            Check latest desktop and OpenClaw release status.
           </p>
         </div>
 
-        <div className="p-4 rounded-[var(--radius-lg)] bg-bg-2 border border-bd-0 space-y-3">
-          <div className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-1 p-3 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-fg-3">Installed:</span>
-              <span className="font-mono text-fg-1">{desktopUpdateInfo?.currentVersion ?? 'unknown'}</span>
+        <div className="p-4 rounded-[var(--radius-lg)] bg-bg-2 border border-bd-0">
+          <div className="grid gap-3 xl:grid-cols-2">
+            <div className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-1 p-3 space-y-3">
+              <div className="text-[11px] uppercase tracking-[0.12em] text-fg-2">ClawControl App</div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-fg-3">Installed:</span>
+                  <span className="font-mono text-fg-1">{desktopUpdateInfo?.currentVersion ?? 'unknown'}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-fg-3">Latest:</span>
+                  <span className="font-mono text-fg-1">{desktopUpdateInfo?.latestVersion ?? 'unknown'}</span>
+                </div>
+                <div className="text-xs">
+                  <span
+                    className={cn(
+                      'font-medium',
+                      desktopUpdateInfo?.updateAvailable
+                        ? 'text-status-warning'
+                        : desktopUpdateInfo
+                          ? 'text-status-success'
+                          : 'text-fg-3'
+                    )}
+                  >
+                    {desktopUpdateInfo?.updateAvailable
+                      ? 'Update available'
+                      : desktopUpdateInfo
+                        ? 'You are up to date'
+                        : 'Not checked yet'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => void handleCheckForUpdates(false)}
+                  disabled={updatesLoading || !updatesBridgeAvailable}
+                  variant="secondary"
+                  size="sm"
+                  className={cn((updatesLoading || !updatesBridgeAvailable) && 'text-fg-3')}
+                >
+                  {updatesLoading ? <LoadingSpinner size="sm" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  {updatesLoading ? 'Checking...' : 'Check for Updates'}
+                </Button>
+
+                <Button
+                  onClick={() => void handleOpenReleasePage()}
+                  disabled={!desktopUpdateInfo?.releaseUrl || openingRelease || !updatesBridgeAvailable}
+                  variant="secondary"
+                  size="sm"
+                  className={cn((!desktopUpdateInfo?.releaseUrl || openingRelease || !updatesBridgeAvailable) && 'text-fg-3')}
+                >
+                  {openingRelease ? <LoadingSpinner size="sm" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
+                  Open Release
+                </Button>
+              </div>
+
+              {!updatesBridgeAvailable && (
+                <p className="text-xs text-fg-3">
+                  Update checks are available in the desktop app only.
+                </p>
+              )}
+
+              {updatesError && (
+                <div className="flex items-center gap-2 p-2 rounded bg-status-danger/10 text-status-danger text-xs">
+                  <AlertCircle className="w-3 h-3 shrink-0" />
+                  <span>{updatesError}</span>
+                </div>
+              )}
             </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-fg-3">Latest:</span>
-              <span className="font-mono text-fg-1">{desktopUpdateInfo?.latestVersion ?? 'unknown'}</span>
-            </div>
-            <div className="text-xs">
-              <span
-                className={cn(
-                  'font-medium',
-                  desktopUpdateInfo?.updateAvailable
-                    ? 'text-status-warning'
-                    : desktopUpdateInfo
-                      ? 'text-status-success'
-                      : 'text-fg-3'
-                )}
-              >
-                {desktopUpdateInfo?.updateAvailable
-                  ? 'Update available'
-                  : desktopUpdateInfo
-                    ? 'You are up to date'
-                    : 'Not checked yet'}
-              </span>
+
+            <div className="rounded-[var(--radius-md)] border border-bd-0 bg-bg-1 p-3 space-y-3">
+              <div className="text-[11px] uppercase tracking-[0.12em] text-fg-2">OpenClaw CLI</div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-fg-3">Installed:</span>
+                  <span className="font-mono text-fg-1">
+                    {openClawCliAvailable ? (openClawInstalledVersion ?? 'unknown') : 'unavailable'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-fg-3">Latest:</span>
+                  <span className="font-mono text-fg-1">{openClawLatestVersion ?? 'unknown'}</span>
+                </div>
+                <div className="text-xs">
+                  <span
+                    className={cn(
+                      'font-medium',
+                      !openClawCliAvailable
+                        ? 'text-status-danger'
+                        : openClawUpdateAvailable
+                          ? 'text-status-warning'
+                          : openClawUpdateInfo
+                            ? 'text-status-success'
+                            : 'text-fg-3'
+                    )}
+                  >
+                    {!openClawCliAvailable
+                      ? 'OpenClaw CLI unavailable'
+                      : openClawUpdateAvailable
+                        ? 'Update available'
+                        : openClawUpdateInfo
+                          ? 'You are up to date'
+                          : 'Not checked yet'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => void handleCheckOpenClawUpdates(false)}
+                  disabled={openClawUpdatesLoading}
+                  variant="secondary"
+                  size="sm"
+                  className={cn(openClawUpdatesLoading && 'text-fg-3')}
+                >
+                  {openClawUpdatesLoading ? <LoadingSpinner size="sm" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  {openClawUpdatesLoading ? 'Checking...' : 'Check for Updates'}
+                </Button>
+
+                <Button
+                  onClick={() => void handleOpenOpenClawReleasePage()}
+                  disabled={openingOpenClawRelease}
+                  variant="secondary"
+                  size="sm"
+                  className={cn(openingOpenClawRelease && 'text-fg-3')}
+                >
+                  {openingOpenClawRelease ? <LoadingSpinner size="sm" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
+                  Open Releases
+                </Button>
+              </div>
+
+              {openClawUpdateInfo?.releaseName && (
+                <p className="text-[11px] text-fg-3">
+                  Latest release: {openClawUpdateInfo.releaseName}
+                </p>
+              )}
+
+              {openClawUpdatesError && (
+                <div className="flex items-center gap-2 p-2 rounded bg-status-danger/10 text-status-danger text-xs">
+                  <AlertCircle className="w-3 h-3 shrink-0" />
+                  <span>{openClawUpdatesError}</span>
+                </div>
+              )}
             </div>
           </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={() => void handleCheckForUpdates(false)}
-              disabled={updatesLoading || !updatesBridgeAvailable}
-              variant="secondary"
-              size="sm"
-              className={cn((updatesLoading || !updatesBridgeAvailable) && 'text-fg-3')}
-            >
-              {updatesLoading ? <LoadingSpinner size="sm" /> : <RefreshCw className="w-3.5 h-3.5" />}
-              {updatesLoading ? 'Checking...' : 'Check for Updates'}
-            </Button>
-
-            <Button
-              onClick={() => void handleOpenReleasePage()}
-              disabled={!desktopUpdateInfo?.releaseUrl || openingRelease || !updatesBridgeAvailable}
-              variant="secondary"
-              size="sm"
-              className={cn((!desktopUpdateInfo?.releaseUrl || openingRelease || !updatesBridgeAvailable) && 'text-fg-3')}
-            >
-              {openingRelease ? <LoadingSpinner size="sm" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
-              Open Release
-            </Button>
-          </div>
-
-          {!updatesBridgeAvailable && (
-            <p className="text-xs text-fg-3">
-              Update checks are available in the desktop app only.
-            </p>
-          )}
-
-          {updatesError && (
-            <div className="flex items-center gap-2 p-2 rounded bg-status-danger/10 text-status-danger text-xs">
-              <AlertCircle className="w-3 h-3 shrink-0" />
-              <span>{updatesError}</span>
-            </div>
-          )}
         </div>
       </section>
 
