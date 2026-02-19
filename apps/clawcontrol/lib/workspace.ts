@@ -23,11 +23,94 @@ export const AGENT_ROLE_MAP: Record<string, { prefix: string; station: StationId
   build: { prefix: 'BUILD', station: 'build', description: 'Implementation & coding' },
   qa: { prefix: 'QA', station: 'qa', description: 'Testing & quality assurance' },
   ops: { prefix: 'OPS', station: 'ops', description: 'Operations & deployment' },
+  security: { prefix: 'SECURITY', station: 'security', description: 'Security assessment & veto authority' },
   review: { prefix: 'REVIEW', station: 'qa', description: 'Code review & approval' },
   ship: { prefix: 'SHIP', station: 'ship', description: 'Deployment & release' },
   compound: { prefix: 'COMPOUND', station: 'compound', description: 'Learning & documentation' },
   update: { prefix: 'UPDATE', station: 'update', description: 'Dependency & maintenance' },
   custom: { prefix: 'CUSTOM', station: 'build', description: 'Custom specialized worker' },
+}
+
+function normalizeGeneratedRoleAndStation(input: AgentTemplateInput): { role: string; station: StationId } {
+  const normalizedRole = String(input.role || '').trim().toLowerCase()
+  const normalizedSlug = String(input.slug || '').trim().toLowerCase()
+  let role = normalizedRole || String(input.station)
+  let station = input.station
+
+  if (normalizedSlug === 'wf-security' || normalizedRole === 'security') {
+    role = 'security'
+    station = 'security'
+  }
+
+  if (normalizedSlug === 'wf-ops' || normalizedRole === 'ops') {
+    role = 'ops'
+    station = 'ops'
+  }
+
+  return { role, station }
+}
+
+function roleSpecificSoulRules(input: AgentTemplateInput, normalizedRole: string): string {
+  if (normalizedRole === 'ops') {
+    return `
+### Ops Governance
+- Actionable relay is decision-only; no FYI/noise payloads.
+- Non-actionable cron output must be \`NO_REPLY\` or \`NO_ACTION\`.
+- Actionable events must create ClawControl work-order linkage with recommendation and evidence.
+- Enforce strict routing: \`wf-ops -> main -> user\`.
+`
+  }
+
+  if (normalizedRole === 'security') {
+    return `
+### Security Governance
+- Security veto is final until resolved with evidence.
+- Do not approve unresolved critical findings.
+- Findings must include impact, reproduction path, and fix recommendation.
+`
+  }
+
+  if (normalizedRole === 'manager') {
+    return `
+### Manager Governance
+- Route implementation through specialists, not direct user responses.
+- Preserve strict ops relay path: \`wf-ops -> main -> user\`.
+- Treat ClawControl DB work orders as authoritative task state.
+`
+  }
+
+  return ''
+}
+
+function roleSpecificOverlayRules(normalizedRole: string): string {
+  if (normalizedRole === 'ops') {
+    return `
+## Actionable Reporting Contract
+- Non-actionable output: \`NO_REPLY\` or \`NO_ACTION\`.
+- Actionable output must include recommendation + evidence and work-order linkage.
+- Never send actionable output directly to user.
+- Preserve strict relay path: \`wf-ops -> main -> user\`.
+`
+  }
+
+  if (normalizedRole === 'security') {
+    return `
+## Security Veto Contract
+- Veto critical findings and provide impact + mitigation path.
+- Do not downgrade critical findings without evidence.
+`
+  }
+
+  if (normalizedRole === 'manager') {
+    return `
+## Orchestration Contract
+- Delegate implementation to specialists.
+- Escalate decision-ready summaries to main only.
+- Keep strict relay path for actionable ops: \`wf-ops -> main -> user\`.
+`
+  }
+
+  return ''
 }
 
 /**
@@ -73,12 +156,14 @@ export interface AgentTemplateInput {
  * Generate the SOUL.md content for an agent
  */
 export function generateSoulContent(input: AgentTemplateInput): string {
+  const normalized = normalizeGeneratedRoleAndStation(input)
   const capabilitiesList = input.capabilities.map(c => `- ${c}`).join('\n')
+  const roleRules = roleSpecificSoulRules(input, normalized.role)
 
   return `# ${input.displayName} Soul
 
 ## Identity
-You are ${input.displayName}, a clawcontrol agent with the role of **${input.role}**.
+You are ${input.displayName}, a clawcontrol agent with the role of **${normalized.role}**.
 
 ## Purpose
 ${input.purpose}
@@ -103,13 +188,15 @@ ${capabilitiesList}
 - Write tests for new functionality
 - Document non-obvious decisions
 
+${roleRules}
+
 ## Constraints
 - WIP Limit: 2 concurrent operations
 - Must request approval for external API calls
 - Cannot modify AGENTS.md without approval
 
-## Station: ${input.station}
-You operate primarily at the **${input.station}** station.
+## Station: ${normalized.station}
+You operate primarily at the **${normalized.station}** station.
 `
 }
 
@@ -117,15 +204,19 @@ You operate primarily at the **${input.station}** station.
  * Generate the overlay.md content for an agent
  */
 export function generateOverlayContent(input: AgentTemplateInput): string {
+  const normalized = normalizeGeneratedRoleAndStation(input)
+  const roleRules = roleSpecificOverlayRules(normalized.role)
   return `# ${input.displayName} Overlay
 
 ## Agent: ${input.displayName}
-Role: ${input.role}
-Station: ${input.station}
+Role: ${normalized.role}
+Station: ${normalized.station}
 
 ## Custom Instructions
 
 <!-- Add agent-specific instructions here -->
+
+${roleRules}
 
 ## Allowed Tools
 - read_file

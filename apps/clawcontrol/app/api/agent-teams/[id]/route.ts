@@ -8,7 +8,11 @@ import {
   buildTeamHierarchyFromTemplateDefaults,
   TeamHierarchyValidationError,
 } from '@/lib/services/team-hierarchy'
-import type { TeamHierarchyConfig } from '@/lib/repo/types'
+import {
+  assertValidTeamGovernance,
+  TeamGovernanceValidationError,
+} from '@/lib/services/team-governance'
+import type { TeamGovernanceConfig, TeamHierarchyConfig } from '@/lib/repo/types'
 
 function dedupe(values: string[] | undefined): string[] | undefined {
   if (values === undefined) return undefined
@@ -66,6 +70,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     workflowIds?: string[]
     templateIds?: string[]
     hierarchy?: TeamHierarchyConfig
+    governance?: TeamGovernanceConfig
     regenerateHierarchyFromDefaults?: boolean
     healthStatus?: 'healthy' | 'warning' | 'degraded' | 'unknown'
     memberAgentIds?: string[]
@@ -105,6 +110,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       : body.hierarchy !== undefined
         ? assertValidTeamHierarchy(body.hierarchy, resolvedTemplateIds)
         : undefined
+    const governance = body.governance !== undefined
+      ? assertValidTeamGovernance(body.governance, { whenUnset: 'legacy' })
+      : undefined
 
     const team = await repos.agentTeams.update(id, {
       name: body.name,
@@ -112,6 +120,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       workflowIds: body.workflowIds,
       templateIds: dedupe(body.templateIds),
       hierarchy,
+      governance,
       healthStatus: body.healthStatus,
       memberAgentIds: body.memberAgentIds,
     })
@@ -127,6 +136,16 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         {
           error: 'TEAM_HIERARCHY_INVALID',
           code: 'TEAM_HIERARCHY_INVALID',
+          details: { issues: error.details },
+        },
+        { status: 400 }
+      )
+    }
+    if (error instanceof TeamGovernanceValidationError) {
+      return NextResponse.json(
+        {
+          error: 'TEAM_GOVERNANCE_INVALID',
+          code: 'TEAM_GOVERNANCE_INVALID',
           details: { issues: error.details },
         },
         { status: 400 }

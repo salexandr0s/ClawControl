@@ -60,6 +60,7 @@ describe('database initialization', () => {
     expect(appliedMigrations.some((row) => row.id === '20260210190000_manager_engine_single_mode')).toBe(true)
     expect(appliedMigrations.some((row) => row.id === '20260212083000_workflow_team_packages')).toBe(true)
     expect(appliedMigrations.some((row) => row.id === '20260216193000_team_hierarchy_v1')).toBe(true)
+    expect(appliedMigrations.some((row) => row.id === '20260219180000_modular_team_governance')).toBe(true)
 
     const agentColumns = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
       'PRAGMA table_info("agents")'
@@ -78,6 +79,15 @@ describe('database initialization', () => {
     )
     const agentTeamColumnNames = new Set(agentTeamColumns.map((row) => row.name))
     expect(agentTeamColumnNames.has('hierarchy_json')).toBe(true)
+    expect(agentTeamColumnNames.has('governance_json')).toBe(true)
+
+    const opsEventColumns = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+      'PRAGMA table_info("ops_actionable_events")'
+    )
+    const opsEventColumnNames = new Set(opsEventColumns.map((row) => row.name))
+    expect(opsEventColumnNames.has('team_id')).toBe(true)
+    expect(opsEventColumnNames.has('ops_runtime_agent_id')).toBe(true)
+    expect(opsEventColumnNames.has('relay_key')).toBe(true)
 
     await prisma.$disconnect()
 

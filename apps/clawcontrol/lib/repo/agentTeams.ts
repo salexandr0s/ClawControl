@@ -4,9 +4,14 @@ import {
   assertValidTeamHierarchy,
   createDefaultTeamHierarchy,
 } from '@/lib/services/team-hierarchy'
+import {
+  assertValidTeamGovernance,
+  createDefaultTeamGovernance,
+} from '@/lib/services/team-governance'
 import type {
   AgentTeamDTO,
   AgentTeamMemberDTO,
+  TeamGovernanceConfig,
   TeamHierarchyConfig,
 } from './types'
 
@@ -18,6 +23,7 @@ export interface CreateAgentTeamInput {
   workflowIds?: string[]
   templateIds?: string[]
   hierarchy?: TeamHierarchyConfig
+  governance?: TeamGovernanceConfig
   healthStatus?: AgentTeamDTO['healthStatus']
   memberAgentIds?: string[]
 }
@@ -28,6 +34,7 @@ export interface UpdateAgentTeamInput {
   workflowIds?: string[]
   templateIds?: string[]
   hierarchy?: TeamHierarchyConfig
+  governance?: TeamGovernanceConfig
   healthStatus?: AgentTeamDTO['healthStatus']
   memberAgentIds?: string[]
 }
@@ -50,6 +57,7 @@ type TeamRow = {
   workflowIds: string
   templateIds: string
   hierarchyJson: string
+  governanceJson: string
   healthStatus: string
   createdAt: Date
   updatedAt: Date
@@ -107,12 +115,22 @@ function parseTeamHierarchy(value: string, templateIds: string[]): TeamHierarchy
   }
 }
 
+function parseTeamGovernance(value: string): TeamGovernanceConfig {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return assertValidTeamGovernance(parsed, { whenUnset: 'legacy' })
+  } catch {
+    return createDefaultTeamGovernance('legacy_global')
+  }
+}
+
 function normalizeTeam(row: TeamRow, members: AgentTeamMemberDTO[]): AgentTeamDTO {
   const source = row.source as AgentTeamDTO['source']
   const healthStatus = row.healthStatus as AgentTeamDTO['healthStatus']
 
   const templateIds = safeParseStringArray(row.templateIds)
   const hierarchy = parseTeamHierarchy(row.hierarchyJson, templateIds)
+  const governance = parseTeamGovernance(row.governanceJson)
 
   return {
     id: row.id,
@@ -123,6 +141,7 @@ function normalizeTeam(row: TeamRow, members: AgentTeamMemberDTO[]): AgentTeamDT
     workflowIds: safeParseStringArray(row.workflowIds),
     templateIds,
     hierarchy,
+    governance,
     healthStatus: (
       healthStatus === 'healthy'
       || healthStatus === 'warning'
@@ -226,6 +245,9 @@ export function createDbAgentTeamsRepo(): AgentTeamsRepo {
       const hierarchy = input.hierarchy
         ? assertValidTeamHierarchy(input.hierarchy, templateIds)
         : createDefaultTeamHierarchy(templateIds)
+      const governance = input.governance
+        ? assertValidTeamGovernance(input.governance, { whenUnset: 'new' })
+        : createDefaultTeamGovernance('team_scoped')
 
       const row = await prisma.agentTeam.create({
         data: {
@@ -236,6 +258,7 @@ export function createDbAgentTeamsRepo(): AgentTeamsRepo {
           workflowIds: JSON.stringify(workflowIds),
           templateIds: JSON.stringify(templateIds),
           hierarchyJson: JSON.stringify(hierarchy),
+          governanceJson: JSON.stringify(governance),
           healthStatus: input.healthStatus ?? 'healthy',
         },
       })
@@ -270,6 +293,9 @@ export function createDbAgentTeamsRepo(): AgentTeamsRepo {
         : input.templateIds !== undefined
           ? assertValidTeamHierarchy(existingHierarchy, resolvedTemplateIds)
           : undefined
+      const nextGovernance = input.governance !== undefined
+        ? assertValidTeamGovernance(input.governance, { whenUnset: 'legacy' })
+        : undefined
 
       const row = await prisma.agentTeam.update({
         where: { id },
@@ -279,6 +305,7 @@ export function createDbAgentTeamsRepo(): AgentTeamsRepo {
           ...(nextWorkflowIds !== undefined ? { workflowIds: nextWorkflowIds } : {}),
           ...(nextTemplateIds !== undefined ? { templateIds: nextTemplateIds } : {}),
           ...(nextHierarchy !== undefined ? { hierarchyJson: JSON.stringify(nextHierarchy) } : {}),
+          ...(nextGovernance !== undefined ? { governanceJson: JSON.stringify(nextGovernance) } : {}),
           ...(input.healthStatus !== undefined ? { healthStatus: input.healthStatus } : {}),
         },
       })

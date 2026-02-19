@@ -2197,6 +2197,25 @@ export interface TeamHierarchyConfig {
   members: Record<string, TeamHierarchyMemberConfig>
 }
 
+export type TeamAgentIdentityMode = 'team_scoped' | 'legacy_global'
+export type TeamOpsRelayMode = 'decision_only'
+
+export interface TeamGovernanceOpsConfig {
+  templateId: string
+  relayMode: TeamOpsRelayMode
+  relayTargetSessionKey: string
+  pollerEnabled: boolean
+  pollIntervalCron: string
+  timezone: string
+}
+
+export interface TeamGovernanceConfig {
+  orchestratorTemplateId: string
+  agentIdentityMode: TeamAgentIdentityMode
+  ops: TeamGovernanceOpsConfig
+  modelPolicy?: Record<string, string>
+}
+
 export interface TeamHierarchyValidationIssue {
   code: string
   message: string
@@ -2204,6 +2223,10 @@ export interface TeamHierarchyValidationIssue {
 }
 
 export interface TeamHierarchyValidationErrorDetails {
+  issues: TeamHierarchyValidationIssue[]
+}
+
+export interface TeamGovernanceValidationErrorDetails {
   issues: TeamHierarchyValidationIssue[]
 }
 
@@ -2216,6 +2239,7 @@ export interface AgentTeamSummary {
   workflowIds: string[]
   templateIds: string[]
   hierarchy: TeamHierarchyConfig
+  governance: TeamGovernanceConfig
   healthStatus: 'healthy' | 'warning' | 'degraded' | 'unknown'
   memberCount: number
   members: AgentTeamMember[]
@@ -2411,6 +2435,7 @@ export const agentTeamsApi = {
     workflowIds?: string[]
     templateIds?: string[]
     hierarchy?: TeamHierarchyConfig
+    governance?: TeamGovernanceConfig
     healthStatus?: 'healthy' | 'warning' | 'degraded' | 'unknown'
     memberAgentIds?: string[]
     typedConfirmText?: string
@@ -2422,6 +2447,7 @@ export const agentTeamsApi = {
     workflowIds?: string[]
     templateIds?: string[]
     hierarchy?: TeamHierarchyConfig
+    governance?: TeamGovernanceConfig
     regenerateHierarchyFromDefaults?: boolean
     healthStatus?: 'healthy' | 'warning' | 'degraded' | 'unknown'
     memberAgentIds?: string[]
@@ -2869,6 +2895,74 @@ export const modelsApi = {
   runAction: (action: ModelAction) =>
     apiPost<{ data: ModelListResponse | ModelStatusResponse }>('/api/models', { action }),
 }
+
+// ============================================================================
+// INTERNAL OPS ACTIONABLE CONTRACTS
+// ============================================================================
+
+export type OpsActionableSeverity = 'critical' | 'high' | 'medium' | 'low'
+
+export interface InternalOpsActionableIngestRequest {
+  source?: string
+  jobId?: string
+  jobName?: string
+  runAtMs?: number
+  teamId?: string
+  opsRuntimeAgentId?: string
+  relayKey?: string
+  severity?: OpsActionableSeverity | string
+  decisionRequired?: boolean
+  actionability?: 'actionable' | 'no_action' | string
+  noAction?: boolean
+  summary?: string
+  recommendation?: string
+  evidenceJson?: Record<string, unknown>
+  workOrderId?: string | null
+}
+
+export interface InternalOpsActionableDigest {
+  id: string
+  fingerprint: string
+  source: string
+  jobId: string | null
+  jobName: string | null
+  runAtMs: number | null
+  teamId: string | null
+  opsRuntimeAgentId: string | null
+  relayKey: string | null
+  severity: OpsActionableSeverity
+  decisionRequired: boolean
+  summary: string
+  recommendation: string
+  evidence: Record<string, unknown>
+  workOrderId: string | null
+  relayedAt: string | null
+  createdAt: string
+}
+
+export interface InternalOpsActionableIngestResponse {
+  ignored: boolean
+  deduped: boolean
+  created: boolean
+  fingerprint: string | null
+  event: InternalOpsActionableDigest | null
+}
+
+export interface InternalOpsActionablePollRelayRequest {
+  limit?: number
+  teamId?: string
+  relayKey?: string
+}
+
+export interface InternalOpsActionablePollRelayResponse {
+  count: number
+  items: InternalOpsActionableDigest[]
+}
+
+export const internalOpsApi = {
+  actionableIngestPath: '/api/internal/ops/actionable',
+  actionablePollRelayPath: '/api/internal/ops/actionable/poll-relay',
+} as const
 
 // ============================================================================
 // OPENCLAW MODELS PROVISIONING

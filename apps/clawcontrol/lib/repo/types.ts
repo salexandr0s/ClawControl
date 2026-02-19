@@ -167,6 +167,25 @@ export interface TeamHierarchyConfig {
   members: Record<string, TeamHierarchyMemberConfig>
 }
 
+export type TeamAgentIdentityMode = 'team_scoped' | 'legacy_global'
+export type TeamOpsRelayMode = 'decision_only'
+
+export interface TeamGovernanceOpsConfig {
+  templateId: string
+  relayMode: TeamOpsRelayMode
+  relayTargetSessionKey: string
+  pollerEnabled: boolean
+  pollIntervalCron: string
+  timezone: string
+}
+
+export interface TeamGovernanceConfig {
+  orchestratorTemplateId: string
+  agentIdentityMode: TeamAgentIdentityMode
+  ops: TeamGovernanceOpsConfig
+  modelPolicy?: Record<string, string>
+}
+
 export interface AgentTeamDTO {
   id: string
   slug: string
@@ -176,6 +195,7 @@ export interface AgentTeamDTO {
   workflowIds: string[]
   templateIds: string[]
   hierarchy: TeamHierarchyConfig
+  governance: TeamGovernanceConfig
   healthStatus: 'healthy' | 'warning' | 'degraded' | 'unknown'
   memberCount: number
   members: AgentTeamMemberDTO[]

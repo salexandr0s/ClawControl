@@ -34,6 +34,7 @@ import {
   Globe,
   CalendarClock,
   CheckSquare,
+  Info,
   LayoutDashboard,
   RefreshCw,
   ChevronDown,
@@ -607,7 +608,7 @@ export function Dashboard({
                 <MiniMetric
                   label="Last Sync"
                   value={usageSyncMeta ? formatShortDateTime(usageSyncMeta.at) : '—'}
-                  subValue={usageSyncMeta ? formatUsageSyncSummary(usageSyncMeta.stats) : undefined}
+                  valueTooltip={usageSyncMeta ? formatUsageSyncSummary(usageSyncMeta.stats) : undefined}
                 />
               </div>
 
@@ -853,11 +854,28 @@ function formatUsdFromMicros(micros: string): string {
   return `$${parsed.toFixed(parsed >= 10 ? 2 : 4)}`
 }
 
-function MiniMetric({ label, value, subValue }: { label: string; value: string; subValue?: string }) {
+function MiniMetric({
+  label,
+  value,
+  subValue,
+  valueTooltip,
+}: {
+  label: string
+  value: string
+  subValue?: string
+  valueTooltip?: string
+}) {
   return (
     <div className="p-2.5 rounded-[var(--radius-md)] border border-bd-0 bg-bg-3 min-w-0">
       <div className="text-[9.5px] leading-4 text-fg-2 truncate">{label}</div>
-      <div className="text-[13.5px] leading-none text-fg-0 font-medium mt-0.5 tabular-nums truncate">{value}</div>
+      <div className="mt-0.5 min-w-0 flex items-center gap-1">
+        <div className="text-[13.5px] leading-none text-fg-0 font-medium tabular-nums truncate min-w-0">{value}</div>
+        {valueTooltip && (
+          <span className="inline-flex items-center shrink-0 text-fg-3" title={valueTooltip} aria-label={valueTooltip}>
+            <Info className="w-3 h-3" />
+          </span>
+        )}
+      </div>
       {subValue && (
         <div className="text-[9.5px] leading-4 text-fg-2 mt-1 tabular-nums">{subValue}</div>
       )}

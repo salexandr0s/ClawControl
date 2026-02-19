@@ -20,6 +20,14 @@ vi.mock('@/lib/openclaw-client', () => ({
   getOpenClawConfig: (...args: unknown[]) => getOpenClawConfigMock(...args),
 }))
 
+vi.mock('@/lib/services/governance-profiles', () => ({
+  resolveActiveTopologyOwnership: async () => ({
+    canonicalTeamId: null,
+    byRuntimeId: new Map(),
+  }),
+  getKnownTopologyEntry: () => null,
+}))
+
 vi.mock('@/lib/db', () => ({
   prisma: {
     agent: {

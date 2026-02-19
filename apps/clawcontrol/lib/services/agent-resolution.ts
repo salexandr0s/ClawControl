@@ -108,6 +108,10 @@ const STAGE_HINTS: Record<string, StageHints> = {
   },
 }
 
+export function getResolverStageRefs(): string[] {
+  return Object.keys(STAGE_HINTS).sort((left, right) => left.localeCompare(right))
+}
+
 function normalizeText(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase()
 }

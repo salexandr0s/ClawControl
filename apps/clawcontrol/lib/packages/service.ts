@@ -54,7 +54,11 @@ import {
   assertValidTeamHierarchy,
   TeamHierarchyValidationError,
 } from '@/lib/services/team-hierarchy'
-import type { TeamHierarchyConfig } from '@/lib/repo/types'
+import {
+  assertValidTeamGovernance,
+  TeamGovernanceValidationError,
+} from '@/lib/services/team-governance'
+import type { TeamGovernanceConfig, TeamHierarchyConfig } from '@/lib/repo/types'
 
 const STAGED_PACKAGE_TTL_MS = 30 * 60 * 1000
 const PACKAGE_HISTORY_DIR = '/workflow-packages/history'
@@ -85,6 +89,7 @@ interface PackageTeamArtifact {
   workflowIds?: string[]
   templateIds?: string[]
   hierarchy: TeamHierarchyConfig
+  governance: TeamGovernanceConfig
   memberAgentIds?: string[]
   healthStatus?: 'healthy' | 'warning' | 'degraded' | 'unknown'
 }
@@ -325,6 +330,21 @@ function parseTeamArtifact(raw: unknown, defaultId: string, kind: ClawPackageKin
     throw error
   }
 
+  let governance: TeamGovernanceConfig
+  try {
+    governance = assertValidTeamGovernance(record.governance, { whenUnset: 'new' })
+  } catch (error) {
+    if (error instanceof TeamGovernanceValidationError) {
+      throw new PackageServiceError(
+        'Invalid team governance configuration',
+        'PACKAGE_VALIDATION_FAILED',
+        400,
+        { id: defaultId, issues: error.details }
+      )
+    }
+    throw error
+  }
+
   return {
     id: typeof record.id === 'string' && record.id.trim() ? record.id.trim() : defaultId,
     slug: typeof record.slug === 'string' && record.slug.trim() ? record.slug.trim() : undefined,
@@ -334,6 +354,7 @@ function parseTeamArtifact(raw: unknown, defaultId: string, kind: ClawPackageKin
     workflowIds: asStringArray(record.workflowIds),
     templateIds,
     hierarchy,
+    governance,
     memberAgentIds: asStringArray(record.memberAgentIds),
     healthStatus: normalizedHealth,
   }
@@ -1152,15 +1173,16 @@ export async function deployStagedPackage(input: {
   const createdTeamIds: string[] = []
   const updatedTeams: Array<{
     teamId: string
-    previous: {
-      name: string
-      description: string | null
-      workflowIds: string[]
-      templateIds: string[]
-      hierarchy: TeamHierarchyConfig
-      healthStatus: 'healthy' | 'warning' | 'degraded' | 'unknown'
-    }
-  }> = []
+      previous: {
+        name: string
+        description: string | null
+        workflowIds: string[]
+        templateIds: string[]
+        hierarchy: TeamHierarchyConfig
+        governance: TeamGovernanceConfig
+        healthStatus: 'healthy' | 'warning' | 'degraded' | 'unknown'
+      }
+    }> = []
   let selectionApplied = false
   let previousSelection: WorkflowSelectionConfig | null = null
 
@@ -1199,6 +1221,7 @@ export async function deployStagedPackage(input: {
                 workflowIds: existing.workflowIds,
                 templateIds: existing.templateIds,
                 hierarchy: existing.hierarchy,
+                governance: existing.governance,
                 healthStatus: existing.healthStatus,
               },
             })
@@ -1209,6 +1232,7 @@ export async function deployStagedPackage(input: {
               workflowIds: team.workflowIds,
               templateIds: team.templateIds,
               hierarchy: team.hierarchy,
+              governance: team.governance,
               healthStatus: team.healthStatus,
               // Keep existing membership stable on update.
             })
@@ -1226,6 +1250,7 @@ export async function deployStagedPackage(input: {
           workflowIds: team.workflowIds,
           templateIds: team.templateIds,
           hierarchy: team.hierarchy,
+          governance: team.governance,
           memberAgentIds: team.memberAgentIds,
           healthStatus: team.healthStatus,
         })
@@ -1420,6 +1445,7 @@ export async function buildPackageExport(input: {
       workflowIds: team.workflowIds,
       templateIds: team.templateIds,
       hierarchy: team.hierarchy,
+      governance: team.governance,
       memberAgentIds: team.members.map((member) => member.id),
       healthStatus: team.healthStatus,
     }, {

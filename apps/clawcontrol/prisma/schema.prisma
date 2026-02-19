@@ -207,6 +207,7 @@ model AgentTeam {
   workflowIds  String   @default("[]") @map("workflow_ids") // JSON array
   templateIds  String   @default("[]") @map("template_ids") // JSON array
   hierarchyJson String  @default("{\"version\":1,\"members\":{}}") @map("hierarchy_json")
+  governanceJson String @default("{}") @map("governance_json")
   healthStatus String   @default("healthy") @map("health_status") // healthy|warning|degraded|unknown
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
@@ -588,6 +589,39 @@ model Activity {
   @@index([actorAgentId])
   @@index([entityType, entityId])
   @@map("activities")
+}
+
+// ============================================================================
+// OPS ACTIONABLE EVENTS (CEO RELAY PIPELINE)
+// ============================================================================
+
+model OpsActionableEvent {
+  id               String    @id @default(cuid())
+  fingerprint      String    @unique
+  source           String
+  jobId            String?   @map("job_id")
+  jobName          String?   @map("job_name")
+  runAtMs          BigInt?   @map("run_at_ms")
+  severity         String    @default("medium") // critical|high|medium|low
+  decisionRequired Boolean   @default(true) @map("decision_required")
+  teamId           String?   @map("team_id")
+  opsRuntimeAgentId String?  @map("ops_runtime_agent_id")
+  relayKey         String?   @map("relay_key")
+  summary          String
+  recommendation   String
+  evidenceJson     String    @default("{}") @map("evidence_json")
+  workOrderId      String?   @map("work_order_id")
+  relayedAt        DateTime? @map("relayed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([relayedAt])
+  @@index([workOrderId])
+  @@index([createdAt])
+  @@index([severity])
+  @@index([teamId])
+  @@index([relayKey])
+  @@map("ops_actionable_events")
 }
 
 // ============================================================================

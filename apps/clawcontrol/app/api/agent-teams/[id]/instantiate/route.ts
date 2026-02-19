@@ -8,6 +8,8 @@ import { upsertAgentToOpenClaw } from '@/lib/services/openclaw-config'
 import { buildCapabilitiesForTemplate } from '@/lib/services/agent-provisioning'
 import { generateSessionKey, AGENT_ROLE_MAP } from '@/lib/workspace'
 import { getTemplateById, materializeTemplateFiles, previewTemplateRender, renderTemplate } from '@/lib/templates'
+import { slugifyDisplayName } from '@/lib/agent-identity'
+import { resolveTeamGovernance } from '@/lib/services/team-governance'
 import { isCanonicalStationId, normalizeStationId, type StationId } from '@clawcontrol/core'
 import type { TeamCapabilityConfig } from '@/lib/repo/types'
 
@@ -82,6 +84,25 @@ function capabilitiesEqual(left: Record<string, unknown>, right: Record<string, 
   return JSON.stringify(stableNormalize(left)) === JSON.stringify(stableNormalize(right))
 }
 
+function resolveRuntimeIdentity(input: {
+  teamSlug: string
+  templateId: string
+  identityMode: 'team_scoped' | 'legacy_global'
+}): { agentSlug: string; runtimeAgentId: string } {
+  if (input.identityMode === 'legacy_global') {
+    return {
+      agentSlug: input.templateId,
+      runtimeAgentId: input.templateId,
+    }
+  }
+
+  const scoped = slugifyDisplayName(`${input.teamSlug}-${input.templateId}`)
+  return {
+    agentSlug: scoped,
+    runtimeAgentId: scoped,
+  }
+}
+
 /**
  * POST /api/agent-teams/:id/instantiate
  *
@@ -124,6 +145,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     commandName: 'team.instantiate_agents',
     commandArgs: { teamId: team.id, teamSlug: team.slug, templateIds: team.templateIds },
   })
+  const governance = resolveTeamGovernance(team, { whenUnset: 'legacy' })
 
   const createdAgents: Array<{ id: string; slug: string; displayName: string }> = []
   const existingAgents: Array<{ id: string; slug: string; displayName: string }> = []
@@ -165,7 +187,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
       }
       const stationId: StationId = templateId === 'security' ? 'security' : stationResolved
 
-      const existing = await repos.agents.getBySlug(templateId)
+      const runtimeIdentity = resolveRuntimeIdentity({
+        teamSlug: team.slug,
+        templateId,
+        identityMode: governance.agentIdentityMode,
+      })
+      const existing = await repos.agents.getBySlug(runtimeIdentity.agentSlug)
       const hierarchyMember = team.hierarchy.members[templateId]
       const nextCapabilities = applyHierarchyCapabilityOverrides(
         buildCapabilitiesForTemplate({ templateId, stationId }),
@@ -180,7 +207,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
       if (!existing) {
         const agentDisplayName = template.name
-        const agentSlug = templateId
+        const agentSlug = runtimeIdentity.agentSlug
 
         const sessionKeyPattern = template.config.sessionKeyPattern
         const sessionKey = sessionKeyPattern
@@ -197,8 +224,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         })
 
         const openClawSync = await upsertAgentToOpenClaw({
-          agentId: agentSlug,
-          runtimeAgentId: agentSlug,
+          agentId: runtimeIdentity.runtimeAgentId,
+          runtimeAgentId: runtimeIdentity.runtimeAgentId,
           slug: agentSlug,
           displayName: agentDisplayName,
           sessionKey,
@@ -208,7 +235,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           throw new Error(`Failed to register agent in OpenClaw: ${openClawSync.error}`)
         }
 
-        openClawAgentId = openClawSync.agentId ?? agentSlug
+        openClawAgentId = openClawSync.agentId ?? runtimeIdentity.runtimeAgentId
 
         agent = await repos.agents.create({
           name: agentDisplayName,

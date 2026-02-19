@@ -8,6 +8,10 @@ const INTERNAL_TOKEN_HEADER = 'x-clawcontrol-internal-token'
 const OPERATOR_SESSION_COOKIE = 'cc_operator_session'
 const CSRF_COOKIE = 'cc_csrf'
 
+function isInternalTokenRoute(pathname: string): boolean {
+  return pathname === '/api/agents/completion' || pathname.startsWith('/api/internal/')
+}
+
 function parseHost(hostHeader: string | null): string | null {
   if (!hostHeader) return null
   // hostHeader may be "127.0.0.1:3000" or "[::1]:3000"
@@ -31,12 +35,14 @@ export function proxy(req: NextRequest) {
     )
   }
 
-  if (MUTATING_METHODS.has(req.method) && req.nextUrl.pathname.startsWith('/api/')) {
-    if (req.nextUrl.pathname === '/api/auth/bootstrap') {
+  const pathname = req.nextUrl.pathname
+
+  if (MUTATING_METHODS.has(req.method) && pathname.startsWith('/api/')) {
+    if (pathname === '/api/auth/bootstrap') {
       return NextResponse.next()
     }
 
-    if (req.nextUrl.pathname === '/api/agents/completion') {
+    if (isInternalTokenRoute(pathname)) {
       if (!req.headers.get(INTERNAL_TOKEN_HEADER)?.trim()) {
         return NextResponse.json(
           { error: 'Internal token is required', code: 'INTERNAL_TOKEN_REQUIRED' },

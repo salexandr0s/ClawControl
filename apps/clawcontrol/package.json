@@ -19,6 +19,12 @@
     "db:studio": "prisma studio",
     "templates:migrate-manager-role": "node scripts/migrate-manager-template-role.mjs",
     "stations:migrate-canonical": "cross-env DATABASE_URL=file:../data/clawcontrol.db node scripts/migrate-agent-stations-to-canonical.mjs",
+    "company:reconcile": "cross-env DATABASE_URL=file:../data/clawcontrol.db node scripts/reconcile-openclaw-company-topology.mjs",
+    "cron:reconcile-ops-governance": "cross-env DATABASE_URL=file:../data/clawcontrol.db node scripts/reconcile-ops-cron-governance.mjs",
+    "models:check-policy": "cross-env DATABASE_URL=file:../data/clawcontrol.db node scripts/check-openclaw-model-policy.mjs",
+    "agents:contract-audit": "python3 ../../../../tools/agent-contract-audit/audit_and_reconcile.py --mode audit",
+    "agents:contract-fix": "python3 ../../../../tools/agent-contract-audit/audit_and_reconcile.py --mode fix --apply",
+    "agents:contract-prune": "python3 ../../../../tools/agent-contract-audit/audit_and_reconcile.py --mode prune-extras --apply",
     "postinstall": "prisma generate"
   },
   "dependencies": {

@@ -3,7 +3,7 @@
   "name": "Security",
   "description": "Security audit stage. Can veto when critical issues exist.",
   "version": "1.0.0",
-  "role": "QA",
+  "role": "SECURITY",
   "render": {
     "engine": "mustache",
     "targets": [

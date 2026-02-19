@@ -8,6 +8,17 @@ This pack installs:
 
 This pack **does not** auto-edit your workspace `AGENTS.md`.
 
+## Recommended Activation Flow
+
+1. Import + deploy the `.clawpack.zip`.
+2. Instantiate the team from **Agents -> Teams**.
+3. Optional compatibility profile:
+  - Activate `clawcontrol-company-v1` only if you want singleton/company behavior (`manager`, `wf-*` runtime ids).
+4. Run governance checks:
+  - `npm run company:reconcile -- --dry-run`
+  - `npm run cron:reconcile-ops-governance -- --dry-run`
+  - `npm run models:check-policy`
+
 ## AGENTS.md snippet (copy/paste)
 
 ```md

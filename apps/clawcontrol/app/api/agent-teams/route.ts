@@ -8,7 +8,11 @@ import {
   buildTeamHierarchyFromTemplateDefaults,
   TeamHierarchyValidationError,
 } from '@/lib/services/team-hierarchy'
-import type { TeamHierarchyConfig } from '@/lib/repo/types'
+import {
+  assertValidTeamGovernance,
+  TeamGovernanceValidationError,
+} from '@/lib/services/team-governance'
+import type { TeamGovernanceConfig, TeamHierarchyConfig } from '@/lib/repo/types'
 
 function dedupe(values: string[] | undefined): string[] {
   if (!values || values.length === 0) return []
@@ -58,6 +62,7 @@ export async function POST(request: NextRequest) {
     workflowIds?: string[]
     templateIds?: string[]
     hierarchy?: TeamHierarchyConfig
+    governance?: TeamGovernanceConfig
     healthStatus?: 'healthy' | 'warning' | 'degraded' | 'unknown'
     memberAgentIds?: string[]
     typedConfirmText?: string
@@ -89,6 +94,9 @@ export async function POST(request: NextRequest) {
     const hierarchy = body.hierarchy
       ? assertValidTeamHierarchy(body.hierarchy, templateIds)
       : await buildHierarchyFromDefaults(templateIds)
+    const governance = body.governance !== undefined
+      ? assertValidTeamGovernance(body.governance, { whenUnset: 'new' })
+      : undefined
 
     const data = await repos.agentTeams.create({
       name: body.name,
@@ -98,6 +106,7 @@ export async function POST(request: NextRequest) {
       workflowIds: body.workflowIds,
       templateIds,
       hierarchy,
+      governance,
       healthStatus: body.healthStatus,
       memberAgentIds: body.memberAgentIds,
     })
@@ -109,6 +118,16 @@ export async function POST(request: NextRequest) {
         {
           error: 'TEAM_HIERARCHY_INVALID',
           code: 'TEAM_HIERARCHY_INVALID',
+          details: { issues: error.details },
+        },
+        { status: 400 }
+      )
+    }
+    if (error instanceof TeamGovernanceValidationError) {
+      return NextResponse.json(
+        {
+          error: 'TEAM_GOVERNANCE_INVALID',
+          code: 'TEAM_GOVERNANCE_INVALID',
           details: { issues: error.details },
         },
         { status: 400 }

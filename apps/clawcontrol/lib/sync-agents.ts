@@ -5,6 +5,13 @@ import { getRepos } from '@/lib/repo'
 import { prisma } from '@/lib/db'
 import { getOpenClawConfig } from '@/lib/openclaw-client'
 import { buildOpenClawSessionKey, inferDefaultAgentWipLimit, slugifyDisplayName } from '@/lib/agent-identity'
+import {
+  buildTemplateBaselineCapabilities,
+} from '@/lib/services/openclaw-company-topology-map'
+import {
+  getKnownTopologyEntry,
+  resolveActiveTopologyOwnership,
+} from '@/lib/services/governance-profiles'
 
 export interface SyncAgentsOptions {
   forceRefresh?: boolean
@@ -151,6 +158,20 @@ async function getDefaultStationId(): Promise<string> {
   return stations[0]?.id ?? 'ops'
 }
 
+function normalizeStation(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase()
+}
+
+function mergeCapabilities(
+  existing: Record<string, unknown> | null | undefined,
+  baseline: Record<string, boolean>
+): Record<string, unknown> {
+  return {
+    ...(existing ?? {}),
+    ...baseline,
+  }
+}
+
 export async function syncAgentsFromOpenClaw(
   options: SyncAgentsOptions = {}
 ): Promise<SyncAgentsResult> {
@@ -158,6 +179,7 @@ export async function syncAgentsFromOpenClaw(
 
   const repos = getRepos()
   const defaultStationId = await getDefaultStationId()
+  const topologyOwnership = await resolveActiveTopologyOwnership()
 
   let added = 0
   let updated = 0
@@ -169,9 +191,17 @@ export async function syncAgentsFromOpenClaw(
 
     const normalizedRuntimeId = agent.id.trim().toLowerCase()
     const isMainAgent = normalizedRuntimeId === 'main'
+    const ownedTopologyEntry = isMainAgent
+      ? null
+      : topologyOwnership.byRuntimeId.get(normalizedRuntimeId) ?? null
+    const knownTopologyEntry = isMainAgent ? null : getKnownTopologyEntry(normalizedRuntimeId)
+    const createTopologyEntry = ownedTopologyEntry ?? knownTopologyEntry
     const name = inferDisplayName(agent)
     const sessionKey = inferSessionKey(agent.id)
     const fallbacks = Array.isArray(agent.fallbacks) ? agent.fallbacks : undefined
+    const topologyCapabilities = createTopologyEntry
+      ? buildTemplateBaselineCapabilities(createTopologyEntry)
+      : null
     const existing =
       (await repos.agents.getBySessionKey(sessionKey))
       ?? (await repos.agents.getByName(agent.id))
@@ -193,26 +223,32 @@ export async function syncAgentsFromOpenClaw(
       : null
 
     if (!existing) {
+      const workerStation = createTopologyEntry?.station ?? defaultStationId
+      const workerCapabilities = topologyCapabilities ?? { [workerStation]: true }
+      const resolvedModel = ownedTopologyEntry?.enforceModel ?? agent.model
+
       await repos.agents.create({
         name,
         displayName: name,
         slug: slugifyDisplayName(name),
         runtimeAgentId: agent.id,
-        ...(mainAgentPatch ?? { kind: 'worker' as const }),
+        ...(mainAgentPatch ?? { kind: createTopologyEntry?.kind ?? 'worker' as const }),
         dispatchEligible: true,
         nameSource: 'openclaw',
-        role: mainAgentPatch?.role ?? 'agent',
-        station: mainAgentPatch?.station ?? defaultStationId,
+        role: mainAgentPatch?.role ?? createTopologyEntry?.role ?? 'agent',
+        station: mainAgentPatch?.station ?? workerStation,
+        ...(ownedTopologyEntry && topologyOwnership.canonicalTeamId ? { teamId: topologyOwnership.canonicalTeamId } : {}),
+        ...(ownedTopologyEntry ? { templateId: ownedTopologyEntry.templateId } : {}),
         sessionKey,
-        capabilities: mainAgentPatch?.capabilities ?? { [defaultStationId]: true },
+        capabilities: mainAgentPatch?.capabilities ?? workerCapabilities,
         wipLimit: inferDefaultAgentWipLimit({
           id: agent.id,
           name,
-          station: mainAgentPatch?.station ?? defaultStationId,
+          station: mainAgentPatch?.station ?? workerStation,
         }),
         isStale: false,
         staleAt: null,
-        ...(agent.model ? { model: agent.model } : {}),
+        ...(resolvedModel ? { model: resolvedModel } : {}),
         ...(fallbacks !== undefined ? { fallbacks: JSON.stringify(fallbacks) } : {}),
       })
       added++
@@ -231,7 +267,7 @@ export async function syncAgentsFromOpenClaw(
           }
         : undefined
 
-      await repos.agents.update(existing.id, {
+      const patch: Record<string, unknown> = {
         ...(existing.nameSource === 'user'
           ? {}
           : {
@@ -249,9 +285,47 @@ export async function syncAgentsFromOpenClaw(
               capabilities: promotedCapabilities,
             }
           : {}),
-        ...(agent.model ? { model: agent.model } : {}),
-        ...(fallbacks !== undefined ? { fallbacks: JSON.stringify(fallbacks) } : {}),
-      })
+      }
+
+      if (ownedTopologyEntry && !isMainAgent) {
+        const resolvedStation = normalizeStation(existing.station)
+        if (
+          !resolvedStation
+          || resolvedStation === normalizeStation(defaultStationId)
+          || ownedTopologyEntry.templateId === 'security'
+        ) {
+          patch.station = ownedTopologyEntry.station
+        }
+
+        if (!existing.templateId) {
+          patch.templateId = ownedTopologyEntry.templateId
+        }
+
+        if (!existing.teamId && topologyOwnership.canonicalTeamId) {
+          patch.teamId = topologyOwnership.canonicalTeamId
+        }
+
+        if (ownedTopologyEntry.kind === 'manager' && existing.kind !== 'manager') {
+          patch.kind = 'manager'
+        }
+
+        if (existing.role.trim().toLowerCase() === 'agent') {
+          patch.role = ownedTopologyEntry.role
+        }
+
+        if (topologyCapabilities) {
+          const mergedCapabilities = mergeCapabilities(existingCapabilities, topologyCapabilities)
+          if (JSON.stringify(mergedCapabilities) !== JSON.stringify(existingCapabilities)) {
+            patch.capabilities = mergedCapabilities
+          }
+        }
+      }
+
+      const resolvedModel = ownedTopologyEntry?.enforceModel ?? agent.model
+      if (resolvedModel) patch.model = resolvedModel
+      if (fallbacks !== undefined) patch.fallbacks = JSON.stringify(fallbacks)
+
+      await repos.agents.update(existing.id, patch)
       updated++
     }
   }

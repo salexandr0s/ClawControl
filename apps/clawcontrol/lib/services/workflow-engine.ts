@@ -18,6 +18,7 @@ import { buildOpenClawSessionKey } from '@/lib/agent-identity'
 import {
   TeamHierarchyPolicyViolation,
 } from '@/lib/services/team-hierarchy-policy'
+import { resolveTeamGovernance } from '@/lib/services/team-governance'
 
 const MANAGER_ACTIVITY_ACTOR = 'system:manager'
 const DEFAULT_CEO_SESSION_KEY = buildOpenClawSessionKey('main')
@@ -355,9 +356,22 @@ async function enforceWorkflowTeamHierarchy(input: {
   if (!team) {
     return { managerAgentId: null, managerTemplateId: null }
   }
-  const managerMember = team.hierarchy.members.manager
-  if (!managerMember) {
-    return { managerAgentId: null, managerTemplateId: null }
+  const governance = resolveTeamGovernance(team, { whenUnset: 'legacy' })
+  const orchestratorTemplateId = governance.orchestratorTemplateId
+  const orchestratorMember = team.hierarchy.members[orchestratorTemplateId]
+  if (!orchestratorMember) {
+    throw new TeamHierarchyPolicyViolation(
+      `Workflow dispatch blocked: orchestrator template "${orchestratorTemplateId}" is not configured in hierarchy`,
+      'LINK_NOT_ALLOWED',
+      {
+        teamId: targetTeamId,
+        orchestratorTemplateId,
+        targetTemplateId: input.targetAgent.templateId ?? null,
+        source: 'workflow_engine',
+        workOrderId: input.workOrderId,
+        operationId: input.operationId,
+      }
+    )
   }
 
   const targetTemplateId = input.targetAgent.templateId?.trim() || null
@@ -374,22 +388,23 @@ async function enforceWorkflowTeamHierarchy(input: {
     )
   }
 
-  if (targetTemplateId === 'manager') {
-    const managerAgent = team.members.find((member) => member.templateId === 'manager') ?? null
-    return { managerAgentId: managerAgent?.id ?? null, managerTemplateId: 'manager' }
+  if (targetTemplateId === orchestratorTemplateId) {
+    const managerAgent = team.members.find((member) => member.templateId === orchestratorTemplateId) ?? null
+    return { managerAgentId: managerAgent?.id ?? null, managerTemplateId: orchestratorTemplateId }
   }
 
-  const allowedTargets = managerMember.delegatesTo
-  const delegateEnabled = managerMember.capabilities.canDelegate !== false
+  const allowedTargets = orchestratorMember.delegatesTo
+  const delegateEnabled = orchestratorMember.capabilities.canDelegate !== false
   if (!delegateEnabled || !allowedTargets.includes(targetTemplateId)) {
     throw new TeamHierarchyPolicyViolation(
-      `Workflow dispatch blocked: manager template cannot delegate to "${targetTemplateId}"`,
+      `Workflow dispatch blocked: orchestrator template "${orchestratorTemplateId}" cannot delegate to "${targetTemplateId}"`,
       'LINK_NOT_ALLOWED',
       {
         teamId: targetTeamId,
+        orchestratorTemplateId,
         targetTemplateId,
         allowedTargets,
-        canDelegate: managerMember.capabilities.canDelegate,
+        canDelegate: orchestratorMember.capabilities.canDelegate,
         source: 'workflow_engine',
         workOrderId: input.workOrderId,
         operationId: input.operationId,
@@ -397,8 +412,8 @@ async function enforceWorkflowTeamHierarchy(input: {
     )
   }
 
-  const managerAgent = team.members.find((member) => member.templateId === 'manager') ?? null
-  return { managerAgentId: managerAgent?.id ?? null, managerTemplateId: 'manager' }
+  const managerAgent = team.members.find((member) => member.templateId === orchestratorTemplateId) ?? null
+  return { managerAgentId: managerAgent?.id ?? null, managerTemplateId: orchestratorTemplateId }
 }
 
 async function loadInitialContext(

@@ -36,6 +36,40 @@ describe('auth route guards', () => {
     expect(payload.code).toBe('INTERNAL_TOKEN_REQUIRED')
   })
 
+  it('rejects internal ops actionable ingest without internal token', async () => {
+    const route = await import('@/app/api/internal/ops/actionable/route')
+    const request = new Request('http://localhost/api/internal/ops/actionable', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'cron',
+        summary: 'Something happened',
+        recommendation: 'Do something',
+      }),
+    })
+
+    const response = await route.POST(request)
+    const payload = (await response.json()) as { code?: string }
+
+    expect(response.status).toBe(403)
+    expect(payload.code).toBe('INTERNAL_TOKEN_REQUIRED')
+  })
+
+  it('rejects internal ops actionable poll relay without internal token', async () => {
+    const route = await import('@/app/api/internal/ops/actionable/poll-relay/route')
+    const request = new Request('http://localhost/api/internal/ops/actionable/poll-relay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+
+    const response = await route.POST(request)
+    const payload = (await response.json()) as { code?: string }
+
+    expect(response.status).toBe(403)
+    expect(payload.code).toBe('INTERNAL_TOKEN_REQUIRED')
+  })
+
   it('rejects approval patch without operator session', async () => {
     const route = await import('@/app/api/approvals/[id]/route')
     const request = new Request('http://localhost/api/approvals/ap_1', {

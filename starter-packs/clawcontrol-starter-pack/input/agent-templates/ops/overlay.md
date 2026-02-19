@@ -12,3 +12,10 @@ Example (shape only):
 - Make changes in small, reversible steps.
 - Verify success criteria.
 - Document rollback.
+
+## Actionable Reporting Contract
+- Non-actionable runs: output `NO_REPLY` or `NO_ACTION`.
+- Actionable runs: call `POST /api/internal/ops/actionable` with structured packet.
+- Relay polling path: `POST /api/internal/ops/actionable/poll-relay`.
+- Every actionable packet must include recommendation and evidence pointer.
+- Never deliver actionable output directly to user.

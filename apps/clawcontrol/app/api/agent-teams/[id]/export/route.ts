@@ -50,6 +50,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     workflowIds: team.workflowIds,
     templateIds: team.templateIds,
     hierarchy: team.hierarchy,
+    governance: team.governance,
     members: team.members.map((member) => ({
       id: member.id,
       slug: member.slug,

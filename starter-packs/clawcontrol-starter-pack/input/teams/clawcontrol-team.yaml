@@ -148,4 +148,17 @@ hierarchy:
       capabilities:
         canDelegate: false
         canSendMessages: true
+governance:
+  orchestratorTemplateId: manager
+  agentIdentityMode: legacy_global
+  ops:
+    templateId: ops
+    relayMode: decision_only
+    relayTargetSessionKey: agent:main:main
+    pollerEnabled: true
+    pollIntervalCron: '*/15 * * * *'
+    timezone: Europe/Zurich
+  modelPolicy:
+    main: anthropic/claude-opus-4-6
+    wf-ops: anthropic/claude-sonnet-4-6
 healthStatus: healthy

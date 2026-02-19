@@ -44,7 +44,7 @@ function restoreEnv(key: string, value: string | undefined): void {
 async function writeTemplate(input: {
   templateId: string
   name: string
-  role: 'BUILD' | 'QA'
+  role: 'BUILD' | 'QA' | 'SECURITY'
   root: string
 }) {
   const dir = join(input.root, 'agent-templates', input.templateId)
@@ -78,6 +78,12 @@ async function writeTemplate(input: {
 }
 
 async function loadRouteModule(): Promise<{ route: RouteModule; repos: MockRepos }> {
+  return loadRouteModuleWithOptions({})
+}
+
+async function loadRouteModuleWithOptions(options: {
+  identityMode?: 'legacy_global' | 'team_scoped'
+}): Promise<{ route: RouteModule; repos: MockRepos }> {
   receiptCounter += 1
 
   const agentStore = new Map<string, any>()
@@ -111,6 +117,20 @@ async function loadRouteModule(): Promise<{ route: RouteModule; repos: MockRepos
             },
           },
         },
+        governance: options.identityMode
+          ? {
+            orchestratorTemplateId: 'manager',
+            agentIdentityMode: options.identityMode,
+            ops: {
+              templateId: 'ops',
+              relayMode: 'decision_only',
+              relayTargetSessionKey: 'agent:main:main',
+              pollerEnabled: true,
+              pollIntervalCron: '*/15 * * * *',
+              timezone: 'Europe/Zurich',
+            },
+          }
+          : undefined,
         healthStatus: 'unknown',
         memberCount: 0,
         members: [],
@@ -218,7 +238,7 @@ beforeEach(async () => {
   await fsp.writeFile(join(tempWorkspace, 'AGENTS.md'), 'UNCHANGED\n', 'utf8')
 
   await writeTemplate({ templateId: 'build', name: 'Build', role: 'BUILD', root: tempWorkspace })
-  await writeTemplate({ templateId: 'security', name: 'Security', role: 'QA', root: tempWorkspace })
+  await writeTemplate({ templateId: 'security', name: 'Security', role: 'SECURITY', root: tempWorkspace })
 
   vi.resetModules()
 })
@@ -262,5 +282,32 @@ describe('POST /api/agent-teams/:id/instantiate', () => {
 
     const agentsMd = await fsp.readFile(join(tempWorkspace, 'AGENTS.md'), 'utf8')
     expect(agentsMd).toBe('UNCHANGED\n')
+  })
+
+  it('uses team-scoped runtime identity when governance mode is team_scoped', async () => {
+    const { route } = await loadRouteModuleWithOptions({ identityMode: 'team_scoped' })
+
+    const request = new NextRequest('http://localhost/api/agent-teams/team-1/instantiate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ typedConfirmText: 'CONFIRM' }),
+    })
+
+    const response = await route.POST(request, { params: Promise.resolve({ id: 'team-1' }) })
+    const body = await response.json() as any
+
+    expect(response.status).toBe(200)
+    expect(body.data.createdAgents).toHaveLength(2)
+    expect(body.data.createdAgents.map((agent: { slug: string }) => agent.slug).sort()).toEqual([
+      'starter-build',
+      'starter-security',
+    ])
+
+    for (const slug of ['starter-build', 'starter-security']) {
+      await expect(fsp.readFile(join(tempWorkspace, 'agents', slug, 'SOUL.md'), 'utf8')).resolves.toContain('SOUL')
+      await expect(fsp.readFile(join(tempWorkspace, 'agents', slug, 'HEARTBEAT.md'), 'utf8')).resolves.toContain('HEARTBEAT_OK')
+      await expect(fsp.readFile(join(tempWorkspace, 'agents', slug, 'MEMORY.md'), 'utf8')).resolves.toContain('MEMORY')
+      await expect(fsp.readFile(join(tempWorkspace, 'agents', `${slug}.md`), 'utf8')).resolves.toContain(slug)
+    }
   })
 })
