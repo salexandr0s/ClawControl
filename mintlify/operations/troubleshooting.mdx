@@ -21,7 +21,7 @@ This page is the troubleshooting index for ClawControl operators.
 3. Check **both** dependency layers:
    - gateway reachability in settings/topbar
    - CLI availability/version in settings
-4. Confirm OpenClaw CLI exists on PATH (or `OPENCLAW_BIN` is set).
+4. Confirm OpenClaw CLI exists on PATH (or `OPENCLAW_BIN` is set); for pnpm installs verify `PNPM_HOME` (commonly `$HOME/Library/pnpm`) is exported and on PATH.
 5. Re-run gateway test from setup/settings flow.
 6. Refresh capabilities (`/api/openclaw/capabilities?refresh=1`) and retry.
 7. Check activity/receipt logs for failed operations.

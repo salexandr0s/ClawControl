@@ -547,13 +547,35 @@ function getDesktopSettingsPath(): string {
   return path.join(app.getPath('userData'), 'settings.json')
 }
 
+function getPnpmBinDirs(): string[] {
+  const home = process.env.HOME || process.env.USERPROFILE || ''
+  const fromEnv = process.env.PNPM_HOME?.trim() || null
+  const candidates = [
+    fromEnv,
+    home ? path.join(home, 'Library', 'pnpm') : null,
+    home ? path.join(home, '.local', 'share', 'pnpm') : null,
+    home ? path.join(home, '.pnpm') : null,
+  ].filter((value): value is string => Boolean(value))
+
+  const deduped: string[] = []
+  for (const candidate of candidates) {
+    if (!deduped.includes(candidate)) deduped.push(candidate)
+  }
+
+  return deduped
+}
+
 function buildServerPath(basePath: string | undefined): string {
   const separator = process.platform === 'win32' ? ';' : ':'
   const existing = (basePath ?? '').split(separator).filter((entry) => entry.length > 0)
-  const extra =
+  const extra = [
+    ...getPnpmBinDirs(),
+    ...(
     process.platform === 'darwin'
       ? ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']
       : ['/usr/local/bin', '/usr/bin', '/bin']
+    ),
+  ]
 
   for (const candidate of extra) {
     if (!existing.includes(candidate)) {
@@ -565,12 +587,14 @@ function buildServerPath(basePath: string | undefined): string {
 }
 
 function resolveOpenClawBin(pathValue: string): string | null {
+  const binaryName = process.platform === 'win32' ? 'openclaw.exe' : 'openclaw'
   const candidates = [
     process.env.OPENCLAW_BIN,
+    ...getPnpmBinDirs().map((dir) => path.join(dir, binaryName)),
     ...pathValue
       .split(process.platform === 'win32' ? ';' : ':')
       .filter((segment) => segment.length > 0)
-      .map((segment) => path.join(segment, process.platform === 'win32' ? 'openclaw.exe' : 'openclaw')),
+      .map((segment) => path.join(segment, binaryName)),
     '/opt/homebrew/bin/openclaw',
     '/usr/local/bin/openclaw',
   ]

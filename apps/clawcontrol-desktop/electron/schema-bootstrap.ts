@@ -11,7 +11,7 @@ type PrismaLikeClient = {
 }
 
 type PrismaLikeClientCtor = new (options?: {
-  datasources?: { db?: { url?: string } }
+  adapter?: unknown
   log?: Array<'query' | 'error' | 'warn'>
 }) => PrismaLikeClient
 
@@ -291,15 +291,18 @@ export async function ensurePackagedDatabaseSchema(
   const migrations = listMigrations(migrationsDir)
   fs.mkdirSync(path.dirname(databasePath), { recursive: true })
 
-  const databaseUrl = `file:${databasePath}`
   const requireFromServer = createRequire(path.join(serverDir, 'package.json'))
   const prismaModule = requireFromServer('@prisma/client') as {
     PrismaClient: PrismaLikeClientCtor
   }
+  const adapterModule = requireFromServer('@prisma/adapter-better-sqlite3') as {
+    PrismaBetterSqlite3: new (config: { url: string }) => unknown
+  }
 
   const PrismaClient = prismaModule.PrismaClient
+  const adapter = new adapterModule.PrismaBetterSqlite3({ url: databasePath })
   const prisma = new PrismaClient({
-    datasources: { db: { url: databaseUrl } },
+    adapter,
     log: ['error'],
   })
 

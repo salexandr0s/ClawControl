@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { PrismaClient } from '@prisma/client'
+import { createSqliteAdapter } from '../lib/prisma-sqlite-adapter.js'
 
 const CANONICAL_STATIONS = [
   'strategic',
@@ -120,7 +121,9 @@ async function main() {
     return
   }
 
-  const prisma = new PrismaClient()
+  const prisma = new PrismaClient({
+    adapter: createSqliteAdapter(process.env.DATABASE_URL),
+  })
   const modeLabel = args.apply ? 'APPLY' : 'DRY-RUN'
   console.log(`[migrate-agent-stations-to-canonical] mode=${modeLabel}`)
 
@@ -193,4 +196,3 @@ main().catch((error) => {
   console.error(`[migrate-agent-stations-to-canonical] failed: ${error instanceof Error ? error.message : String(error)}`)
   process.exit(1)
 })
-

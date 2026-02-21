@@ -22,7 +22,7 @@ process.env.HOST = '127.0.0.1'
 
 // Local default: if DATABASE_URL is unset, use the bundled SQLite path.
 if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim().length === 0) {
-  process.env.DATABASE_URL = 'file:../data/clawcontrol.db'
+  process.env.DATABASE_URL = 'file:./data/clawcontrol.db'
 }
 
 // Pass-through: `node scripts/local-only.mjs <cmd> <args...>`

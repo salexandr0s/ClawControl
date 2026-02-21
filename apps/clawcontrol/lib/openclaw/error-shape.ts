@@ -8,7 +8,7 @@ export type OpenClawErrorCode =
   | 'OPENCLAW_COMMAND_FAILED'
 
 const CLI_INSTALL_HINT =
-  "Install OpenClaw from https://github.com/openclaw/openclaw and ensure 'openclaw' is on PATH (or set OPENCLAW_BIN)."
+  "Install OpenClaw from https://github.com/openclaw/openclaw and ensure 'openclaw' is on PATH. If installed via pnpm, add PNPM_HOME (for example '$HOME/Library/pnpm') to PATH, or set OPENCLAW_BIN to the full binary path."
 
 const JSON_PARSE_HINT =
   'OpenClaw returned non-JSON output. Retry once; if it persists, check plugin startup logs and command output.'

@@ -2,8 +2,11 @@
 
 import { spawn } from 'node:child_process'
 import { PrismaClient } from '@prisma/client'
+import { createSqliteAdapter } from '../lib/prisma-sqlite-adapter.js'
 
-const prisma = new PrismaClient()
+const prisma = new PrismaClient({
+  adapter: createSqliteAdapter(process.env.DATABASE_URL),
+})
 
 const GOVERNANCE_ACTIVE_PROFILES_KEY = 'governance.activeProfiles'
 const LEGACY_COMPANY_PROFILE_ID = 'clawcontrol-company-v1'

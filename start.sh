@@ -23,6 +23,7 @@ DB_FILE="$DATA_DIR/clawcontrol.db"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo ""
@@ -59,6 +60,64 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+# Runtime guardrails + diagnostics
+REQUIRED_NODE_MAJOR=25
+
+if ! command -v node > /dev/null 2>&1; then
+  echo -e "${RED}Node.js not found on PATH.${NC}"
+  exit 1
+fi
+
+if ! command -v npm > /dev/null 2>&1; then
+  echo -e "${RED}npm not found on PATH.${NC}"
+  exit 1
+fi
+
+NODE_BIN="$(command -v node)"
+NPM_BIN="$(command -v npm)"
+NODE_VERSION="$(node -v)"
+NPM_VERSION="$(npm -v)"
+NODE_MAJOR="$(echo "$NODE_VERSION" | sed -E 's/^v([0-9]+).*/\1/')"
+
+if [[ "$NODE_MAJOR" != "$REQUIRED_NODE_MAJOR" ]]; then
+  echo -e "${RED}Node.js $NODE_VERSION detected. Required major version: $REQUIRED_NODE_MAJOR.x${NC}"
+  echo "Remediation:"
+  echo "  brew install node@25"
+  echo "  export PATH=\"/opt/homebrew/opt/node@25/bin:\$PATH\""
+  exit 1
+fi
+
+OPENCLAW_BIN_SOURCE="${OPENCLAW_BIN:-}"
+if [[ -n "$OPENCLAW_BIN_SOURCE" && -x "$OPENCLAW_BIN_SOURCE" ]]; then
+  OPENCLAW_BIN_RESOLVED="$OPENCLAW_BIN_SOURCE"
+elif [[ -n "$OPENCLAW_BIN_SOURCE" ]] && command -v "$OPENCLAW_BIN_SOURCE" > /dev/null 2>&1; then
+  OPENCLAW_BIN_RESOLVED="$(command -v "$OPENCLAW_BIN_SOURCE")"
+elif command -v openclaw > /dev/null 2>&1; then
+  OPENCLAW_BIN_RESOLVED="$(command -v openclaw)"
+elif [[ -n "${PNPM_HOME:-}" && -x "${PNPM_HOME}/openclaw" ]]; then
+  OPENCLAW_BIN_RESOLVED="${PNPM_HOME}/openclaw"
+elif [[ -x "$HOME/Library/pnpm/openclaw" ]]; then
+  OPENCLAW_BIN_RESOLVED="$HOME/Library/pnpm/openclaw"
+else
+  OPENCLAW_BIN_RESOLVED=""
+fi
+
+echo -e "${BLUE}Runtime diagnostics${NC}"
+echo "  node: $NODE_VERSION ($NODE_BIN)"
+echo "  npm:  $NPM_VERSION ($NPM_BIN)"
+if [[ -n "$OPENCLAW_BIN_RESOLVED" ]]; then
+  OPENCLAW_VERSION="$("$OPENCLAW_BIN_RESOLVED" --version 2>/dev/null || true)"
+  if [[ -n "$OPENCLAW_VERSION" ]]; then
+    echo "  openclaw: $OPENCLAW_VERSION ($OPENCLAW_BIN_RESOLVED)"
+  else
+    echo "  openclaw: $OPENCLAW_BIN_RESOLVED (version check failed)"
+  fi
+else
+  echo -e "  ${YELLOW}openclaw: not found${NC}"
+  echo "    Install OpenClaw and ensure PATH includes PNPM_HOME (example: \$HOME/Library/pnpm) or set OPENCLAW_BIN."
+fi
+echo ""
 
 # Check desktop app exists (if desktop mode)
 if [[ "$MODE" == "desktop" ]] && [[ ! -d "$DESKTOP_DIR" ]]; then

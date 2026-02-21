@@ -58,18 +58,45 @@ done
 # Check prerequisites
 # ─────────────────────────────────────────────────────────────────────────────
 echo -e "${BLUE}Checking prerequisites...${NC}"
+REQUIRED_NODE_MAJOR=25
 
 if ! command -v node &> /dev/null; then
   echo -e "${RED}✗ Node.js not found. Install it first.${NC}"
   exit 1
 fi
-echo "  ✓ Node.js $(node -v)"
+NODE_VERSION="$(node -v)"
+NODE_MAJOR="$(echo "$NODE_VERSION" | sed -E 's/^v([0-9]+).*/\1/')"
+
+if [[ "$NODE_MAJOR" != "$REQUIRED_NODE_MAJOR" ]]; then
+  echo -e "${RED}✗ Node.js $NODE_VERSION detected. Required major version: $REQUIRED_NODE_MAJOR.x${NC}"
+  echo "  Remediation (Homebrew):"
+  echo "    brew install node@25"
+  echo "    export PATH=\"/opt/homebrew/opt/node@25/bin:\$PATH\""
+  exit 1
+fi
+echo "  ✓ Node.js $NODE_VERSION"
 
 if ! command -v npm &> /dev/null; then
   echo -e "${RED}✗ npm not found.${NC}"
   exit 1
 fi
 echo "  ✓ npm $(npm -v)"
+
+echo ""
+echo -e "${BLUE}Checking OpenClaw CLI...${NC}"
+if command -v openclaw &> /dev/null; then
+  OPENCLAW_PATH="$(command -v openclaw)"
+  OPENCLAW_VERSION="$(openclaw --version 2>/dev/null || true)"
+  if [[ -n "$OPENCLAW_VERSION" ]]; then
+    echo "  ✓ OpenClaw $OPENCLAW_VERSION ($OPENCLAW_PATH)"
+  else
+    echo -e "${YELLOW}  ! OpenClaw found at $OPENCLAW_PATH but version check failed${NC}"
+  fi
+else
+  echo -e "${YELLOW}  ! OpenClaw CLI not found on PATH${NC}"
+  echo "    Optional for setup, required for full OpenClaw-backed features."
+  echo "    Install and ensure PATH includes your global bin (example: \$HOME/Library/pnpm)."
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Install dependencies
@@ -124,8 +151,8 @@ cd "$CLAWCONTROL_DIR"
 # Generate Prisma client
 npx prisma generate
 
-# Run migrations (creates DB if not exists)
-npx prisma migrate deploy
+# Run migrations (creates DB if not exists, with safe fallback on schema-engine failures)
+npm run db:migrate
 
 echo "  ✓ Migrations complete"
 

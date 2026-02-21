@@ -1,13 +1,13 @@
 {
   "name": "clawcontrol",
   "private": true,
-  "packageManager": "npm@10.1.0",
+  "packageManager": "npm@11.9.0",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=25.0.0 <26"
   },
   "scripts": {
     "dev": "turbo dev",

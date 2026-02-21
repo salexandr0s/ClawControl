@@ -48,12 +48,30 @@ let cached: CliCheck | null = null
 let cacheTime = 0
 const CACHE_TTL = 60_000 // 60 seconds
 
+function pnpmBinCandidates(): string[] {
+  const home = homedir()
+  const fromEnv = process.env.PNPM_HOME?.trim()
+  const candidates = [
+    fromEnv,
+    join(home, 'Library', 'pnpm'),
+    join(home, '.local', 'share', 'pnpm'),
+    join(home, '.pnpm'),
+  ].filter((value): value is string => Boolean(value))
+
+  const deduped: string[] = []
+  for (const candidate of candidates) {
+    if (!deduped.includes(candidate)) deduped.push(candidate)
+  }
+  return deduped
+}
+
 function openClawBinaryCandidates(): string[] {
   const envBin = process.env.OPENCLAW_BIN?.trim()
   const candidates = [
     envBin,
     resolvedOpenClawBin,
     DEFAULT_OPENCLAW_BIN,
+    ...pnpmBinCandidates().map((dir) => join(dir, 'openclaw')),
     '/opt/homebrew/bin/openclaw',
     '/usr/local/bin/openclaw',
     '/usr/bin/openclaw',
@@ -217,7 +235,7 @@ export async function checkOpenClaw(): Promise<CliCheck> {
     result = {
       available: false,
       version: null,
-      error: `OpenClaw CLI not found. Install from https://github.com/openclaw/openclaw and ensure 'openclaw' is on PATH (or set OPENCLAW_BIN).`,
+      error: `OpenClaw CLI not found. Install from https://github.com/openclaw/openclaw and ensure 'openclaw' is on PATH. If installed with pnpm, add PNPM_HOME (for example '$HOME/Library/pnpm') to PATH, or set OPENCLAW_BIN to the absolute binary path.`,
     }
   }
 

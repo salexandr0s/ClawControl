@@ -63,8 +63,8 @@ npm run dev --workspace=clawcontrol-desktop
 
 ## Requirements
 
-- Node.js `20+`
-- npm `10+`
+- Node.js `25.x`
+- npm `11+`
 - OpenClaw CLI installed and discoverable (`openclaw` on `PATH`, or `OPENCLAW_BIN` set)
 
 ## Dependency Model (important)
