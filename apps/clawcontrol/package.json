@@ -7,6 +7,7 @@
     "predev": "node scripts/ensure-next-postcss.mjs",
     "build": "cross-env DATABASE_URL=file:./data/clawcontrol.db next build --webpack",
     "prebuild": "node scripts/ensure-next-postcss.mjs && prisma generate",
+    "postbuild": "node scripts/sync-standalone-runtime-deps.mjs",
     "start": "cross-env DATABASE_URL=file:./data/clawcontrol.db node scripts/local-only.mjs next start --hostname 127.0.0.1",
     "lint": "eslint .",
     "test": "vitest run",

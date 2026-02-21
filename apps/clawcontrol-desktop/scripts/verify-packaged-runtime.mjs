@@ -22,6 +22,13 @@ const appPath = path.join(
 const serverDir = path.join(appPath, 'Contents', 'Resources', 'server')
 const migrationsDir = path.join(serverDir, 'apps', 'clawcontrol', 'prisma', 'migrations')
 const serverEntry = path.join(serverDir, 'apps', 'clawcontrol', 'server.js')
+const prismaAdapterDir = path.join(serverDir, 'node_modules', '@prisma', 'adapter-better-sqlite3')
+const prismaDriverAdapterUtilsDir = path.join(
+  serverDir,
+  'node_modules',
+  '@prisma',
+  'driver-adapter-utils'
+)
 const schemaBootstrapPath = path.join(
   repoRoot,
   'apps',
@@ -90,6 +97,8 @@ async function main() {
   assertExists(serverDir, 'Packaged server directory')
   assertExists(migrationsDir, 'Packaged Prisma migrations')
   assertExists(serverEntry, 'Packaged server entry')
+  assertExists(prismaAdapterDir, 'Packaged Prisma better-sqlite3 adapter')
+  assertExists(prismaDriverAdapterUtilsDir, 'Packaged Prisma driver adapter utils')
   assertExists(schemaBootstrapPath, 'Desktop schema bootstrap module')
 
   const { ensurePackagedDatabaseSchema } = await import(pathToFileURL(schemaBootstrapPath).toString())

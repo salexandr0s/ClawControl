@@ -7,6 +7,18 @@ const nextConfig = {
   // which the Electron app can ship/run without bundling the full monorepo.
   output: 'standalone',
 
+  // Prisma v7 adapter runtime packages are required by both web runtime and
+  // desktop packaged bootstrap. Include both local and monorepo-hoisted paths;
+  // build scripts also perform a deterministic post-build sync as a safety net.
+  outputFileTracingIncludes: {
+    '/*': [
+      './node_modules/@prisma/adapter-better-sqlite3/**/*',
+      './node_modules/@prisma/driver-adapter-utils/**/*',
+      '../../node_modules/@prisma/adapter-better-sqlite3/**/*',
+      '../../node_modules/@prisma/driver-adapter-utils/**/*',
+    ],
+  },
+
   // Avoid bundling native Node deps into the server build.
   // In particular, `ws` can end up with a broken bufferutil shim when bundled.
   serverExternalPackages: ['ws'],
