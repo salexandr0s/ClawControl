@@ -1,6 +1,6 @@
 {
   "name": "clawcontrol",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "private": true,
   "scripts": {
     "dev": "cross-env DATABASE_URL=file:./data/clawcontrol.db node scripts/local-only.mjs next dev --webpack --hostname 127.0.0.1",
