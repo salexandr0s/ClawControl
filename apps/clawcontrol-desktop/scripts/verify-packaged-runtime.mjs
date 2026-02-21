@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -19,6 +19,7 @@ const appPath = path.join(
   'mac-arm64',
   'ClawControl.app'
 )
+const appExecutable = path.join(appPath, 'Contents', 'MacOS', 'ClawControl')
 const serverDir = path.join(appPath, 'Contents', 'Resources', 'server')
 const migrationsDir = path.join(serverDir, 'apps', 'clawcontrol', 'prisma', 'migrations')
 const serverEntry = path.join(serverDir, 'apps', 'clawcontrol', 'server.js')
@@ -29,6 +30,7 @@ const prismaDriverAdapterUtilsDir = path.join(
   '@prisma',
   'driver-adapter-utils'
 )
+const betterSqliteEntry = path.join(serverDir, 'node_modules', 'better-sqlite3')
 const schemaBootstrapPath = path.join(
   repoRoot,
   'apps',
@@ -92,30 +94,107 @@ async function waitForReady(port, pathname, timeoutMs = 30_000) {
   )
 }
 
+function assertElectronCanLoadBetterSqlite3() {
+  const probeScriptPath = path.join(serverDir, '.better-sqlite3-abi-probe.cjs')
+  fs.writeFileSync(
+    probeScriptPath,
+    [
+      "const BetterSqlite3 = require(process.argv[2])",
+      "const db = new BetterSqlite3(':memory:')",
+      "db.prepare('SELECT 1 AS ok').get()",
+      'db.close()',
+      "process.stdout.write(`[smoke] better-sqlite3 loaded via Electron NODE_MODULE_VERSION=${process.versions.modules}\\n`)",
+    ].join('\n'),
+    'utf8'
+  )
+
+  const result = spawnSync(appExecutable, [probeScriptPath, betterSqliteEntry], {
+    cwd: serverDir,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+    },
+  })
+
+  try {
+    if (result.status !== 0) {
+      const detail = [result.stdout, result.stderr].filter(Boolean).join('\n').trim()
+      throw new Error(`Electron ABI probe failed: ${detail}`)
+    }
+    if (result.stdout) process.stdout.write(result.stdout)
+  } finally {
+    try {
+      fs.unlinkSync(probeScriptPath)
+    } catch {
+      // ignore cleanup failures
+    }
+  }
+}
+
+function runSchemaBootstrapWithElectron(tmpDir, databasePath) {
+  const runnerScriptPath = path.join(tmpDir, 'schema-bootstrap-runner.cjs')
+  fs.writeFileSync(
+    runnerScriptPath,
+    [
+      "const { ensurePackagedDatabaseSchema } = require(process.argv[2])",
+      'const serverDir = process.argv[3]',
+      'const databasePath = process.argv[4]',
+      'Promise.resolve()',
+      '  .then(() => ensurePackagedDatabaseSchema(serverDir, databasePath))',
+      "  .then(() => process.stdout.write('[smoke] schema bootstrap via Electron succeeded\\n'))",
+      '  .catch((error) => {',
+      "    const message = error instanceof Error ? error.message : String(error)",
+      '    process.stderr.write(`${message}\\n`)',
+      '    process.exit(1)',
+      '  })',
+    ].join('\n'),
+    'utf8'
+  )
+
+  const result = spawnSync(appExecutable, [runnerScriptPath, schemaBootstrapPath, serverDir, databasePath], {
+    cwd: serverDir,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+    },
+  })
+
+  if (result.status !== 0) {
+    const detail = [result.stdout, result.stderr].filter(Boolean).join('\n').trim()
+    throw new Error(`Electron schema bootstrap failed: ${detail}`)
+  }
+  if (result.stdout) process.stdout.write(result.stdout)
+}
+
 async function main() {
   assertExists(appPath, 'Packaged app')
+  assertExists(appExecutable, 'Packaged app executable')
   assertExists(serverDir, 'Packaged server directory')
   assertExists(migrationsDir, 'Packaged Prisma migrations')
   assertExists(serverEntry, 'Packaged server entry')
   assertExists(prismaAdapterDir, 'Packaged Prisma better-sqlite3 adapter')
   assertExists(prismaDriverAdapterUtilsDir, 'Packaged Prisma driver adapter utils')
+  assertExists(betterSqliteEntry, 'Packaged better-sqlite3 module')
   assertExists(schemaBootstrapPath, 'Desktop schema bootstrap module')
 
-  const { ensurePackagedDatabaseSchema } = await import(pathToFileURL(schemaBootstrapPath).toString())
+  assertElectronCanLoadBetterSqlite3()
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawcontrol-desktop-smoke-'))
   const dbPath = path.join(tmpDir, 'clawcontrol.db')
   const workspaceRoot = path.join(tmpDir, 'workspace')
   fs.mkdirSync(workspaceRoot, { recursive: true })
 
-  await ensurePackagedDatabaseSchema(serverDir, dbPath)
+  runSchemaBootstrapWithElectron(tmpDir, dbPath)
 
   const port = 33000 + Math.floor(Math.random() * 2000)
-  const server = spawn(process.execPath, [serverEntry], {
+  const server = spawn(appExecutable, [serverEntry], {
     cwd: path.dirname(serverEntry),
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
       NODE_ENV: 'production',
       HOST: '127.0.0.1',
       HOSTNAME: '127.0.0.1',
