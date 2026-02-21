@@ -26,38 +26,20 @@ import { readSettingsSync } from '@/lib/settings/store'
 //   - Alias compatibility: ~/.OpenClaw/
 //   - openclaw.json, moltbot.json, clawdbot.json, config.yaml
 // - Historical workspace directories:
-//   - ~/OpenClaw, ~/moltbot, ~/clawd
-// - Auto-detect: ../../../../.. (when clawcontrol is checked out under ~/clawd/projects/clawcontrol/apps/clawcontrol)
-// - ./workspace (fallback for demo/dev)
+//   - ~/openclaw, ~/OpenClaw, ~/moltbot, ~/clawd
+// - Final default:
+//   - ~/openclaw (never infer workspace from process cwd)
 const CONFIG_DIR_GROUPS = [
   ['.openclaw', '.OpenClaw'],
   ['.moltbot'],
   ['.clawdbot'],
 ] as const
 const CONFIG_FILE_ORDER = ['openclaw.json', 'moltbot.json', 'clawdbot.json', 'config.yaml'] as const
-const WORKSPACE_DIR_ORDER = ['OpenClaw', 'moltbot', 'clawd'] as const
+const WORKSPACE_DIR_ORDER = ['openclaw', 'OpenClaw', 'moltbot', 'clawd'] as const
 const WORKSPACE_ROOT_CACHE_TTL_MS = 5_000
 
-function isWorkspaceMarkerPath(dir: string): boolean {
-  return (
-    existsSync(join(dir, 'AGENTS.md'))
-    || existsSync(join(dir, 'SOUL.md'))
-    || existsSync(join(dir, 'HEARTBEAT.md'))
-  )
-}
-
-function findNearestWorkspaceRoot(startDir: string, maxDepth = 10): string | null {
-  let cursor = resolve(startDir)
-
-  for (let depth = 0; depth <= maxDepth; depth++) {
-    if (isWorkspaceMarkerPath(cursor)) return cursor
-
-    const parent = resolve(cursor, '..')
-    if (parent === cursor) break
-    cursor = parent
-  }
-
-  return null
+function defaultWorkspaceRoot(): string {
+  return resolve(homedir(), 'openclaw')
 }
 
 function pickWorkspaceRoot(): string {
@@ -82,14 +64,7 @@ function pickWorkspaceRoot(): string {
   const knownWorkspace = workspaceFromKnownDirectories()
   if (knownWorkspace) return knownWorkspace
 
-  const discovered = findNearestWorkspaceRoot(process.cwd())
-  if (discovered) return discovered
-
-  const localWorkspace = resolve(process.cwd(), 'workspace')
-  if (existsSync(localWorkspace)) return localWorkspace
-
-  // Final fallback: current working directory (never auto-fallback to /).
-  return resolve(process.cwd())
+  return defaultWorkspaceRoot()
 }
 
 function workspaceFromSettings(): string | null {

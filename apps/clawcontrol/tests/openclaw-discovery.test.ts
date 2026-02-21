@@ -142,7 +142,7 @@ describe('OpenClaw discovery', () => {
     expect(discovered?.source).toBe('openclaw.json')
   })
 
-  it('deduplicates symlinked config/workspace aliases and falls back to ~/OpenClaw', async () => {
+  it('deduplicates symlinked config/workspace aliases and falls back to ~/openclaw', async () => {
     await fsp.writeFile(
       join(openClawDir, 'openclaw.json'),
       JSON.stringify({
@@ -158,7 +158,8 @@ describe('OpenClaw discovery', () => {
     )
     await fsp.mkdir(join(openClawDir, 'agents', 'alpha', 'agent'), { recursive: true })
 
-    const openClawWorkspace = join(fakeHome, 'OpenClaw')
+    const openClawWorkspace = join(fakeHome, 'openclaw')
+    const upperAlias = join(fakeHome, 'OpenClaw')
     const clawdAlias = join(fakeHome, 'clawd')
     await fsp.mkdir(openClawWorkspace, { recursive: true })
 
@@ -170,6 +171,12 @@ describe('OpenClaw discovery', () => {
 
     try {
       await fsp.symlink(openClawWorkspace, clawdAlias)
+    } catch {
+      // Ignore environments where symlink creation is restricted.
+    }
+
+    try {
+      await fsp.symlink(openClawWorkspace, upperAlias)
     } catch {
       // Ignore environments where symlink creation is restricted.
     }

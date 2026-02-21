@@ -1057,14 +1057,14 @@ ssh -L 3000:127.0.0.1:3000 {'<user>@<host-tailnet-name>'}
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm text-fg-1">
                   <FolderOpen className="w-4 h-4 text-fg-2" />
-                  Workspace Path
+                  OpenClaw Workspace Path
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={workspacePath}
                     onChange={(e) => setWorkspacePath(e.target.value)}
-                    placeholder="/path/to/your/workspace"
+                    placeholder="/path/to/your/openclaw-workspace"
                     className="flex-1 px-3 py-2 text-sm bg-bg-1 border border-bd-0 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-3 focus:outline-none focus:border-status-info/50"
                   />
                   {pickerAvailable && (
@@ -1106,7 +1106,7 @@ ssh -L 3000:127.0.0.1:3000 {'<user>@<host-tailnet-name>'}
               {settingsConfig?.resolved?.workspacePath && (
                 <div className="pt-3 border-t border-bd-0 space-y-2">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-fg-3">Resolved workspace:</span>
+                    <span className="text-fg-3">Resolved OpenClaw workspace:</span>
                     <span className="font-mono text-fg-2">{settingsConfig.resolved.workspacePath}</span>
                   </div>
                   <div className="flex items-center justify-between text-xs">
@@ -1128,7 +1128,7 @@ ssh -L 3000:127.0.0.1:3000 {'<user>@<host-tailnet-name>'}
 
               {/* Help text */}
               <p className="text-xs text-fg-3 pt-2">
-                Configure access mode, gateway URL, and workspace directory. Gateway/access mode changes apply immediately after save; workspace changes may require restart.
+                Configure access mode, gateway URL, and OpenClaw workspace directory. Gateway/access mode changes apply immediately after save; workspace changes may require restart.
                 {restartAvailable
                   ? ' Changes are applied with an automatic server restart.'
                   : ' Changes require a server restart.'}

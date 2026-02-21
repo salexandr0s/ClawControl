@@ -196,7 +196,7 @@ export default function SetupPage() {
         <header>
           <h1 className="text-2xl font-semibold">Setup ClawControl</h1>
           <p className="text-sm text-fg-2 mt-1">
-            Validate your local environment and save initial gateway/workspace settings.
+            Validate your local environment and save initial gateway/OpenClaw workspace settings.
           </p>
         </header>
 
@@ -240,7 +240,7 @@ export default function SetupPage() {
                 <div className="flex items-center justify-between">
                   <div className="inline-flex items-center gap-2">
                     <StateIcon state={initStatus.checks.workspace.state} />
-                    <span>Workspace</span>
+                    <span>OpenClaw Workspace</span>
                   </div>
                   <span className={stateTone(initStatus.checks.workspace.state)}>{initStatus.checks.workspace.message}</span>
                 </div>
@@ -337,12 +337,12 @@ ssh -L 3000:127.0.0.1:3000 {'<user>@<host-tailnet-name>'}
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs text-fg-2">Workspace Path</label>
+                <label className="text-xs text-fg-2">OpenClaw Workspace Path</label>
                 <div className="flex gap-2">
                   <input
                     value={workspacePath}
                     onChange={(event) => setWorkspacePath(event.target.value)}
-                    placeholder="/path/to/workspace"
+                    placeholder="/path/to/openclaw-workspace"
                     className="flex-1 px-3 py-2 text-sm bg-bg-1 border border-bd-0 rounded-[var(--radius-md)] text-fg-0 placeholder:text-fg-3 focus:outline-none focus:border-status-info/50"
                   />
                   {pickerAvailable && (

@@ -47,7 +47,7 @@ const CONFIG_DIR_GROUPS = [
   ['.clawdbot'],
 ] as const
 const CONFIG_FILE_ORDER = ['openclaw.json', 'moltbot.json', 'clawdbot.json', 'config.yaml'] as const
-const WORKSPACE_DIR_ORDER = ['OpenClaw', 'moltbot', 'clawd'] as const
+const WORKSPACE_DIR_ORDER = ['openclaw', 'OpenClaw', 'moltbot', 'clawd'] as const
 
 const DEFAULT_GATEWAY_HTTP_URL = 'http://127.0.0.1:18789'
 const DEFAULT_GATEWAY_WS_URL = 'ws://127.0.0.1:18789'

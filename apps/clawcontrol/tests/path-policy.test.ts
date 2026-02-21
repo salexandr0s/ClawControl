@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { promises as fsp } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 
@@ -45,7 +45,7 @@ describe('workspace path policy', () => {
     }
   })
 
-  it('finds nearest workspace root from cwd (does not fallback to /)', async () => {
+  it('defaults to ~/openclaw and does not infer workspace root from cwd', async () => {
     const repoLikeRoot = join(tempRoot, 'repo')
     const nested = join(repoLikeRoot, 'apps', 'clawcontrol')
 
@@ -59,7 +59,7 @@ describe('workspace path policy', () => {
     vi.resetModules()
 
     const mod = await import('@/lib/fs/path-policy')
-    expect(await fsp.realpath(mod.getWorkspaceRoot())).toBe(await fsp.realpath(repoLikeRoot))
+    expect(mod.getWorkspaceRoot()).toBe(resolve(fakeHome, 'openclaw'))
   })
 
   it('prefers ~/.openclaw/openclaw.json workspace when env vars are unset', async () => {
@@ -255,12 +255,19 @@ describe('workspace path policy', () => {
     expect(rows.some((row) => row.name === 'memory')).toBe(true)
   })
 
-  it('falls back to historical workspace directory names with symlink dedupe', async () => {
-    const openClawWorkspace = join(fakeHome, 'OpenClaw')
+  it('falls back to historical workspace directory names with lowercase openclaw preference', async () => {
+    const openClawWorkspace = join(fakeHome, 'openclaw')
+    const upperAlias = join(fakeHome, 'OpenClaw')
     const legacyAlias = join(fakeHome, 'clawd')
 
     await fsp.mkdir(openClawWorkspace, { recursive: true })
     await fsp.writeFile(join(openClawWorkspace, 'AGENTS.md'), '# test')
+
+    try {
+      await fsp.symlink(openClawWorkspace, upperAlias)
+    } catch {
+      // Ignore environments where symlink creation is restricted.
+    }
 
     try {
       await fsp.symlink(openClawWorkspace, legacyAlias)
