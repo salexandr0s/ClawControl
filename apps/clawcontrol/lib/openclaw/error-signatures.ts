@@ -102,7 +102,7 @@ export function normalizeErrorSignature(block: string): NormalizedErrorSignature
     .join(' | ')
     .slice(0, 400)
 
-  const signatureHash = createHash('sha1')
+  const signatureHash = createHash('sha256')
     .update(signatureText || 'unknown-error')
     .digest('hex')
 

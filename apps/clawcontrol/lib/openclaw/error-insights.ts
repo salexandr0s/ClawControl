@@ -39,7 +39,7 @@ function toInsightSnapshot(row: {
 }
 
 function buildInputHash(signature: ErrorSignatureListItem): string {
-  return createHash('sha1')
+  return createHash('sha256')
     .update(JSON.stringify({
       signatureHash: signature.signatureHash,
       signatureText: signature.signatureText,
