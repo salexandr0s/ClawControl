@@ -97,4 +97,40 @@ describe('openclaw client loopback enforcement', () => {
     expect(resolved?.gatewayUrl).toBe('http://127.0.0.1:18789')
     expect(resolved?.gatewayWsUrl).toBe('ws://127.0.0.1:18789')
   })
+
+  it('derives WS from selected HTTP source instead of mixing cross-source WS URLs', async () => {
+    mocks.readSettings.mockResolvedValueOnce(
+      baseSettings({
+        gatewayHttpUrl: 'http://127.0.0.1:28888',
+      })
+    )
+    process.env.OPENCLAW_GATEWAY_WS_URL = 'ws://127.0.0.1:19999'
+
+    const mod = await import('@/lib/openclaw-client')
+    const resolved = await mod.getOpenClawConfig(true)
+
+    expect(resolved).not.toBeNull()
+    expect(resolved?.gatewayUrl).toBe('http://127.0.0.1:28888')
+    expect(resolved?.gatewayWsUrl).toBe('ws://127.0.0.1:28888')
+    expect(resolved?.resolution.gatewayUrlSource).toBe('settings')
+    expect(resolved?.resolution.gatewayWsUrlSource).toBe('settings')
+  })
+
+  it('sync resolution keeps same-source WS only when endpoint-equivalent', async () => {
+    mocks.readSettingsSync.mockReturnValue(
+      baseSettings({
+        gatewayHttpUrl: 'http://127.0.0.1:18789',
+        gatewayWsUrl: 'ws://127.0.0.1:28888',
+      })
+    )
+
+    const mod = await import('@/lib/openclaw-client')
+    const resolved = mod.getOpenClawConfigSync()
+
+    expect(resolved).not.toBeNull()
+    expect(resolved?.gatewayUrl).toBe('http://127.0.0.1:18789')
+    expect(resolved?.gatewayWsUrl).toBe('ws://127.0.0.1:18789')
+    expect(resolved?.resolution.gatewayUrlSource).toBe('settings')
+    expect(resolved?.resolution.gatewayWsUrlSource).toBe('settings')
+  })
 })

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   syncAgentSessions: vi.fn(),
   isFirstRun: vi.fn(),
   syncAgentsFromOpenClaw: vi.fn(),
+  reconcileActiveGovernanceProfiles: vi.fn(),
   getOpenClawConfig: vi.fn(),
 }))
 
@@ -34,6 +35,10 @@ vi.mock('@/lib/first-run', () => ({
 
 vi.mock('@/lib/sync-agents', () => ({
   syncAgentsFromOpenClaw: (...args: unknown[]) => mocks.syncAgentsFromOpenClaw(...args),
+}))
+
+vi.mock('@/lib/services/governance-profiles', () => ({
+  reconcileActiveGovernanceProfiles: (...args: unknown[]) => mocks.reconcileActiveGovernanceProfiles(...args),
 }))
 
 vi.mock('@/lib/openclaw-client', () => ({
@@ -96,11 +101,17 @@ describe('api/agents session overlay', () => {
     mocks.syncAgentSessions.mockReset()
     mocks.isFirstRun.mockReset()
     mocks.syncAgentsFromOpenClaw.mockReset()
+    mocks.reconcileActiveGovernanceProfiles.mockReset()
     mocks.getOpenClawConfig.mockReset()
 
     mocks.isFirstRun.mockResolvedValue(false)
     mocks.getOpenClawConfig.mockResolvedValue(null)
     mocks.syncAgentSessions.mockResolvedValue({ seen: 0, upserted: 0 })
+    mocks.reconcileActiveGovernanceProfiles.mockResolvedValue({
+      profileIds: [],
+      totalMutations: 0,
+      results: [],
+    })
     mocks.getOrLoadWithCache.mockImplementation(async (_key: string, _ttlMs: number, loader: () => Promise<unknown>) => ({
       value: await loader(),
       cacheHit: false,
@@ -182,5 +193,25 @@ describe('api/agents session overlay', () => {
     expect(payload.data[0]?.status).toBe('error')
     expect(new Date(payload.data[0]?.lastHeartbeatAt).toISOString()).toBe(freshestSeenAt.toISOString())
     expect(new Date(payload.data[0]?.lastSeenAt).toISOString()).toBe(freshestSeenAt.toISOString())
+  })
+
+  it('runs governance reconciliation after first-run OpenClaw sync fallback', async () => {
+    mocks.isFirstRun.mockResolvedValue(true)
+    mocks.repos.agents.list
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([makeAgent()])
+
+    const route = await import('@/app/api/agents/route')
+    const request = new NextRequest(
+      'http://localhost/api/agents?includeSessionOverlay=0&includeModelOverlay=0'
+    )
+    const response = await route.GET(request)
+    const payload = await response.json() as { data: AgentDTO[] }
+
+    expect(payload.data).toHaveLength(1)
+    expect(mocks.syncAgentsFromOpenClaw).toHaveBeenCalledTimes(1)
+    expect(mocks.syncAgentsFromOpenClaw).toHaveBeenCalledWith({ forceRefresh: true })
+    expect(mocks.reconcileActiveGovernanceProfiles).toHaveBeenCalledTimes(1)
+    expect(mocks.reconcileActiveGovernanceProfiles).toHaveBeenCalledWith({ apply: true })
   })
 })

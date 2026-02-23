@@ -59,7 +59,42 @@ function isLoopbackUrl(url: string): boolean {
   }
 }
 
+type LoopbackEndpointIdentity = {
+  hostClass: 'ipv4' | 'ipv6'
+  port: number
+}
+
 type ConfigSource = 'settings' | 'env' | 'openclaw'
+
+function defaultPortForProtocol(protocol: string): number {
+  if (protocol === 'https:' || protocol === 'wss:') return 443
+  return 80
+}
+
+function loopbackEndpointIdentity(url: string): LoopbackEndpointIdentity | null {
+  try {
+    const parsed = new URL(url)
+    if (!isLoopbackHostname(parsed.hostname)) return null
+
+    const host = parsed.hostname.trim().toLowerCase()
+    const hostClass = host === '::1' || host === '[::1]' ? 'ipv6' : 'ipv4'
+    const explicitPort = Number(parsed.port)
+    const port = Number.isFinite(explicitPort) && explicitPort > 0
+      ? explicitPort
+      : defaultPortForProtocol(parsed.protocol)
+
+    return { hostClass, port }
+  } catch {
+    return null
+  }
+}
+
+function areLoopbackEndpointsEquivalent(first: string, second: string): boolean {
+  const a = loopbackEndpointIdentity(first)
+  const b = loopbackEndpointIdentity(second)
+  if (!a || !b) return false
+  return a.hostClass === b.hostClass && a.port === b.port
+}
 
 function pickFirstLoopbackUrl(
   candidates: Array<{ value: string | null; source: ConfigSource }>
@@ -77,6 +112,44 @@ function toWsUrl(httpUrl: string): string {
   if (httpUrl.startsWith('http://')) return `ws://${httpUrl.slice('http://'.length)}`
   if (httpUrl.startsWith('ws://') || httpUrl.startsWith('wss://')) return httpUrl
   return `ws://${httpUrl}`
+}
+
+function resolveGatewayPair(input: {
+  httpCandidates: Array<{ value: string | null; source: ConfigSource }>
+  wsCandidates: Array<{ value: string | null; source: ConfigSource }>
+  defaultWsUrl?: string
+}): {
+  gatewayUrl: string
+  gatewayWsUrl: string
+  gatewayUrlSource: ConfigSource
+  gatewayWsUrlSource: ConfigSource
+} {
+  const httpSelection = pickFirstLoopbackUrl(input.httpCandidates)
+  const gatewayUrl = httpSelection.value || DEFAULT_GATEWAY_HTTP_URL
+  const gatewayUrlSource = httpSelection.source || 'openclaw'
+
+  const sameSourceWs = input.wsCandidates.find((candidate) => (
+    candidate.source === gatewayUrlSource
+    && typeof candidate.value === 'string'
+    && isLoopbackUrl(candidate.value)
+  ))
+
+  if (sameSourceWs && sameSourceWs.value && areLoopbackEndpointsEquivalent(gatewayUrl, sameSourceWs.value)) {
+    return {
+      gatewayUrl,
+      gatewayWsUrl: sameSourceWs.value,
+      gatewayUrlSource,
+      gatewayWsUrlSource: gatewayUrlSource,
+    }
+  }
+
+  const derivedWsUrl = toWsUrl(gatewayUrl) || input.defaultWsUrl || DEFAULT_GATEWAY_WS_URL
+  return {
+    gatewayUrl,
+    gatewayWsUrl: derivedWsUrl,
+    gatewayUrlSource,
+    gatewayWsUrlSource: gatewayUrlSource,
+  }
 }
 
 function hasMeaningfulSettings(config: {
@@ -122,21 +195,23 @@ async function resolveConfig(): Promise<ResolvedOpenClawConfig | null> {
     return null
   }
 
-  const httpSelection = pickFirstLoopbackUrl([
-    { value: settingsGatewayUrl, source: 'settings' },
-    { value: envGatewayUrl, source: 'env' },
-    { value: discoveredGatewayUrl, source: 'openclaw' },
-  ])
-  const gatewayUrl = httpSelection.value || DEFAULT_GATEWAY_HTTP_URL
-  const gatewayUrlSource = httpSelection.source || 'openclaw'
-
-  const wsSelection = pickFirstLoopbackUrl([
-    { value: settingsGatewayWsUrl, source: 'settings' },
-    { value: envGatewayWsUrl, source: 'env' },
-    { value: discoveredGatewayWsUrl, source: 'openclaw' },
-  ])
-  const gatewayWsUrl = wsSelection.value || toWsUrl(gatewayUrl) || DEFAULT_GATEWAY_WS_URL
-  const gatewayWsUrlSource = wsSelection.source || gatewayUrlSource
+  const resolvedGateway = resolveGatewayPair({
+    httpCandidates: [
+      { value: settingsGatewayUrl, source: 'settings' },
+      { value: envGatewayUrl, source: 'env' },
+      { value: discoveredGatewayUrl, source: 'openclaw' },
+    ],
+    wsCandidates: [
+      { value: settingsGatewayWsUrl, source: 'settings' },
+      { value: envGatewayWsUrl, source: 'env' },
+      { value: discoveredGatewayWsUrl, source: 'openclaw' },
+    ],
+    defaultWsUrl: DEFAULT_GATEWAY_WS_URL,
+  })
+  const gatewayUrl = resolvedGateway.gatewayUrl
+  const gatewayUrlSource = resolvedGateway.gatewayUrlSource
+  const gatewayWsUrl = resolvedGateway.gatewayWsUrl
+  const gatewayWsUrlSource = resolvedGateway.gatewayWsUrlSource
 
   const token =
     settingsGatewayToken
@@ -259,19 +334,21 @@ export function getOpenClawConfigSync(): ResolvedOpenClawConfig | null {
     return null
   }
 
-  const httpSelection = pickFirstLoopbackUrl([
-    { value: settingsGatewayUrl, source: 'settings' },
-    { value: envGatewayUrl, source: 'env' },
-  ])
-  const gatewayUrl = httpSelection.value || DEFAULT_GATEWAY_HTTP_URL
-  const gatewayUrlSource = httpSelection.source || 'openclaw'
-
-  const wsSelection = pickFirstLoopbackUrl([
-    { value: settingsGatewayWsUrl, source: 'settings' },
-    { value: envGatewayWsUrl, source: 'env' },
-  ])
-  const gatewayWsUrl = wsSelection.value || toWsUrl(gatewayUrl)
-  const gatewayWsUrlSource = wsSelection.source || gatewayUrlSource
+  const resolvedGateway = resolveGatewayPair({
+    httpCandidates: [
+      { value: settingsGatewayUrl, source: 'settings' },
+      { value: envGatewayUrl, source: 'env' },
+    ],
+    wsCandidates: [
+      { value: settingsGatewayWsUrl, source: 'settings' },
+      { value: envGatewayWsUrl, source: 'env' },
+    ],
+    defaultWsUrl: DEFAULT_GATEWAY_WS_URL,
+  })
+  const gatewayUrl = resolvedGateway.gatewayUrl
+  const gatewayUrlSource = resolvedGateway.gatewayUrlSource
+  const gatewayWsUrl = resolvedGateway.gatewayWsUrl
+  const gatewayWsUrlSource = resolvedGateway.gatewayWsUrlSource
   const token = settingsGatewayToken || envGatewayToken || null
   const workspacePath = settingsWorkspace || envWorkspace || null
 

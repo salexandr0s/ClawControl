@@ -190,4 +190,38 @@ describe('OpenClaw discovery', () => {
     const alphaCount = (discovered?.agents ?? []).filter((agent) => agent.id === 'alpha').length
     expect(alphaCount).toBe(1)
   })
+
+  it('does not duplicate config inputs for .openclaw/.OpenClaw aliases', async () => {
+    await fsp.writeFile(
+      join(openClawDir, 'openclaw.json'),
+      JSON.stringify({
+        remote: {
+          url: 'http://127.0.0.1:16661',
+          token: 'alias-token',
+        },
+      })
+    )
+
+    const upperAlias = join(fakeHome, '.OpenClaw')
+    try {
+      await fsp.access(upperAlias)
+    } catch {
+      try {
+        await fsp.symlink(openClawDir, upperAlias)
+      } catch {
+        // Ignore environments where symlink creation is restricted.
+      }
+    }
+
+    const mod = await import('../../../packages/adapters-openclaw/src/discovery')
+    const discovered = await mod.discoverLocalConfig()
+
+    expect(discovered).not.toBeNull()
+    const configPaths = discovered?.configPaths ?? []
+    const normalizedUnique = new Set(configPaths.map((entry) => entry.toLowerCase()))
+    expect(configPaths.length).toBe(normalizedUnique.size)
+
+    const openclawJsonCount = configPaths.filter((entry) => /[\\/]openclaw\.json$/i.test(entry)).length
+    expect(openclawJsonCount).toBe(1)
+  })
 })

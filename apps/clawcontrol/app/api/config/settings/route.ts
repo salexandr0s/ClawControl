@@ -53,6 +53,42 @@ function isLoopbackUrl(value: string): boolean {
   }
 }
 
+type LoopbackEndpointIdentity = {
+  hostClass: 'ipv4' | 'ipv6'
+  port: number
+}
+
+function defaultPortForProtocol(protocol: string): number {
+  if (protocol === 'https:' || protocol === 'wss:') return 443
+  return 80
+}
+
+function loopbackEndpointIdentity(value: string): LoopbackEndpointIdentity | null {
+  try {
+    const parsed = new URL(value)
+    if (!isLoopbackHostname(parsed.hostname)) return null
+
+    const host = parsed.hostname.trim().toLowerCase()
+    const hostClass = host === '::1' || host === '[::1]' ? 'ipv6' : 'ipv4'
+
+    const explicitPort = Number(parsed.port)
+    const port = Number.isFinite(explicitPort) && explicitPort > 0
+      ? explicitPort
+      : defaultPortForProtocol(parsed.protocol)
+
+    return { hostClass, port }
+  } catch {
+    return null
+  }
+}
+
+function areGatewayEndpointsEquivalent(httpUrl: string, wsUrl: string): boolean {
+  const http = loopbackEndpointIdentity(httpUrl)
+  const ws = loopbackEndpointIdentity(wsUrl)
+  if (!http || !ws) return false
+  return http.hostClass === ws.hostClass && http.port === ws.port
+}
+
 async function applyRuntimeWorkspacePath(workspacePath: string | null | undefined): Promise<void> {
   const normalized = normalizeString(workspacePath)
 
@@ -201,6 +237,30 @@ export async function PUT(request: Request) {
         {
           error: 'Gateway WebSocket URL must use a loopback host (127.0.0.1, localhost, or ::1).',
           code: 'NON_LOOPBACK_FORBIDDEN',
+        },
+        { status: 400 }
+      )
+    }
+
+    const currentSettings = (await readSettings()).settings
+    const effectiveGatewayHttpUrl =
+      Object.prototype.hasOwnProperty.call(patch, 'gatewayHttpUrl')
+        ? (patch.gatewayHttpUrl as string | null)
+        : (currentSettings.gatewayHttpUrl ?? null)
+    const effectiveGatewayWsUrl =
+      Object.prototype.hasOwnProperty.call(patch, 'gatewayWsUrl')
+        ? (patch.gatewayWsUrl as string | null)
+        : (currentSettings.gatewayWsUrl ?? null)
+
+    if (
+      typeof effectiveGatewayHttpUrl === 'string'
+      && typeof effectiveGatewayWsUrl === 'string'
+      && !areGatewayEndpointsEquivalent(effectiveGatewayHttpUrl, effectiveGatewayWsUrl)
+    ) {
+      return NextResponse.json(
+        {
+          error: 'Gateway HTTP and WebSocket URLs must target the same loopback host class and port.',
+          code: 'GATEWAY_ENDPOINT_MISMATCH',
         },
         { status: 400 }
       )

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { isFirstRun } from '@/lib/first-run'
 import { syncAgentsFromOpenClaw } from '@/lib/sync-agents'
 import { getOpenClawConfig } from '@/lib/openclaw-client'
+import { reconcileActiveGovernanceProfiles } from '@/lib/services/governance-profiles'
 import { extractAgentIdFromSessionKey } from '@/lib/agent-identity'
 import { syncAgentSessions } from '@/lib/openclaw/sessions'
 import { withRouteTiming } from '@/lib/perf/route-timing'
@@ -278,6 +279,14 @@ export const GET = withRouteTiming('api.agents.get', async (request: NextRequest
           if (firstRun) {
             try {
               await syncAgentsFromOpenClaw({ forceRefresh: true })
+              try {
+                await reconcileActiveGovernanceProfiles({ apply: true })
+              } catch (reconcileErr) {
+                console.warn(
+                  '[api/agents] Governance reconciliation after first-run sync failed:',
+                  reconcileErr instanceof Error ? reconcileErr.message : String(reconcileErr)
+                )
+              }
               nextData = await repos.agents.list(filters)
             } catch (syncErr) {
               console.warn(

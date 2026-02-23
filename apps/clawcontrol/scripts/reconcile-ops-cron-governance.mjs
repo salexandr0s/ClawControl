@@ -10,12 +10,16 @@ const prisma = new PrismaClient({
 
 const GOVERNANCE_ACTIVE_PROFILES_KEY = 'governance.activeProfiles'
 const LEGACY_COMPANY_PROFILE_ID = 'clawcontrol-company-v1'
+const OPERATOR_GATE_WARNING = 'Operator-gated command: do not run from autonomous agents unless Alexandros explicitly requested it.'
 
 function usage() {
   console.log(`reconcile-ops-cron-governance
 
 Usage:
   node scripts/reconcile-ops-cron-governance.mjs [--dry-run] [--apply]
+
+Safety:
+  - ${OPERATOR_GATE_WARNING}
 
 Behavior:
   - Iterates governed teams and resolves each team's ops runtime agent.
@@ -438,6 +442,7 @@ async function ensurePoller({ existingJobs, apply, teamScope }) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
+  console.error(`[reconcile-ops-cron-governance] ${OPERATOR_GATE_WARNING}`)
   const jobs = await cronList()
   const scoped = await resolveGovernedTeams()
 

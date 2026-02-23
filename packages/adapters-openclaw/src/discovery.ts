@@ -52,9 +52,12 @@ const WORKSPACE_DIR_ORDER = ['openclaw', 'OpenClaw', 'moltbot', 'clawd'] as cons
 const DEFAULT_GATEWAY_HTTP_URL = 'http://127.0.0.1:18789'
 const DEFAULT_GATEWAY_WS_URL = 'ws://127.0.0.1:18789'
 
-function pathKey(input: string): string {
+function pathStringKey(input: string): string {
   const normalized = path.resolve(input)
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+  if (process.platform === 'win32' || process.platform === 'darwin') {
+    return normalized.toLowerCase()
+  }
+  return normalized
 }
 
 function toRecord(value: unknown): Record<string, unknown> | null {
@@ -187,6 +190,22 @@ async function getRealPath(targetPath: string): Promise<string> {
   }
 }
 
+async function pathIdentityKey(input: string): Promise<string> {
+  const resolved = path.resolve(input)
+  const real = await getRealPath(resolved)
+
+  try {
+    const stat = await fs.stat(real)
+    if (typeof stat.dev === 'number' && typeof stat.ino === 'number') {
+      return `devino:${stat.dev}:${stat.ino}`
+    }
+  } catch {
+    // Fall back to normalized string key when stat lookup fails.
+  }
+
+  return `path:${pathStringKey(real)}`
+}
+
 async function discoverConfigDirs(homeDir: string): Promise<string[]> {
   const dirs: string[] = []
   const seen = new Set<string>()
@@ -206,7 +225,7 @@ async function discoverConfigDirs(homeDir: string): Promise<string[]> {
       if (!stat.isDirectory()) continue
 
       const real = await getRealPath(candidate)
-      const key = pathKey(real)
+      const key = await pathIdentityKey(real)
       if (seen.has(key)) continue
 
       seen.add(key)
@@ -242,7 +261,7 @@ async function discoverConfigFiles(homeDir: string): Promise<ParsedConfigFile[]>
       if (!(await pathExists(filePath))) continue
 
       const real = await getRealPath(filePath)
-      const key = pathKey(real)
+      const key = await pathIdentityKey(real)
       if (seenFiles.has(key)) continue
 
       const parsed = await parseConfigFile(filePath, fileName)
@@ -432,7 +451,7 @@ async function discoverWorkspaceFallback(homeDir: string): Promise<string | null
     if (!stat.isDirectory()) continue
 
     const real = await getRealPath(candidate)
-    const key = pathKey(real)
+    const key = await pathIdentityKey(real)
     if (seen.has(key)) continue
 
     seen.add(key)

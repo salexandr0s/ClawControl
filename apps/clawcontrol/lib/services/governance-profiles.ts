@@ -52,12 +52,27 @@ function parseJsonArray(value: string | null | undefined): string[] {
   }
 }
 
-async function readActiveProfilesFromSetting(): Promise<string[]> {
+interface ActiveProfilesSettingState {
+  exists: boolean
+  profiles: string[]
+}
+
+async function readActiveProfilesFromSetting(): Promise<ActiveProfilesSettingState> {
   const row = await prisma.setting.findUnique({
     where: { key: GOVERNANCE_ACTIVE_PROFILES_KEY },
     select: { value: true },
   })
-  return parseJsonArray(row?.value)
+  if (!row) {
+    return {
+      exists: false,
+      profiles: [],
+    }
+  }
+
+  return {
+    exists: true,
+    profiles: parseJsonArray(row.value),
+  }
 }
 
 async function writeActiveProfilesToSetting(profileIds: string[]): Promise<void> {
@@ -74,12 +89,6 @@ async function writeActiveProfilesToSetting(profileIds: string[]): Promise<void>
 }
 
 async function detectLegacyCompanyLayout(): Promise<boolean> {
-  const team = await prisma.agentTeam.findFirst({
-    where: { slug: 'clawcontrol-team' },
-    select: { id: true },
-  })
-  if (!team) return false
-
   const runtimeIds = listCompanyTopologyEntries().map((entry) => entry.runtimeAgentId)
   const sessionKeys = runtimeIds.map((id) => `agent:${id}:${id}`)
   const rows = await prisma.agent.findMany({
@@ -111,13 +120,15 @@ async function detectLegacyCompanyLayout(): Promise<boolean> {
 
 export async function getActiveGovernanceProfiles(): Promise<string[]> {
   const existing = await readActiveProfilesFromSetting()
-  if (existing.length > 0) return existing
+  // Existing key (including explicit []) is treated as operator intent.
+  if (existing.exists) return existing.profiles
 
   const detectedLegacyLayout = await detectLegacyCompanyLayout()
   if (!detectedLegacyLayout) return []
 
   const migrated = [LEGACY_COMPANY_PROFILE_ID]
   await writeActiveProfilesToSetting(migrated)
+  console.info('[governance] Auto-activated legacy company profile from topology detection')
   return migrated
 }
 
@@ -209,4 +220,3 @@ export async function resolveActiveModelPolicy(): Promise<Record<string, string>
 export function getKnownTopologyEntry(runtimeAgentId: string): CompanyTopologyEntry | null {
   return findCompanyTopologyEntry(runtimeAgentId)
 }
-

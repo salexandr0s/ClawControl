@@ -13,8 +13,36 @@ const __dirname = path.dirname(__filename)
 const REPO_ROOT = path.resolve(__dirname, '..')
 const APP_DIR = path.join(REPO_ROOT, 'apps', 'clawcontrol')
 
-const WORKSPACE_ROOT = '/Users/savorgserver/OpenClaw'
-const DESKTOP_DB_PATH = '/Users/savorgserver/Library/Application Support/clawcontrol-desktop/clawcontrol.db'
+const DESKTOP_SETTINGS_PATH = '/Users/savorgserver/Library/Application Support/clawcontrol-desktop/settings.json'
+const DEFAULT_WORKSPACE_ROOT = '/Users/savorgserver/openclaw'
+const DEFAULT_DESKTOP_DB_PATH = '/Users/savorgserver/Library/Application Support/clawcontrol-desktop/clawcontrol.db'
+
+function normalizeOverridePath(value) {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? path.resolve(trimmed) : null
+}
+
+function readDesktopSettingsWorkspacePath() {
+  try {
+    if (!fs.existsSync(DESKTOP_SETTINGS_PATH)) return null
+    const raw = fs.readFileSync(DESKTOP_SETTINGS_PATH, 'utf8')
+    const parsed = JSON.parse(raw)
+    return normalizeOverridePath(parsed?.workspacePath)
+  } catch {
+    return null
+  }
+}
+
+const WORKSPACE_ROOT =
+  normalizeOverridePath(process.env.WORKFLOW_TEST_WORKSPACE_ROOT)
+  || readDesktopSettingsWorkspacePath()
+  || DEFAULT_WORKSPACE_ROOT
+
+const DESKTOP_DB_PATH =
+  normalizeOverridePath(process.env.WORKFLOW_TEST_DESKTOP_DB_PATH)
+  || DEFAULT_DESKTOP_DB_PATH
+
 const RESET_SQL_PATH = path.join(REPO_ROOT, 'scripts', 'reset-workorders-desktop.sql')
 const WORKFLOW_SOURCE_DIR = path.join(
   REPO_ROOT,
@@ -55,54 +83,63 @@ const EXPECTED_WORKFLOW_IDS = [
 
 const AGENT_SPECS = [
   {
+    runtimeAgentId: 'wf-research',
     displayName: 'wf-research',
     role: 'spec',
     purpose: 'Research stage specialist for deterministic workflow validation.',
     capabilities: ['research', 'analysis', 'spec'],
   },
   {
+    runtimeAgentId: 'wf-plan',
     displayName: 'wf-plan',
     role: 'spec',
     purpose: 'Planning stage specialist for deterministic workflow validation.',
     capabilities: ['plan', 'architecture', 'design'],
   },
   {
+    runtimeAgentId: 'wf-plan-review',
     displayName: 'wf-plan-review',
     role: 'qa',
     purpose: 'Plan review specialist for deterministic workflow validation.',
     capabilities: ['review', 'qa', 'audit', 'plan_review'],
   },
   {
+    runtimeAgentId: 'wf-build',
     displayName: 'wf-build',
     role: 'build',
     purpose: 'Build stage specialist for deterministic workflow validation.',
     capabilities: ['build', 'implementation', 'code', 'dev'],
   },
   {
+    runtimeAgentId: 'wf-build-review',
     displayName: 'wf-build-review',
     role: 'qa',
     purpose: 'Build review specialist for deterministic workflow validation.',
     capabilities: ['review', 'qa', 'audit', 'build_review'],
   },
   {
+    runtimeAgentId: 'wf-ui',
     displayName: 'wf-ui',
     role: 'build',
     purpose: 'UI stage specialist for deterministic workflow validation.',
     capabilities: ['ui', 'frontend', 'ux'],
   },
   {
+    runtimeAgentId: 'wf-ui-review',
     displayName: 'wf-ui-review',
     role: 'qa',
     purpose: 'UI review specialist for deterministic workflow validation.',
     capabilities: ['review', 'qa', 'ui_review', 'a11y'],
   },
   {
+    runtimeAgentId: 'wf-ops',
     displayName: 'wf-ops',
     role: 'ops',
     purpose: 'Ops stage specialist for deterministic workflow validation.',
     capabilities: ['ops', 'infra', 'deploy', 'sre'],
   },
   {
+    runtimeAgentId: 'wf-security',
     displayName: 'wf-security',
     role: 'qa',
     purpose: 'Security stage specialist for deterministic workflow validation.',
@@ -928,16 +965,41 @@ function buildMarkdownReport(report) {
   return `${lines.join('\n')}\n`
 }
 
+function normalizeAgentIdentity(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function findExistingAgent(agents, spec) {
+  const targetRuntimeAgentId = normalizeAgentIdentity(spec.runtimeAgentId || spec.displayName)
+  const targetSlug = normalizeAgentIdentity(spec.slug || spec.displayName)
+  const targetDisplayName = normalizeAgentIdentity(spec.displayName)
+  const targetName = normalizeAgentIdentity(spec.name || spec.displayName)
+
+  return agents.find((agent) => {
+    const runtimeAgentId = normalizeAgentIdentity(agent.runtimeAgentId ?? agent.runtime_agent_id)
+    const slug = normalizeAgentIdentity(agent.slug)
+    const displayName = normalizeAgentIdentity(agent.displayName ?? agent.display_name)
+    const name = normalizeAgentIdentity(agent.name)
+
+    return (
+      (targetRuntimeAgentId && runtimeAgentId === targetRuntimeAgentId)
+      || (targetSlug && slug === targetSlug)
+      || (targetDisplayName && displayName === targetDisplayName)
+      || (targetName && name === targetName)
+    )
+  })
+}
+
+function isAgentExistsConflict(error) {
+  const message = describeRequestError(error).toUpperCase()
+  return message.includes('AGENT_EXISTS') || message.includes('HTTP 409 FOR /API/AGENTS/CREATE')
+}
+
 async function ensureAgentExists(spec) {
   const listResponse = await requestJson('/api/agents?includeSessionOverlay=0&syncSessions=0&includeModelOverlay=0&cacheTtlMs=0')
   const agents = Array.isArray(listResponse?.data) ? listResponse.data : []
 
-  const existing = agents.find((agent) => {
-    const displayName = String(agent.displayName ?? agent.name ?? '').toLowerCase()
-    const slug = String(agent.slug ?? '').toLowerCase()
-    const target = spec.displayName.toLowerCase()
-    return displayName === target || slug === target
-  })
+  const existing = findExistingAgent(agents, spec)
 
   if (existing) {
     return { created: false, agent: existing }
@@ -951,28 +1013,31 @@ async function ensureAgentExists(spec) {
     typedConfirmText: 'CONFIRM',
   }
 
-  await requestJson('/api/agents/create', {
-    method: 'POST',
-    body: payload,
-    operator: true,
-    timeoutMs: 45_000,
-  })
+  let created = true
+  try {
+    await requestJson('/api/agents/create', {
+      method: 'POST',
+      body: payload,
+      operator: true,
+      timeoutMs: 45_000,
+    })
+  } catch (error) {
+    if (!isAgentExistsConflict(error)) {
+      throw error
+    }
+    created = false
+  }
 
   const refreshed = await requestJson('/api/agents?includeSessionOverlay=0&syncSessions=0&includeModelOverlay=0&cacheTtlMs=0')
   const refreshedAgents = Array.isArray(refreshed?.data) ? refreshed.data : []
 
-  const createdAgent = refreshedAgents.find((agent) => {
-    const displayName = String(agent.displayName ?? agent.name ?? '').toLowerCase()
-    const slug = String(agent.slug ?? '').toLowerCase()
-    const target = spec.displayName.toLowerCase()
-    return displayName === target || slug === target
-  })
+  const createdAgent = findExistingAgent(refreshedAgents, spec)
 
   if (!createdAgent) {
     throw new Error(`Agent creation did not produce expected agent: ${spec.displayName}`)
   }
 
-  return { created: true, agent: createdAgent }
+  return { created, agent: createdAgent }
 }
 
 async function runScenario(scenario, workflowDefinition, runtime = {}) {
@@ -1241,20 +1306,23 @@ async function runScenario(scenario, workflowDefinition, runtime = {}) {
       }
       const operations = Array.isArray(operationsResponse?.data) ? operationsResponse.data : []
 
-      const inProgress = operations
-        .filter((operation) => operation.status === 'in_progress')
+      const actionable = operations
+        .filter((operation) => {
+          const status = String(operation.status ?? '')
+          return status === 'in_progress' || status === 'review'
+        })
         .sort((left, right) => {
           const leftTs = Date.parse(left.updatedAt ?? left.createdAt ?? '') || 0
           const rightTs = Date.parse(right.updatedAt ?? right.createdAt ?? '') || 0
           return rightTs - leftTs
         })
 
-      if (inProgress.length === 0) {
+      if (actionable.length === 0) {
         await sleep(500)
         continue
       }
 
-      const operation = inProgress[0]
+      const operation = actionable[0]
       const stage = stageMap.get(Number(operation.workflowStageIndex))
 
       const completion = chooseCompletionPayload({
@@ -1291,7 +1359,7 @@ async function runScenario(scenario, workflowDefinition, runtime = {}) {
 
         await recoverServer(workflowId, 'send_completion')
         const operationStatus = sqlScalar(`SELECT status FROM operations WHERE id='${escapeSql(operation.id)}'`)
-        if (operationStatus === 'in_progress') {
+        if (operationStatus === 'in_progress' || operationStatus === 'review') {
           await requestJson('/api/agents/completion', {
             method: 'POST',
             internal: true,

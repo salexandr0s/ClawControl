@@ -117,6 +117,52 @@ describe('config settings route', () => {
     expect(mocks.writeSettings).not.toHaveBeenCalled()
   })
 
+  it('rejects mismatched loopback HTTP/WS endpoint pairs on PUT', async () => {
+    const route = await import('@/app/api/config/settings/route')
+
+    const request = new NextRequest('http://localhost/api/config/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gatewayHttpUrl: 'http://127.0.0.1:18789',
+        gatewayWsUrl: 'ws://127.0.0.1:28888',
+      }),
+    })
+
+    const response = await route.PUT(request)
+    const payload = (await response.json()) as { code?: string; error?: string }
+
+    expect(response.status).toBe(400)
+    expect(payload.code).toBe('GATEWAY_ENDPOINT_MISMATCH')
+    expect(payload.error).toContain('same loopback')
+    expect(mocks.writeSettings).not.toHaveBeenCalled()
+  })
+
+  it('rejects mismatch against existing saved HTTP URL when only WS is patched', async () => {
+    mocks.readSettings.mockResolvedValue(
+      baseSettings({
+        gatewayHttpUrl: 'http://127.0.0.1:18789',
+      })
+    )
+
+    const route = await import('@/app/api/config/settings/route')
+
+    const request = new NextRequest('http://localhost/api/config/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gatewayWsUrl: 'ws://127.0.0.1:28888',
+      }),
+    })
+
+    const response = await route.PUT(request)
+    const payload = (await response.json()) as { code?: string; error?: string }
+
+    expect(response.status).toBe(400)
+    expect(payload.code).toBe('GATEWAY_ENDPOINT_MISMATCH')
+    expect(mocks.writeSettings).not.toHaveBeenCalled()
+  })
+
   it('accepts loopback gateway URL and remoteAccessMode updates on PUT', async () => {
     const updated = baseSettings({
       remoteAccessMode: 'tailscale_tunnel',

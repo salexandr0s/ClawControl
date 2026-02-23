@@ -10,6 +10,7 @@ import { assertValidTeamHierarchy } from '@/lib/services/team-hierarchy'
 import { assertValidTeamGovernance } from '@/lib/services/team-governance'
 import { getResolverStageRefs } from '@/lib/services/agent-resolution'
 import {
+  MODEL_POLICY,
   buildTemplateBaselineCapabilities,
   companyRuntimeAgentIds,
   listCompanyTopologyEntries,
@@ -36,6 +37,22 @@ type AgentRow = {
 }
 
 type TeamHealthStatus = 'healthy' | 'warning' | 'degraded' | 'unknown'
+
+const STARTER_TEAM_RELATIVE_PATH = [
+  'starter-packs',
+  'clawcontrol-starter-pack',
+  'input',
+  'teams',
+  'clawcontrol-team.yaml',
+] as const
+
+const FALLBACK_WORKFLOW_IDS = [
+  'cc_greenfield_project',
+  'cc_bug_fix',
+  'cc_content_creation',
+  'cc_security_audit',
+  'cc_ops_change',
+] as const
 
 interface StarterTeamDefinition {
   id: string
@@ -145,21 +162,102 @@ function maybeSet<T>(patch: Record<string, unknown>, key: string, current: T, de
 }
 
 function starterTeamCandidatePaths(): string[] {
-  const rel = ['starter-packs', 'clawcontrol-starter-pack', 'input', 'teams', 'clawcontrol-team.yaml']
-  const cwd = process.cwd()
-  const roots = [
-    cwd,
-    resolve(cwd, '..'),
-    resolve(cwd, '../..'),
-    resolve(cwd, '../../..'),
-  ]
-  return roots.map((root) => join(root, ...rel))
+  const explicitPath = asString(process.env.CLAWCONTROL_STARTER_TEAM_PATH)
+  if (explicitPath) return [resolve(explicitPath)]
+
+  const candidates: string[] = []
+  const seen = new Set<string>()
+  let current = resolve(process.cwd())
+
+  // Walk up enough levels to cover standalone and desktop runtime cwd layouts.
+  for (let i = 0; i < 12; i += 1) {
+    const candidate = join(current, ...STARTER_TEAM_RELATIVE_PATH)
+    if (!seen.has(candidate)) {
+      seen.add(candidate)
+      candidates.push(candidate)
+    }
+
+    const parent = resolve(current, '..')
+    if (parent === current) break
+    current = parent
+  }
+
+  return candidates
+}
+
+function buildFallbackStarterTeamDefinition(): StarterTeamDefinition {
+  const templateIds = normalizeIdArray(
+    listCompanyTopologyEntries().map((entry) => entry.templateId)
+  )
+  const managerTemplateId = 'manager'
+  const members: TeamHierarchyConfig['members'] = {}
+  const specialistTemplateIds = templateIds.filter((templateId) => templateId !== managerTemplateId)
+
+  for (const templateId of templateIds) {
+    if (templateId === managerTemplateId) {
+      members[templateId] = {
+        reportsTo: null,
+        delegatesTo: [...specialistTemplateIds],
+        receivesFrom: [...specialistTemplateIds],
+        canMessage: [...specialistTemplateIds],
+        capabilities: {
+          canDelegate: true,
+          canSendMessages: true,
+        },
+      }
+      continue
+    }
+
+    members[templateId] = {
+      reportsTo: managerTemplateId,
+      delegatesTo: [],
+      receivesFrom: [managerTemplateId],
+      canMessage: [managerTemplateId],
+      capabilities: {
+        canDelegate: false,
+        canSendMessages: true,
+      },
+    }
+  }
+
+  return {
+    id: 'clawcontrol-team',
+    slug: 'clawcontrol-team',
+    name: 'ClawControl Team',
+    description: 'Core specialist templates + editable ClawControl workflows + selection overlay. Uses your existing OpenClaw main agent as CEO.',
+    source: 'imported',
+    workflowIds: [...FALLBACK_WORKFLOW_IDS],
+    templateIds,
+    hierarchy: {
+      version: 1,
+      members,
+    },
+    governance: {
+      orchestratorTemplateId: 'manager',
+      agentIdentityMode: 'legacy_global',
+      ops: {
+        templateId: 'ops',
+        relayMode: 'decision_only',
+        relayTargetSessionKey: 'agent:main:main',
+        pollerEnabled: true,
+        pollIntervalCron: '*/15 * * * *',
+        timezone: 'Europe/Zurich',
+      },
+      modelPolicy: {
+        main: MODEL_POLICY.main,
+        'wf-ops': MODEL_POLICY['wf-ops'],
+      },
+    },
+    healthStatus: 'healthy',
+  }
 }
 
 async function loadStarterTeamDefinition(): Promise<StarterTeamDefinition> {
   let rawYaml: string | null = null
+  const attemptedPaths: string[] = []
 
   for (const candidate of starterTeamCandidatePaths()) {
+    attemptedPaths.push(candidate)
     try {
       rawYaml = await readFile(candidate, 'utf8')
       break
@@ -169,7 +267,11 @@ async function loadStarterTeamDefinition(): Promise<StarterTeamDefinition> {
   }
 
   if (!rawYaml) {
-    throw new Error('Starter team definition not found (clawcontrol-team.yaml)')
+    console.warn(
+      '[governance] Starter team definition not found (clawcontrol-team.yaml); using built-in fallback.',
+      { attemptedPaths }
+    )
+    return buildFallbackStarterTeamDefinition()
   }
 
   const parsed = yaml.load(rawYaml)
