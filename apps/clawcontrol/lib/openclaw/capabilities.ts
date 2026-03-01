@@ -37,6 +37,22 @@ export interface PluginCapabilities {
   setConfig: boolean
 }
 
+export interface AgentBindingsCapabilities {
+  /** Whether the agents bindings subcommand exists */
+  supported: boolean
+  /** Whether `openclaw agents bind` works */
+  bind: boolean
+  /** Whether `openclaw agents unbind` works */
+  unbind: boolean
+}
+
+export interface SecretsCapabilities {
+  /** Whether the secrets subcommand exists */
+  supported: boolean
+  /** Whether `openclaw secrets list --json` works */
+  listJson: boolean
+}
+
 export interface SourceCapabilities {
   /** Whether CLI is available on PATH */
   cli: boolean
@@ -53,6 +69,10 @@ export interface OpenClawCapabilities {
   resolvedBin: string
   /** Plugin-related capabilities */
   plugins: PluginCapabilities
+  /** Agent bindings capabilities (OpenClaw v2026.2.26+) */
+  agentBindings: AgentBindingsCapabilities
+  /** Secrets management capabilities (OpenClaw v2026.2.26+) */
+  secrets: SecretsCapabilities
   /** Data source capabilities */
   sources: SourceCapabilities
   /** When capabilities were last probed */
@@ -223,6 +243,8 @@ export async function getOpenClawCapabilities(): Promise<OpenClawCapabilities> {
       uninstall: false,
       setConfig: false,
     },
+    agentBindings: { supported: false, bind: false, unbind: false },
+    secrets: { supported: false, listJson: false },
     sources: {
       cli: false,
       http: false, // Future: detect HTTP API availability
@@ -285,6 +307,27 @@ export async function getOpenClawCapabilities(): Promise<OpenClawCapabilities> {
       'Plugin commands not supported by this OpenClaw version.'
   }
 
+  // Probe agent bindings and secrets subcommands in parallel
+  const [agentBindingsSupported, secretsSupported] = await Promise.all([
+    probeSubcommand(['agents', 'bindings']),
+    probeSubcommand(['secrets']),
+  ])
+
+  capabilities.agentBindings.supported = agentBindingsSupported
+  if (agentBindingsSupported) {
+    const [bind, unbind] = await Promise.all([
+      probeSubcommand(['agents', 'bind']),
+      probeSubcommand(['agents', 'unbind']),
+    ])
+    capabilities.agentBindings.bind = bind
+    capabilities.agentBindings.unbind = unbind
+  }
+
+  capabilities.secrets.supported = secretsSupported
+  if (secretsSupported) {
+    capabilities.secrets.listJson = await probeJsonSupport(['secrets', 'list'])
+  }
+
   // Cache and log
   cacheCapabilities(capabilities)
 
@@ -293,6 +336,8 @@ export async function getOpenClawCapabilities(): Promise<OpenClawCapabilities> {
     console.log('[OpenClaw] Capabilities detected:', {
       version: capabilities.version,
       plugins: capabilities.plugins,
+      agentBindings: capabilities.agentBindings,
+      secrets: capabilities.secrets,
       sources: capabilities.sources,
       degradedReason: capabilities.degradedReason,
     })
@@ -319,6 +364,22 @@ export async function hasPluginCapability(
 ): Promise<boolean> {
   const caps = await getOpenClawCapabilities()
   return caps.plugins[capability]
+}
+
+/**
+ * Check if agent bindings capability is available
+ */
+export async function hasAgentBindingsCapability(): Promise<boolean> {
+  const caps = await getOpenClawCapabilities()
+  return caps.agentBindings.supported
+}
+
+/**
+ * Check if secrets management capability is available
+ */
+export async function hasSecretsCapability(): Promise<boolean> {
+  const caps = await getOpenClawCapabilities()
+  return caps.secrets.supported
 }
 
 /**

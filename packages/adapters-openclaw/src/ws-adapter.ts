@@ -101,6 +101,10 @@ export class WsAdapter implements OpenClawWsAdapter {
   private pendingRequests = new Map<string, PendingRequest>()
   private requestIdCounter = 0
 
+  // Stable instance identifier — survives reconnects so the gateway
+  // can pin pairing metadata across WS sessions (OpenClaw v2026.2.26+).
+  private readonly instanceId = randomUUID().slice(0, 8)
+
   // Event listeners
   private chatEventListeners = new Map<string, Set<(event: ChatEvent) => void>>()
   private globalEventListeners = new Set<(event: unknown) => void>()
@@ -290,7 +294,7 @@ export class WsAdapter implements OpenClawWsAdapter {
         version: CLIENT_VERSION,
         platform: CLIENT_PLATFORM,
         mode: this.clientMode,
-        instanceId: randomUUID().slice(0, 8),
+        instanceId: this.instanceId,
       },
       role,
       scopes,
@@ -691,6 +695,7 @@ export class WsAdapter implements OpenClawWsAdapter {
       const result = await this.request<{ output?: string; exitCode?: number }>('command.run', {
         templateId,
         args,
+        commandArgv: [templateId, ...Object.entries(args).flatMap(([k, v]) => [`--${k}`, String(v)])],
       })
 
       if (result.output) {

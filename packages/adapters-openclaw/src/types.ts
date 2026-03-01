@@ -493,6 +493,12 @@ export interface SessionEntry {
   outputTokens?: number
   totalTokens?: number
   label?: string
+  /** Inactivity-based idle timeout in hours (OpenClaw v2026.2.27+) */
+  idleHours?: number
+  /** Maximum session age in hours (OpenClaw v2026.2.27+) */
+  maxAgeHours?: number
+  /** Thread lifecycle state (OpenClaw v2026.2.27+) */
+  threadState?: 'active' | 'idle' | 'expired'
 }
 
 /**

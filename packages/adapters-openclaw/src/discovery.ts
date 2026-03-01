@@ -20,6 +20,14 @@ export interface DiscoveredAgent {
   model?: string
   fallbacks?: string[]
   agentDir?: string
+  /** Whether this agent is ACP thread-bound (OpenClaw v2026.2.26+) */
+  threadBound?: boolean
+  /** Agent runtime type: 'acp' or 'standard' (OpenClaw v2026.2.26+) */
+  runtimeType?: string
+  /** Inactivity-based idle timeout in hours (OpenClaw v2026.2.26+) */
+  idleHours?: number
+  /** Maximum agent age in hours (OpenClaw v2026.2.26+) */
+  maxAgeHours?: number
 }
 
 export type GatewayProbeState = 'reachable' | 'auth_required' | 'unreachable'
@@ -386,12 +394,26 @@ function extractAgents(config: Record<string, unknown>): DiscoveredAgent[] {
     const model = extractModelPrimary(agent?.model)
     const fallbacks = extractModelFallbacks(agent?.model)
 
+    // ACP lifecycle fields (OpenClaw v2026.2.26+)
+    const threadBound = agent?.threadBound === true || agent?.thread_bound === true
+    const runtimeType = asString(agent?.runtimeType) || asString(agent?.runtime_type)
+    const idleHoursVal = typeof agent?.idleHours === 'number' ? agent.idleHours
+      : typeof agent?.idle_hours === 'number' ? agent.idle_hours
+      : undefined
+    const maxAgeHoursVal = typeof agent?.maxAgeHours === 'number' ? agent.maxAgeHours
+      : typeof agent?.max_age_hours === 'number' ? agent.max_age_hours
+      : undefined
+
     out.push({
       id,
       ...(identity ? { identity } : {}),
       ...(model ? { model } : {}),
       ...(fallbacks ? { fallbacks } : {}),
       ...(asString(agent?.agentDir) ? { agentDir: asString(agent?.agentDir) } : {}),
+      ...(threadBound ? { threadBound } : {}),
+      ...(runtimeType ? { runtimeType } : {}),
+      ...(idleHoursVal !== undefined ? { idleHours: idleHoursVal } : {}),
+      ...(maxAgeHoursVal !== undefined ? { maxAgeHours: maxAgeHoursVal } : {}),
     })
   }
 

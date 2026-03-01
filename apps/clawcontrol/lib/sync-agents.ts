@@ -30,6 +30,14 @@ interface OpenClawAgentConfig {
   name?: string
   model?: string
   fallbacks?: string[]
+  /** Whether this agent is ACP thread-bound (OpenClaw v2026.2.26+) */
+  threadBound?: boolean
+  /** Agent runtime type: 'acp' | 'standard' (OpenClaw v2026.2.26+) */
+  runtimeType?: string
+  /** Inactivity-based idle timeout in hours (OpenClaw v2026.2.26+) */
+  idleHours?: number
+  /** Maximum agent age in hours (OpenClaw v2026.2.26+) */
+  maxAgeHours?: number
 }
 
 function inferDisplayName(agent: OpenClawAgentConfig): string {
@@ -91,11 +99,24 @@ function normalizeAgentRecord(input: unknown): OpenClawAgentConfig | null {
 
   const modelConfig = extractModel(record.model)
 
+  // ACP lifecycle fields (OpenClaw v2026.2.26+)
+  const threadBound = record.threadBound === true || record.thread_bound === true
+  const runtimeType =
+    asString(record.runtimeType) || asString(record.runtime_type)
+  const idleHoursRaw = record.idleHours ?? record.idle_hours
+  const idleHoursVal = typeof idleHoursRaw === 'number' ? idleHoursRaw : undefined
+  const maxAgeHoursRaw = record.maxAgeHours ?? record.max_age_hours
+  const maxAgeHoursVal = typeof maxAgeHoursRaw === 'number' ? maxAgeHoursRaw : undefined
+
   return {
     id,
     ...(identity ? { identity } : {}),
     ...(modelConfig.model ? { model: modelConfig.model } : {}),
     ...(modelConfig.fallbacks !== undefined ? { fallbacks: modelConfig.fallbacks } : {}),
+    ...(threadBound ? { threadBound } : {}),
+    ...(runtimeType ? { runtimeType } : {}),
+    ...(idleHoursVal !== undefined ? { idleHours: idleHoursVal } : {}),
+    ...(maxAgeHoursVal !== undefined ? { maxAgeHours: maxAgeHoursVal } : {}),
   }
 }
 
@@ -222,10 +243,20 @@ export async function syncAgentsFromOpenClaw(
         }
       : null
 
+    // Build ACP lifecycle metadata when present (OpenClaw v2026.2.26+)
+    const acpLifecycle = {
+      ...(agent.threadBound ? { threadBound: agent.threadBound } : {}),
+      ...(agent.runtimeType ? { runtimeType: agent.runtimeType } : {}),
+      ...(agent.idleHours !== undefined ? { idleHours: agent.idleHours } : {}),
+      ...(agent.maxAgeHours !== undefined ? { maxAgeHours: agent.maxAgeHours } : {}),
+    }
+    const hasAcpFields = Object.keys(acpLifecycle).length > 0
+
     if (!existing) {
       const workerStation = createTopologyEntry?.station ?? defaultStationId
       const workerCapabilities = topologyCapabilities ?? { [workerStation]: true }
       const resolvedModel = ownedTopologyEntry?.enforceModel ?? agent.model
+      const baseCapabilities = mainAgentPatch?.capabilities ?? workerCapabilities
 
       await repos.agents.create({
         name,
@@ -240,7 +271,7 @@ export async function syncAgentsFromOpenClaw(
         ...(ownedTopologyEntry && topologyOwnership.canonicalTeamId ? { teamId: topologyOwnership.canonicalTeamId } : {}),
         ...(ownedTopologyEntry ? { templateId: ownedTopologyEntry.templateId } : {}),
         sessionKey,
-        capabilities: mainAgentPatch?.capabilities ?? workerCapabilities,
+        capabilities: hasAcpFields ? { ...baseCapabilities, ...acpLifecycle } : baseCapabilities,
         wipLimit: inferDefaultAgentWipLimit({
           id: agent.id,
           name,
@@ -324,6 +355,12 @@ export async function syncAgentsFromOpenClaw(
       const resolvedModel = ownedTopologyEntry?.enforceModel ?? agent.model
       if (resolvedModel) patch.model = resolvedModel
       if (fallbacks !== undefined) patch.fallbacks = JSON.stringify(fallbacks)
+
+      // Merge ACP lifecycle fields into capabilities (OpenClaw v2026.2.26+)
+      if (hasAcpFields) {
+        const currentCaps = (patch.capabilities ?? existingCapabilities ?? {}) as Record<string, unknown>
+        patch.capabilities = { ...currentCaps, ...acpLifecycle }
+      }
 
       await repos.agents.update(existing.id, patch)
       updated++

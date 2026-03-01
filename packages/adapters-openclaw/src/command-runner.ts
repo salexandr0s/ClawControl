@@ -88,6 +88,12 @@ export const ALLOWED_COMMANDS = {
   'plugins.disable': { args: ['plugins', 'disable'], danger: true, description: 'Disable a plugin' },
   'plugins.config': { args: ['plugins', 'config'], danger: true, description: 'Configure a plugin' },
 
+  // Agent Bindings (OpenClaw v2026.2.26+)
+  'agents.bindings.json': { args: ['agents', 'bindings', '--json'], danger: false, description: 'List agent bindings' },
+
+  // Secrets Management (OpenClaw v2026.2.26+)
+  'secrets.list.json': { args: ['secrets', 'list', '--json'], danger: false, description: 'List external secrets' },
+
   // Models Management
   'models.list.json': { args: ['models', 'list', '--json'], danger: false, description: 'List configured models (JSON output)' },
   'models.list.all.json': { args: ['models', 'list', '--all', '--json'], danger: false, description: 'List all available models (JSON output)' },
@@ -723,6 +729,28 @@ export const ALLOWED_DYNAMIC_COMMANDS = {
     description: 'Install a plugin from local path/archive or npm spec',
     paramValidators: {
       spec: noNewlines(1024),
+    },
+  },
+  'agents.bind': {
+    baseArgs: ['agents', 'bind'],
+    requiredParams: ['agent', 'binding'] as const,
+    positionalParams: ['agent', 'binding'] as const,
+    danger: true,
+    description: 'Bind an agent to a binding (requires <agent> <binding>)',
+    paramValidators: {
+      agent: defaultParamValidator,
+      binding: defaultParamValidator,
+    },
+  },
+  'agents.unbind': {
+    baseArgs: ['agents', 'unbind'],
+    requiredParams: ['agent', 'binding'] as const,
+    positionalParams: ['agent', 'binding'] as const,
+    danger: true,
+    description: 'Unbind an agent from a binding (requires <agent> <binding>)',
+    paramValidators: {
+      agent: defaultParamValidator,
+      binding: defaultParamValidator,
     },
   },
   'models.auth.paste-token': {
