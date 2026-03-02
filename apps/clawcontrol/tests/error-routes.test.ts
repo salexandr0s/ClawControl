@@ -77,7 +77,7 @@ beforeEach(() => {
     },
     topSignatures: [
       {
-        signatureHash: 'a'.repeat(40),
+        signatureHash: 'a'.repeat(64),
         signatureText: 'Config warning signature',
         count: '8',
         windowCount: '8',
@@ -113,7 +113,7 @@ beforeEach(() => {
     days: 14,
     signatures: [
       {
-        signatureHash: 'a'.repeat(40),
+        signatureHash: 'a'.repeat(64),
         signatureText: 'Config warning signature',
         count: '8',
         windowCount: '8',
@@ -268,11 +268,11 @@ describe('error routes', () => {
     expect(payload.code).toBe('ERROR_ANALYTICS_SCHEMA_OUTDATED')
     expect(payload.warning).toContain('db:migrate')
     expect(payload.data.signatures).toHaveLength(1)
-    expect(payload.data.signatures[0]?.signatureHash).toBe('a'.repeat(40))
+    expect(payload.data.signatures[0]?.signatureHash).toBe('a'.repeat(64))
   })
 
   it('supports remediation create-only and create+start flows', async () => {
-    const hash = 'a'.repeat(40)
+    const hash = 'a'.repeat(64)
     mocks.createErrorRemediationWorkOrder
       .mockResolvedValueOnce({
         workOrderId: 'wo_1',
@@ -329,7 +329,7 @@ describe('error routes', () => {
   })
 
   it('returns structured response when auto-start dispatch fails after work order creation', async () => {
-    const hash = 'b'.repeat(40)
+    const hash = 'b'.repeat(64)
     mocks.createErrorRemediationWorkOrder.mockResolvedValueOnce({
       workOrderId: 'wo_3',
       code: 'WO-0003',

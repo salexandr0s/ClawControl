@@ -68,6 +68,7 @@ export const ALLOWED_COMMANDS = {
   // Config reads (local-only)
   'config.agents.list.json': { args: ['config', 'get', 'agents.list', '--json'], danger: false, description: 'Read configured agents.list (JSON)' },
   'config.gateway.json': { args: ['config', 'get', 'gateway', '--json'], danger: false, description: 'Read gateway config (JSON)' },
+  'config.file': { args: ['config', 'file'], danger: false, description: 'Show active config file path' },
 
   // Gateway Discovery (documented at docs.openclaw.ai/cli/gateway)
   'gateway.discover': { args: ['gateway', 'discover', '--json'], danger: false, description: 'Scan for gateways on network' },
@@ -671,7 +672,7 @@ export const ALLOWED_DYNAMIC_COMMANDS = {
       'system-event': noNewlines(8000),
       message: noNewlines(2000),
       model: noNewlines(256),
-      thinking: (v) => ['off', 'minimal', 'low', 'medium', 'high'].includes(v),
+      thinking: (v) => ['off', 'minimal', 'low', 'medium', 'high', 'adaptive'].includes(v),
       'timeout-seconds': (v) => /^[1-9][0-9]{0,4}$/.test(v),
       announce: (v) => v === 'true' || v === 'false',
       'no-deliver': (v) => v === 'true' || v === 'false',

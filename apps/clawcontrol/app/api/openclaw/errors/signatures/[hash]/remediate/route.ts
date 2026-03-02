@@ -11,7 +11,7 @@ interface RemediationBody {
 }
 
 function isValidSignatureHash(hash: string): boolean {
-  return /^[a-f0-9]{40}$/i.test(hash)
+  return /^[a-f0-9]{64}$/i.test(hash)
 }
 
 export async function POST(request: Request, context: RouteContext) {
