@@ -24,9 +24,13 @@ Both **ClawControl** and **Paperclip** are AI agent orchestration platforms, but
 | **Goal Alignment** | Work Order priorities (P0-P3) | Goals → Projects → Issues traceability chain | **Paperclip** |
 | **Desktop App** | Electron wrapper | None (web-only) | **ClawControl** |
 | **Workflow Engine** | YAML-defined multi-stage workflows | N/A (simpler task routing) | **ClawControl** |
-| **Plugin/Skill Marketplace** | ClawHub integration, plugin system | None | **ClawControl** |
+| **Plugin/Skill Marketplace** | ClawHub integration, full plugin system | Basic skills directory, no marketplace | **ClawControl** |
 | **Real-time Monitoring** | WebSocket + SSE (activities, receipts, OpenClaw events) | WebSocket live events | **ClawControl** |
-| **Security Scanning** | Artifact scanning, path safety, allowlists | None apparent | **ClawControl** |
+| **Security Scanning** | Artifact scanning, path safety, allowlists | Redaction of sensitive keys, hostname allowlists | **ClawControl** |
+| **Storage Backends** | Local filesystem only | Local disk + Amazon S3 | **Paperclip** |
+| **Agent Locking** | Claim/timeout mechanics | Issue checkout/release with stale task detection (>60min) | **Tie** |
+| **Data Redaction** | None | Automatic redaction of API keys, passwords, JWTs in audit trails | **Paperclip** |
+| **LLM Self-Config Docs** | None | `/llms/*.txt` machine-readable endpoints for agent self-configuration | **Paperclip** |
 | **CLI Tool** | None (web/desktop UI only) | Dedicated CLI (`npx paperclipai onboard`) | **Paperclip** |
 | **Heartbeat/Scheduling** | Cron jobs with UI management | Heartbeats with scheduled + event-triggered wakeups | **Paperclip** |
 | **Deployment** | Local-first, Docker, Electron | Docker Compose, PostgreSQL, cloud-ready | **Paperclip** |
@@ -72,20 +76,20 @@ Both **ClawControl** and **Paperclip** are AI agent orchestration platforms, but
 ---
 
 #### 2.4 Secrets Management
-**What Paperclip does:** Provider-based secrets management with local encrypted storage and external provider stubs. Secrets are versioned (`company_secret_versions`), scoped to companies, and managed through a dedicated API.
+**What Paperclip does:** Provider-based secrets management with local encrypted storage (`local_encrypted` default) and external provider stubs. Secrets are versioned (`company_secret_versions`) with SHA256 integrity tracking, scoped to companies, and managed through a dedicated API. Features strict mode enforcement for sensitive keys (API keys, tokens, passwords) using regex-based detection. Environment variables can be bound to secrets or plain values.
 
 **Why it matters:** ClawControl relies on environment variables for secrets, which is insecure for multi-agent environments where different agents need different API keys. There's no encryption, no rotation, no audit trail for secret access.
 
-**Recommendation:** Implement a secrets provider system. Start with a local encrypted provider (AES-256-GCM). Add a secrets management page in settings. Support per-agent secret scoping. Log secret access in the activity trail.
+**Recommendation:** Implement a secrets provider system. Start with a local encrypted provider (AES-256-GCM). Add a secrets management page in settings. Support per-agent secret scoping. Log secret access in the activity trail. Add strict mode for sensitive key patterns.
 
 ---
 
 #### 2.5 CLI Tool
-**What Paperclip does:** Offers `npx paperclipai onboard` for quick setup and a full CLI package for server management.
+**What Paperclip does:** Offers `npx paperclipai onboard` for quick setup and a full CLI package built with Commander + Clack prompts. Commands include: `onboard`, `doctor`, `env`, `configure`, `db:backup`, `allowed-hostname`, `run`, `heartbeat run`, `auth bootstrap-ceo`, plus client commands for context/company/issue/agent/approval/activity/dashboard management.
 
 **Why it matters:** ClawControl requires cloning the repo and running npm commands manually. A CLI would dramatically improve onboarding and enable headless/CI operations.
 
-**Recommendation:** Create a `packages/cli` package with commands: `clawcontrol init`, `clawcontrol start`, `clawcontrol agents list`, `clawcontrol work-orders create`, etc. Publish to npm as `@clawcontrol/cli`.
+**Recommendation:** Create a `packages/cli` package with commands: `clawcontrol init`, `clawcontrol start`, `clawcontrol agents list`, `clawcontrol work-orders create`, `clawcontrol doctor`, `clawcontrol db:backup`, etc. Publish to npm as `@clawcontrol/cli`. Use Commander + Clack for interactive prompts.
 
 ---
 
@@ -145,24 +149,51 @@ Both **ClawControl** and **Paperclip** are AI agent orchestration platforms, but
 
 ---
 
+#### 2.12 Data Redaction in Audit Trails
+**What Paperclip does:** Automatic redaction of sensitive keys (API keys, passwords, JWTs, tokens) in audit trails and API responses. Secret references are preserved but values are masked. Configuration secrets are redacted in all API responses.
+
+**Why it matters:** ClawControl logs full JSON payloads in its activity trail without any redaction. If an API key or secret is passed through an operation, it could be exposed in the audit log.
+
+**Recommendation:** Add a redaction layer that scans activity payloads for sensitive patterns (API keys, tokens, passwords) before persistence. Preserve references but mask values.
+
+---
+
+#### 2.13 S3 Storage Backend
+**What Paperclip does:** Pluggable storage with local disk and Amazon S3 providers (configurable region, endpoint, bucket, prefix, path style).
+
+**Why it matters:** ClawControl stores everything on local filesystem. For cloud deployments or teams needing shared artifact storage, S3 support is essential.
+
+**Recommendation:** Abstract the file storage layer behind a provider interface. Add S3 as an optional backend alongside the existing local filesystem.
+
+---
+
+#### 2.14 LLM-Facing Documentation Endpoints
+**What Paperclip does:** Special `/llms/*.txt` endpoints serve machine-readable adapter documentation so agents can self-configure and understand their capabilities.
+
+**Why it matters:** ClawControl agents rely on SOUL.md overlays but have no way to programmatically query what capabilities or adapters are available. Machine-readable docs enable smarter agent behavior.
+
+**Recommendation:** Add `/api/llms/capabilities.txt` and `/api/llms/adapters.txt` endpoints that serve structured, machine-readable documentation for agent consumption.
+
+---
+
 ### Priority 3: Nice-to-Have, Consider Later
 
-#### 2.12 Event-Triggered Agent Wakeups
+#### 2.15 Event-Triggered Agent Wakeups
 **What Paperclip does:** Beyond scheduled cron heartbeats, agents can be woken by events (`agent_wakeup_requests`). This enables reactive agent behavior — e.g., "wake the QA agent when a PR is opened."
 
 **Recommendation:** Add webhook-triggered agent activation alongside existing cron support.
 
-#### 2.13 Org Chart Visualization
+#### 2.16 Org Chart Visualization
 **What Paperclip does:** Visual org chart page (`OrgChart.tsx`) showing reporting structure.
 
 **Recommendation:** ClawControl already has team hierarchies. Add an interactive visualization using a tree/graph library.
 
-#### 2.14 "My Issues" Personal Dashboard
+#### 2.17 "My Issues" Personal Dashboard
 **What Paperclip does:** `MyIssues.tsx` page showing work assigned to the current user.
 
 **Recommendation:** Add a "My Work" view filtering work orders and operations by the current user's assignments.
 
-#### 2.15 Company Portability (Import/Export)
+#### 2.18 Company Portability (Import/Export)
 **What Paperclip does:** `company-portability.ts` service for importing/exporting entire company configurations.
 
 **Recommendation:** ClawControl already has package import/export. Extend it to include full workspace snapshots.
@@ -216,11 +247,11 @@ Add optional auth behind a feature flag:
 
 | Phase | Features | Effort |
 |---|---|---|
-| **v0.21** | Per-agent budget controls, labels/tags, comments | Small |
+| **v0.21** | Per-agent budget controls, labels/tags, comments, data redaction | Small |
 | **v0.22** | Multi-runtime adapter interface, Claude Code adapter | Medium |
 | **v0.23** | Secrets management, agent config versioning | Medium |
-| **v0.24** | CLI tool, inbox/notifications | Medium |
-| **v0.25** | Goal hierarchy (Goals → Projects → Work Orders) | Medium |
+| **v0.24** | CLI tool, inbox/notifications, LLM-facing doc endpoints | Medium |
+| **v0.25** | Goal hierarchy (Goals → Projects → Work Orders), S3 storage | Medium |
 | **v0.26** | Optional authentication & RBAC | Large |
 | **v1.0** | Multi-tenancy, event-triggered wakeups, org chart viz | Large |
 
