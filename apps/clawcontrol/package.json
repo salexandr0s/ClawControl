@@ -73,7 +73,7 @@
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.17",
     "cross-env": "^7.0.3",
-    "eslint": "^9.39.0",
+    "eslint": "^10.0.3",
     "eslint-config-next": "^16.1.0",
     "postcss": "^8.4.35",
     "prisma": "^7.4.1",
