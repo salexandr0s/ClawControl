@@ -852,7 +852,6 @@ function ensureAuthSecret(): string {
 
   fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(secretPath, newSecret, { encoding: "utf8", mode: 0o600 });
-  fs.chmodSync(secretPath, 0o600);
 
   return newSecret;
 }

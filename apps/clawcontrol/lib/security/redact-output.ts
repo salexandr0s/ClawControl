@@ -9,7 +9,7 @@ const REDACTION_RULES: Array<{ label: string; pattern: RegExp }> = [
   {
     label: "PRIVATE_KEY",
     pattern:
-      /-----BEGIN (?:RSA|OPENSSH|EC|PGP) PRIVATE KEY-----[\s\S]*?-----END (?:RSA|OPENSSH|EC|PGP) PRIVATE KEY-----/g,
+      /-----BEGIN ((?:RSA|OPENSSH|EC|PGP) PRIVATE KEY)-----[\s\S]*?-----END \1-----/g,
   },
   {
     label: "CLERK_KEY",
@@ -38,7 +38,7 @@ const REDACTION_RULES: Array<{ label: string; pattern: RegExp }> = [
 ];
 
 export function redactSecrets(text: string): string {
-  if (!text) return text;
+  if (text.length === 0) return text;
 
   let result = text;
   for (const rule of REDACTION_RULES) {

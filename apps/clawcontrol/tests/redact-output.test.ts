@@ -2,12 +2,30 @@ import { describe, expect, it } from "vitest";
 import { redactSecrets } from "@/lib/security/redact-output";
 
 describe("redactSecrets", () => {
-  it("redacts private key blocks", () => {
+  it("redacts RSA private key blocks", () => {
     const input =
       "prefix\n-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----\nsuffix";
     const result = redactSecrets(input);
     expect(result).toBe("prefix\n[REDACTED:PRIVATE_KEY]\nsuffix");
     expect(result).not.toContain("MIIEow");
+  });
+
+  it("redacts OPENSSH private key blocks", () => {
+    const input =
+      "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbn...\n-----END OPENSSH PRIVATE KEY-----";
+    expect(redactSecrets(input)).toBe("[REDACTED:PRIVATE_KEY]");
+  });
+
+  it("redacts EC private key blocks", () => {
+    const input =
+      "-----BEGIN EC PRIVATE KEY-----\nMHQCAQ...\n-----END EC PRIVATE KEY-----";
+    expect(redactSecrets(input)).toBe("[REDACTED:PRIVATE_KEY]");
+  });
+
+  it("redacts PGP private key blocks", () => {
+    const input =
+      "-----BEGIN PGP PRIVATE KEY-----\nlQOYBG...\n-----END PGP PRIVATE KEY-----";
+    expect(redactSecrets(input)).toBe("[REDACTED:PRIVATE_KEY]");
   });
 
   it("redacts Clerk secret keys", () => {

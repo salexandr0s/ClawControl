@@ -1,6 +1,6 @@
 import "server-only";
 
-import { mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -61,7 +61,6 @@ export function loadOrGenerateAuthSecret(): string {
   try {
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(secretPath, newSecret, { encoding: "utf8", mode: 0o600 });
-    chmodSync(secretPath, 0o600);
   } catch (err) {
     throw new Error(
       `Failed to write auth secret to ${secretPath}: ${err instanceof Error ? err.message : String(err)}`,
