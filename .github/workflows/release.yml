@@ -33,6 +33,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Audit production dependencies
+        continue-on-error: true
+        run: npm audit --audit-level=high --omit=dev
+
       - name: Build Desktop App (macOS)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"

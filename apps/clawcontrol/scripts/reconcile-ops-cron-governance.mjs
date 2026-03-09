@@ -280,7 +280,7 @@ Keep existing business logic unchanged. Reporting contract:
    BASE_URL="\${CLAWCONTROL_INTERNAL_BASE_URL:-http://127.0.0.1:3000}"
    TOKEN="\${CLAWCONTROL_INTERNAL_TOKEN:-\${OPENCLAW_INTERNAL_TOKEN:-}}"
    if [ -z "$TOKEN" ]; then
-     TOKEN="$(node -e 'const c=require("node:crypto");const s=process.env.CLAWCONTROL_OPERATOR_AUTH_SECRET||process.env.OPENCLAW_OPERATOR_AUTH_SECRET||"clawcontrol-local-operator-secret";process.stdout.write(c.createHmac("sha256",s).update("clawcontrol:internal").digest("base64url"));')"
+     TOKEN="$(node -e 'const c=require("node:crypto"),f=require("node:fs"),p=require("node:path"),h=require("node:os");const d=process.env.CLAWCONTROL_USER_DATA_DIR||p.join(h.homedir(),".openclaw","clawcontrol");let s=process.env.CLAWCONTROL_OPERATOR_AUTH_SECRET||process.env.OPENCLAW_OPERATOR_AUTH_SECRET||"";if(!s)try{s=f.readFileSync(p.join(d,"auth-secret"),"utf8").trim()}catch{}if(!s){process.stderr.write("ERROR: no auth secret found\\n");process.exit(1)}process.stdout.write(c.createHmac("sha256",s).update("clawcontrol:internal").digest("base64url"));')"
    fi
    RUN_AT_MS=$(($(date +%s)*1000))
    curl -sS -X POST "$BASE_URL/api/internal/ops/actionable" \\
